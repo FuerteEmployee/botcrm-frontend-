@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>QA Session Seed</title>
+  </head>
+  <body>
+    <script>
+      localStorage.setItem(
+        "bot_hrms_session",
+        JSON.stringify({
+          phone: "+91 8888888888",
+          name: "Dummy Admin",
+          role: "superadmin",
+          token: "qa-token",
+          loggedInAt: Date.now()
+        })
+      );
+      location.replace("/super/overview");
+    </script>
+  </body>
+</html>

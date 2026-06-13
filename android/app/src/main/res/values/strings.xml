@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">BOT</string>
+    <string name="title_activity_main">BOT</string>
+    <string name="package_name">com.bot.admin</string>
+    <string name="custom_url_scheme">com.bot.admin</string>
+</resources>

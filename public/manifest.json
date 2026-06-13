@@ -1,0 +1,16 @@
+{
+  "name": "B.O.T HRMS Admin",
+  "short_name": "B.O.T",
+  "description": "Premium HRMS dashboard for the B.O.T workforce.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#6366f1",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

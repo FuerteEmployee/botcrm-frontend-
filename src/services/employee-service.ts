@@ -1,0 +1,185 @@
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiClient } from "@/lib/api-client";
+import { toast } from "sonner";
+
+export interface WeeklyHoliday {
+  day: 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday';
+  weeks: number[]; // [] = all, [1,3] = 1st & 3rd
+}
+
+export interface SalaryComponent {
+  enabled: boolean;
+  type: 'percentage' | 'amount';
+  percentage: number;
+  amount: number;
+  includeInTotal: boolean;
+}
+
+export interface Employee {
+  _id: string;
+  name: string;
+  phone: string;
+  designation?: string;
+  email?: string;
+  departmentId?: string;
+  branchId?: string;
+  shiftId?: string;
+  salary: number;
+  profileImage?: string;
+  status: 'active' | 'inactive';
+  weeklyHolidays: WeeklyHoliday[];
+  salaryComponents: {
+    tds: SalaryComponent;
+    tdsCategory?: string;
+    basic: SalaryComponent;
+    da: SalaryComponent;
+    hra: SalaryComponent;
+    ca: SalaryComponent;
+    pf: SalaryComponent;
+    esic: SalaryComponent;
+    epf: SalaryComponent;
+    tdsOnProfession: SalaryComponent;
+    retention: SalaryComponent;
+    pt: SalaryComponent;
+    adminCharge: SalaryComponent;
+    bonus: SalaryComponent;
+  };
+  gender?: 'male' | 'female' | 'other';
+  dob?: string;
+  joiningDate?: string;
+  employmentType?: 'monthly' | 'daily' | 'hourly';
+  leadDeletionPermission?: boolean;
+  address?: string;
+  bloodGroup?: string;
+  contactPersonName?: string;
+  contactPersonMobile?: string;
+  aadhaarNo?: string;
+  panNo?: string;
+  experience?: string;
+  residentialAddress?: string;
+  residentialPhone?: string;
+  education?: string;
+  bankDetails?: {
+    accountNumber: string;
+    bankName: string;
+    ifsc: string;
+    branchName: string;
+    nameAsPerBank: string;
+  };
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface EmployeeResponse {
+  employees: Employee[];
+  totalPages: number;
+  totalRecords: number;
+}
+
+interface EmployeeParams {
+  page?: number;
+  limit?: number;
+  search?: string;
+  departmentId?: string;
+  status?: string;
+}
+
+export function useEmployeeService(params: EmployeeParams = {}) {
+  const queryClient = useQueryClient();
+  const { page = 1, limit = 10, search = "", departmentId = "all", status = "active" } = params;
+
+  const { data, isLoading, isFetching } = useQuery<EmployeeResponse>({
+    queryKey: ["employees", page, limit, search, departmentId, status],
+    queryFn: async () => {
+      const qp = new URLSearchParams();
+      qp.append("page", page.toString());
+      qp.append("limit", limit.toString());
+      if (search) qp.append("search", search);
+      if (departmentId && departmentId !== "all") qp.append("departmentId", departmentId);
+      if (status && status !== "all") qp.append("status", status);
+
+      const { data } = await apiClient.get(`/users/employees?${qp.toString()}`);
+      
+      // Handle both formats (if API returns raw array or paginated object)
+      if (Array.isArray(data)) {
+        // If it's a raw array, we simulate server-side pagination client-side
+        // so the UI remains consistent while the backend is being updated.
+        const filteredData = data.filter(e => {
+          const matchesSearch = !search || 
+            e.name?.toLowerCase().includes(search.toLowerCase()) ||
+            e.phone?.includes(search);
+          const matchesDept = departmentId === "all" || e.departmentId === departmentId || (e.departmentId as any)?._id === departmentId;
+          const matchesStatus = status === "all" || e.status === status;
+          return matchesSearch && matchesDept && matchesStatus;
+        });
+
+        const start = (page - 1) * limit;
+        return {
+          employees: filteredData.slice(start, start + limit),
+          totalPages: Math.ceil(filteredData.length / limit),
+          totalRecords: filteredData.length
+        };
+      }
+      return data;
+    },
+    staleTime: 5000,
+  });
+
+  const createMutation = useMutation({
+    mutationFn: async (formData: FormData | Partial<Employee>) => {
+      const { data } = await apiClient.post("/users/employees", formData);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+      toast.success("Employee created successfully");
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || "Failed to create employee");
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, data }: { id: string; data: FormData | Partial<Employee> }) => {
+      const { data: response } = await apiClient.put(`/users/employees/${id}`, data);
+      return response;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+      toast.success("Employee updated successfully");
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || "Failed to update employee");
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const { data } = await apiClient.delete(`/users/employees/${id}`);
+      return data;
+    },
+    onSuccess: () => {
+      // Invalidate all related queries so UI updates dynamically
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      queryClient.invalidateQueries({ queryKey: ["attendance"] });
+      queryClient.invalidateQueries({ queryKey: ["salary"] });
+      queryClient.invalidateQueries({ queryKey: ["leaves"] });
+      queryClient.invalidateQueries({ queryKey: ["user-tickets"] });
+      toast.success("Employee deleted successfully");
+    },
+  });
+
+  return {
+    employees: data?.employees || [],
+    totalPages: data?.totalPages || 1,
+    totalRecords: data?.totalRecords || 0,
+    isLoading,
+    isFetching,
+    createEmployee: createMutation.mutateAsync,
+    updateEmployee: updateMutation.mutateAsync,
+    deleteEmployee: deleteMutation.mutateAsync,
+    isCreating: createMutation.isPending,
+    isUpdating: updateMutation.isPending,
+  };
+}
