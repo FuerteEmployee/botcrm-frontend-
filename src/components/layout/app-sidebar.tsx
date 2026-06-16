@@ -20,6 +20,7 @@ import {
   Monitor,
   Receipt,
   UserCog,
+  CreditCard,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
@@ -56,6 +57,7 @@ const NAV: NavItem[] = [
   { to: "/assets", label: "Assets Management", icon: Monitor },
   { to: "/expenses", label: "Expense Management", icon: Receipt },
   { to: "/users", label: "Users", icon: UserCog, adminOnly: true },
+  { to: "/billing", label: "Plan & Billing", icon: CreditCard, adminOnly: true },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 

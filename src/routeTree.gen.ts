@@ -39,6 +39,7 @@ import { Route as AppEmployeesRouteImport } from './routes/_app/employees'
 import { Route as AppDepartmentsRouteImport } from './routes/_app/departments'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
 import { Route as AppBranchesRouteImport } from './routes/_app/branches'
+import { Route as AppBillingRouteImport } from './routes/_app/billing'
 import { Route as AppAttendanceConfigRouteImport } from './routes/_app/attendance-config'
 import { Route as AppAttendanceRouteImport } from './routes/_app/attendance'
 import { Route as AppAssetsRouteImport } from './routes/_app/assets'
@@ -198,6 +199,11 @@ const AppBranchesRoute = AppBranchesRouteImport.update({
   path: '/branches',
   getParentRoute: () => AppRoute,
 } as any)
+const AppBillingRoute = AppBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppAttendanceConfigRoute = AppAttendanceConfigRouteImport.update({
   id: '/attendance-config',
   path: '/attendance-config',
@@ -253,6 +259,7 @@ export interface FileRoutesByFullPath {
   '/assets': typeof AppAssetsRouteWithChildren
   '/attendance': typeof AppAttendanceRoute
   '/attendance-config': typeof AppAttendanceConfigRoute
+  '/billing': typeof AppBillingRoute
   '/branches': typeof AppBranchesRoute
   '/dashboard': typeof AppDashboardRoute
   '/departments': typeof AppDepartmentsRoute
@@ -291,6 +298,7 @@ export interface FileRoutesByTo {
   '/announcements': typeof AppAnnouncementsRoute
   '/attendance': typeof AppAttendanceRoute
   '/attendance-config': typeof AppAttendanceConfigRoute
+  '/billing': typeof AppBillingRoute
   '/branches': typeof AppBranchesRoute
   '/dashboard': typeof AppDashboardRoute
   '/departments': typeof AppDepartmentsRoute
@@ -332,6 +340,7 @@ export interface FileRoutesById {
   '/_app/assets': typeof AppAssetsRouteWithChildren
   '/_app/attendance': typeof AppAttendanceRoute
   '/_app/attendance-config': typeof AppAttendanceConfigRoute
+  '/_app/billing': typeof AppBillingRoute
   '/_app/branches': typeof AppBranchesRoute
   '/_app/dashboard': typeof AppDashboardRoute
   '/_app/departments': typeof AppDepartmentsRoute
@@ -374,6 +383,7 @@ export interface FileRouteTypes {
     | '/assets'
     | '/attendance'
     | '/attendance-config'
+    | '/billing'
     | '/branches'
     | '/dashboard'
     | '/departments'
@@ -412,6 +422,7 @@ export interface FileRouteTypes {
     | '/announcements'
     | '/attendance'
     | '/attendance-config'
+    | '/billing'
     | '/branches'
     | '/dashboard'
     | '/departments'
@@ -452,6 +463,7 @@ export interface FileRouteTypes {
     | '/_app/assets'
     | '/_app/attendance'
     | '/_app/attendance-config'
+    | '/_app/billing'
     | '/_app/branches'
     | '/_app/dashboard'
     | '/_app/departments'
@@ -704,6 +716,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBranchesRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/billing': {
+      id: '/_app/billing'
+      path: '/billing'
+      fullPath: '/billing'
+      preLoaderRoute: typeof AppBillingRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/attendance-config': {
       id: '/_app/attendance-config'
       path: '/attendance-config'
@@ -805,6 +824,7 @@ interface AppRouteChildren {
   AppAssetsRoute: typeof AppAssetsRouteWithChildren
   AppAttendanceRoute: typeof AppAttendanceRoute
   AppAttendanceConfigRoute: typeof AppAttendanceConfigRoute
+  AppBillingRoute: typeof AppBillingRoute
   AppBranchesRoute: typeof AppBranchesRoute
   AppDashboardRoute: typeof AppDashboardRoute
   AppDepartmentsRoute: typeof AppDepartmentsRoute
@@ -827,6 +847,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAssetsRoute: AppAssetsRouteWithChildren,
   AppAttendanceRoute: AppAttendanceRoute,
   AppAttendanceConfigRoute: AppAttendanceConfigRoute,
+  AppBillingRoute: AppBillingRoute,
   AppBranchesRoute: AppBranchesRoute,
   AppDashboardRoute: AppDashboardRoute,
   AppDepartmentsRoute: AppDepartmentsRoute,

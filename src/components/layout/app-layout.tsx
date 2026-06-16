@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import { AppSidebar } from "./app-sidebar";
 import { AppHeader } from "./app-header";
+import { SubscriptionGate } from "./subscription-gate";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
 
@@ -54,7 +55,9 @@ export function AppLayout() {
         <AppHeader onMenuClick={() => setSidebarOpen(true)} />
         <main className="flex-1 overflow-y-auto scrollbar-thin">
           <div className="px-5 sm:px-6 pt-5 sm:pt-6 pb-24 sm:pb-8 max-w-[1440px] w-full mx-auto">
-            <Outlet />
+            <SubscriptionGate>
+              <Outlet />
+            </SubscriptionGate>
           </div>
         </main>
       </div>
