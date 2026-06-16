@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { Plus, Pencil, Trash2, MapPin, Search, LayoutGrid, List, Users, Globe, Filter, Crosshair, Loader2, Check } from "lucide-react";
+import { Plus, Pencil, Trash2, MapPin, Search, LayoutGrid, List, Users, Globe, Filter, Crosshair, Loader2, Check, Network } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatCard } from "@/components/shared/stat-card";
@@ -18,6 +18,8 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { apiClient } from "@/lib/api-client";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -60,6 +62,34 @@ function BranchesPage() {
     setView(defaultLayout);
   }, [defaultLayout]);
   const [fetchingLoc, setFetchingLoc] = useState(false);
+
+  // Multi-branch feature toggle (persisted in Settings)
+  const [allowMultipleBranches, setAllowMultipleBranches] = useState(false);
+  const [savingMulti, setSavingMulti] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    apiClient.get("/settings")
+      .then(({ data }) => {
+        if (active) setAllowMultipleBranches(!!data?.branchSettings?.allowMultipleBranches);
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  const toggleMultipleBranches = async (checked: boolean) => {
+    setSavingMulti(true);
+    setAllowMultipleBranches(checked); // optimistic
+    try {
+      await apiClient.put("/settings", { branchSettings: { allowMultipleBranches: checked } });
+      toast.success(checked ? "Employees can now be assigned to multiple branches" : "Multi-branch assignment disabled");
+    } catch (err) {
+      setAllowMultipleBranches(!checked); // revert
+      toast.error("Failed to update setting");
+    } finally {
+      setSavingMulti(false);
+    }
+  };
 
   useEffect(() => {
     setHasMounted(true);
@@ -196,6 +226,28 @@ function BranchesPage() {
         <StatCard label="Total Staff" value={totalEmployees} icon={Users} accent="success" delay={0.05} />
         <StatCard label="Cities Covered" value={uniqueCities} icon={Globe} accent="info" delay={0.1} />
       </div>
+
+      {/* Multi-branch feature toggle */}
+      <Card className="p-4 sm:p-5 border border-border/60 bg-white rounded-2xl shadow-sm">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary grid place-items-center shrink-0">
+              <Network className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-[14px] font-bold text-foreground">Multiple branches per employee</p>
+              <p className="text-[12px] text-muted-foreground mt-0.5 max-w-xl">
+                Turn this on if some employees work across more than one branch. When enabled, you can assign multiple branches to an employee on their profile.
+              </p>
+            </div>
+          </div>
+          <Switch
+            checked={allowMultipleBranches}
+            onCheckedChange={toggleMultipleBranches}
+            disabled={savingMulti || !canEdit}
+          />
+        </div>
+      </Card>
 
       {/* Filters Bar */}
       <div className="flex flex-col md:flex-row items-center justify-between gap-3 py-1">

@@ -305,16 +305,9 @@ function SettingsPage() {
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto pb-20">
-      <PageHeader 
-        title="Workspace Settings" 
+      <PageHeader
+        title="Workspace Settings"
         description="Global configurations for your organization's HRMS environment."
-        actions={
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="h-9 rounded-xl gap-2 font-bold text-[12px] border-border/60" onClick={() => window.location.reload()}>
-              <Globe className="h-3.5 w-3.5" /> Public View
-            </Button>
-          </div>
-        }
       />
 
       {/* Modern Tab System */}

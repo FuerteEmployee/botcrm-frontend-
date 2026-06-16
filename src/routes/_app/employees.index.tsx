@@ -289,6 +289,11 @@ function EmployeesPage() {
                     <div className="flex items-center gap-2">
                       <MapPin className="h-4 w-4 text-muted-foreground/40" />
                       {(e.branchId as any)?.branchName || "Gurugram"}
+                      {((e as any).branchIds?.length || 0) > 1 && (
+                        <Badge variant="secondary" className="text-[10px] font-bold px-1.5 py-0">
+                          +{(e as any).branchIds.length - 1}
+                        </Badge>
+                      )}
                     </div>
                   </DataTableCell>
                   <DataTableCell>

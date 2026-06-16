@@ -92,6 +92,8 @@ const formatKey = (key: string) => {
   return customMap[key] || key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase());
 };
 
+const DRAFT_KEY = "bot:employee-create-draft";
+
 function AddEmployeePage() {
   const [hasMounted, setHasMounted] = useState(false);
   const { employeeId } = Route.useSearch();
@@ -113,7 +115,8 @@ function AddEmployeePage() {
     }
   }, [isAllowed, isEditing, navigate]);
 
-  const [form, setForm] = useState({
+  const [form, setForm] = useState(() => {
+    const defaults = {
     fullName: "",
     phone: "",
     email: "",
@@ -123,6 +126,7 @@ function AddEmployeePage() {
     joiningDate: "",
     departmentId: "",
     branchId: "",
+    branchIds: [] as string[],
     employmentType: "monthly",
     shiftId: "",
     weeklyHolidays: [] as { day: string; weeks: number[] }[],
@@ -165,9 +169,21 @@ function AddEmployeePage() {
       adminCharge: { enabled: false, percentage: 0, amount: 0, type: 'percentage', includeInTotal: true },
       bonus: { enabled: false, percentage: 0, amount: 0, type: 'percentage', includeInTotal: true },
     }
+    };
+    // Restore an in-progress draft after a page refresh (create mode only).
+    if (!employeeId) {
+      try {
+        const saved = sessionStorage.getItem(DRAFT_KEY);
+        if (saved) return { ...defaults, ...(JSON.parse(saved) as Partial<typeof defaults>) };
+      } catch { /* ignore corrupt draft */ }
+    }
+    return defaults;
   });
 
   const [touched, setTouched] = useState<Record<string, boolean>>({});
+
+  const [globalSettings, setGlobalSettings] = useState<any>(null);
+  const allowMultipleBranches = !!globalSettings?.branchSettings?.allowMultipleBranches;
 
   const errors = useMemo(() => {
     const err: Record<string, string> = {};
@@ -177,17 +193,19 @@ function AddEmployeePage() {
     if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) err.email = "Invalid email format";
     if (!form.salary || Number(form.salary) < 0) err.salary = "Valid salary is required";
     if (!form.joiningDate) err.joiningDate = "Joining date is required";
-    if (!form.branchId) err.branchId = "Branch selection is required";
+    if (allowMultipleBranches) {
+      if (form.branchIds.length === 0) err.branchId = "Select at least one branch";
+    } else if (!form.branchId) {
+      err.branchId = "Branch selection is required";
+    }
     if (!form.departmentId) err.departmentId = "Department selection is required";
     if (!form.shiftId) err.shiftId = "Shift selection is required";
     return err;
-  }, [form]);
+  }, [form, allowMultipleBranches]);
 
   const handleBlur = (field: string) => {
     setTouched(prev => ({ ...prev, [field]: true }));
   };
-
-  const [globalSettings, setGlobalSettings] = useState<any>(null);
 
   useEffect(() => {
     setHasMounted(true);
@@ -196,22 +214,23 @@ function AddEmployeePage() {
         const { data } = await apiClient.get('/settings');
         setGlobalSettings(data);
         if (!isEditing) {
-          const updates: Partial<typeof form> = {};
-          if (data?.attendance?.defaultShiftId) {
-            updates.shiftId = data.attendance.defaultShiftId;
-          }
-          if (data?.attendance?.workDays?.length) {
-            // Days NOT in workDays are holidays — pre-populate weeklyHolidays
-            const holidayDays = Object.entries(DAY_LABELS)
-              .filter(([key]) => !data.attendance.workDays.includes(key))
-              .map(([, fullName]) => fullName);
-            if (holidayDays.length > 0) {
-              updates.weeklyHolidays = holidayDays.map(day => ({ day, weeks: [] }));
+          // Only fill empty fields so a restored draft isn't overwritten.
+          setForm(prev => {
+            const updates: Partial<typeof prev> = {};
+            if (!prev.shiftId && data?.attendance?.defaultShiftId) {
+              updates.shiftId = data.attendance.defaultShiftId;
             }
-          }
-          if (Object.keys(updates).length > 0) {
-            setForm(prev => ({ ...prev, ...updates }));
-          }
+            if (prev.weeklyHolidays.length === 0 && data?.attendance?.workDays?.length) {
+              // Days NOT in workDays are holidays — pre-populate weeklyHolidays
+              const holidayDays = Object.entries(DAY_LABELS)
+                .filter(([key]) => !data.attendance.workDays.includes(key))
+                .map(([, fullName]) => fullName);
+              if (holidayDays.length > 0) {
+                updates.weeklyHolidays = holidayDays.map(day => ({ day, weeks: [] }));
+              }
+            }
+            return Object.keys(updates).length > 0 ? { ...prev, ...updates } : prev;
+          });
         }
       } catch (err) {
         console.error("Failed to fetch settings", err);
@@ -220,7 +239,30 @@ function AddEmployeePage() {
     fetchSettings();
   }, [isEditing]);
 
+  // Auto-select dropdown defaults (Branch / Department / Shift) to the first
+  // available option, so the form isn't left with empty required selects.
+  useEffect(() => {
+    if (isEditing) return;
+    setForm(prev => {
+      const updates: Partial<typeof prev> = {};
+      if (!prev.departmentId && departments?.length) updates.departmentId = departments[0]._id;
+      if (!prev.shiftId && shifts?.length) updates.shiftId = shifts[0]._id;
+      if (allowMultipleBranches) {
+        if ((prev.branchIds?.length || 0) === 0 && branches?.length) updates.branchIds = [branches[0]._id];
+      } else if (!prev.branchId && branches?.length) {
+        updates.branchId = branches[0]._id;
+      }
+      return Object.keys(updates).length > 0 ? { ...prev, ...updates } : prev;
+    });
+  }, [departments, branches, shifts, isEditing, allowMultipleBranches]);
 
+  // Persist the in-progress form so a page refresh doesn't wipe it (create mode only).
+  useEffect(() => {
+    if (isEditing || !hasMounted) return;
+    try {
+      sessionStorage.setItem(DRAFT_KEY, JSON.stringify(form));
+    } catch { /* storage full / unavailable — ignore */ }
+  }, [form, isEditing, hasMounted]);
 
   const formatDateForInput = (dateVal?: string | Date) => {
     if (!dateVal) return "";
@@ -247,6 +289,12 @@ function AddEmployeePage() {
           joiningDate: formatDateForInput((emp as any).joiningDate || emp.createdAt),
           departmentId: (emp.departmentId as any)?._id || emp.departmentId || "",
           branchId: (emp.branchId as any)?._id || emp.branchId || "",
+          branchIds: (() => {
+            const ids = ((emp as any).branchIds || []).map((b: any) => b?._id || b).filter(Boolean);
+            if (ids.length) return ids;
+            const primary = (emp.branchId as any)?._id || emp.branchId;
+            return primary ? [primary] : [];
+          })(),
           employmentType: (emp as any).employmentType || "monthly",
           shiftId: (emp.shiftId as any)?._id || emp.shiftId || "",
           weeklyHolidays: emp.weeklyHolidays || [],
@@ -297,10 +345,16 @@ function AddEmployeePage() {
 
     setIsSubmitting(true);
     try {
+      const branchIds = allowMultipleBranches
+        ? form.branchIds
+        : (form.branchId ? [form.branchId] : []);
+
       const payload = {
         ...form,
         name: form.fullName,
         salary: Number(form.salary) || 0,
+        branchIds,
+        branchId: branchIds[0] || "",
       };
 
       if (isEditing && employeeId) {
@@ -308,6 +362,8 @@ function AddEmployeePage() {
       } else {
         await createEmployee({ ...payload, role: 'employee' } as any);
       }
+      // Submission succeeded — clear the saved draft.
+      try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
       navigate({ to: "/employees" });
     } catch (error) {
       console.error(error);
@@ -527,16 +583,63 @@ function AddEmployeePage() {
                 required
               />
 
-              <FormSelect
-                label="Branch Location"
-                icon={MapPin}
-                placeholder="Select Branch"
-                value={form.branchId}
-                onValueChange={(v) => { setForm({ ...form, branchId: v }); handleBlur('branchId'); }}
-                options={(branches || []).map((b: any) => ({ label: b.branchName, value: b._id }))}
-                error={touched.branchId ? errors.branchId : undefined}
-                required
-              />
+              {allowMultipleBranches ? (
+                <div className="space-y-4 md:col-span-2">
+                  <label className="text-[11px] font-bold text-muted-foreground tracking-widest ml-1">
+                    BRANCH LOCATIONS<span className="text-destructive ml-0.5">*</span>
+                    <span className="ml-2 font-semibold normal-case tracking-normal text-[10px] text-primary">Select one or more</span>
+                  </label>
+                  <div className="flex flex-wrap gap-2 rounded-xl border border-border/60 bg-background p-3 shadow-sm min-h-12">
+                    {(branches || []).length === 0 && (
+                      <span className="text-[12px] text-muted-foreground">No branches available</span>
+                    )}
+                    {(branches || []).map((b: any) => {
+                      const selected = form.branchIds.includes(b._id);
+                      return (
+                        <button
+                          type="button"
+                          key={b._id}
+                          onClick={() => {
+                            setForm(prev => ({
+                              ...prev,
+                              branchIds: selected
+                                ? prev.branchIds.filter(id => id !== b._id)
+                                : [...prev.branchIds, b._id],
+                            }));
+                            handleBlur('branchId');
+                          }}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium transition-all",
+                            selected
+                              ? "border-primary bg-primary text-white shadow-sm"
+                              : "border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted"
+                          )}
+                        >
+                          {selected ? <Check className="h-3.5 w-3.5" /> : <MapPin className="h-3.5 w-3.5" />}
+                          {b.branchName}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {form.branchIds.length > 0 && (
+                    <p className="text-[11px] text-muted-foreground ml-1">The first selected branch is treated as the primary branch.</p>
+                  )}
+                  {touched.branchId && errors.branchId && (
+                    <p className="text-[11px] text-destructive font-medium ml-1">{errors.branchId}</p>
+                  )}
+                </div>
+              ) : (
+                <FormSelect
+                  label="Branch Location"
+                  icon={MapPin}
+                  placeholder="Select Branch"
+                  value={form.branchId}
+                  onValueChange={(v) => { setForm({ ...form, branchId: v }); handleBlur('branchId'); }}
+                  options={(branches || []).map((b: any) => ({ label: b.branchName, value: b._id }))}
+                  error={touched.branchId ? errors.branchId : undefined}
+                  required
+                />
+              )}
 
               <FormSelect
                 label="Department"

@@ -81,6 +81,20 @@ function EmployeeDetailsPage() {
     return dept ? dept.name : "N/A";
   };
 
+  const getBranchNames = () => {
+    const e = employee as any;
+    const raw = (e?.branchIds?.length ? e.branchIds : (e?.branchId ? [e.branchId] : [])) as any[];
+    const names = raw
+      .map((b) => {
+        const id = typeof b === 'object' ? b?._id : b;
+        return (typeof b === 'object' && b?.branchName)
+          ? b.branchName
+          : branches.find((x: any) => x._id === id)?.branchName;
+      })
+      .filter(Boolean);
+    return names.length ? names.join(", ") : "N/A";
+  };
+
   const [activeTab, setActiveTab] = useState<"profile" | "attendance">("profile");
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedLog, setSelectedLog] = useState<AttendanceRecord | null>(null);
@@ -413,6 +427,7 @@ function EmployeeDetailsPage() {
                           { label: "Email Address", value: employee.email, icon: Mail },
                           { label: "Phone Number", value: employee.phone, icon: Phone },
                           { label: "Local Address", value: employee.address, icon: MapPin },
+                          { label: "Branch(es)", value: getBranchNames(), icon: MapPin },
                           { label: "Date of Birth", value: employee.dob, icon: Calendar },
                           { label: "Date of Joining", value: employee.joiningDate, icon: Clock },
                         ].map((item, i) => (
