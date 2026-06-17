@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { Outlet, useNavigate, Link, useLocation, createFileRoute } from "@tanstack/react-router";
+import { Outlet, useNavigate, Link, useLocation, createFileRoute, redirect } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/use-auth";
-import { clearSession } from "@/lib/auth";
+import { clearSession, getSession } from "@/lib/auth";
 import { 
   Home, History, CalendarDays, Ticket, User, LogOut, Sun, Moon, Sparkles
 } from "lucide-react";
@@ -10,6 +10,17 @@ import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 
 export const Route = createFileRoute("/user")({
+  // Only employees may enter the employee panel; everyone else is sent back to
+  // "/" which re-routes them to the panel matching their real role.
+  beforeLoad: () => {
+    const session = getSession();
+    if (!session) {
+      throw redirect({ to: "/login" });
+    }
+    if (session.role !== "employee") {
+      throw redirect({ to: "/" });
+    }
+  },
   component: UserLayout,
 });
 
