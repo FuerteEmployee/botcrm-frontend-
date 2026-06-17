@@ -27,6 +27,12 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff,woff2}"],
+        // Take over open pages immediately on a new deploy and purge stale
+        // precaches — prevents an old service worker from serving a broken
+        // cached bundle (e.g. one pointing at the wrong API URL).
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
             // Cache CARTO / OpenStreetMap map tiles with a network-first strategy
