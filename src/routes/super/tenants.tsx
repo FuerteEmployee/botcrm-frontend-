@@ -370,6 +370,9 @@ function ManageDialog({
   const [planId, setPlanId] = useState(tenant?.planId?._id || "");
   const [status, setStatus] = useState(tenant?.status || "active");
   const [billingCycle, setBillingCycle] = useState(tenant?.billingCycle || "monthly");
+  const [bannerThresholdDays, setBannerThresholdDays] = useState<string>(
+    String(tenant?.bannerThresholdDays ?? 7),
+  );
 
   const mutation = useMutation({
     mutationFn: (data: any) => updateTenant(tenantId, data),
@@ -432,7 +435,21 @@ function ManageDialog({
               </SelectContent>
             </Select>
           </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Show banner when (days left)</Label>
+            <Input
+              type="number"
+              min={0}
+              max={365}
+              className="h-8 text-xs"
+              value={bannerThresholdDays}
+              onChange={(e) => setBannerThresholdDays(e.target.value)}
+            />
+          </div>
         </div>
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          The tenant's trial/renewal countdown banner stays hidden until this many days before expiry.
+        </p>
         <div className="flex justify-end gap-2 mt-4">
           <Button variant="outline" size="sm" onClick={onClose}>
             Cancel
@@ -441,7 +458,14 @@ function ManageDialog({
             size="sm"
             className="bg-primary hover:bg-primary/90"
             disabled={mutation.isPending}
-            onClick={() => mutation.mutate({ planId, status, billingCycle })}
+            onClick={() =>
+              mutation.mutate({
+                planId,
+                status,
+                billingCycle,
+                bannerThresholdDays: Number(bannerThresholdDays),
+              })
+            }
           >
             {mutation.isPending ? "Saving..." : "Save changes"}
           </Button>
@@ -464,6 +488,7 @@ function CreateTenantDialog({
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [planId, setPlanId] = useState(plans?.[0]?._id || "");
+  const [bannerThresholdDays, setBannerThresholdDays] = useState<string>("7");
   const [errorMsg, setErrorMsg] = useState("");
 
   // Require name + plan, and a phone with at least 10 digits.
@@ -518,6 +543,17 @@ function CreateTenantDialog({
               </SelectContent>
             </Select>
           </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Show banner when (days left)</Label>
+            <Input
+              type="number"
+              min={0}
+              max={365}
+              className="h-8 text-xs"
+              value={bannerThresholdDays}
+              onChange={(e) => setBannerThresholdDays(e.target.value)}
+            />
+          </div>
         </div>
         {errorMsg && (
           <div className="mt-3 p-2.5 rounded-md bg-destructive/10 text-destructive text-[13px] border border-destructive/20 font-medium">
@@ -539,6 +575,7 @@ function CreateTenantDialog({
                 phone: phone.trim(),
                 email: email.trim() || undefined,
                 planId,
+                bannerThresholdDays: Number(bannerThresholdDays),
               });
             }}
           >

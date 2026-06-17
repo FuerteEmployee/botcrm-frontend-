@@ -1,4 +1,4 @@
-import { type ReactNode } from "react";
+import { type ReactNode, useState, useEffect } from "react";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { AlertTriangle, Lock, Clock, Phone } from "lucide-react";
 import { useMySubscription, SUPPORT_PHONES, telHref } from "@/services/subscription-service";
@@ -110,36 +110,65 @@ export function SubscriptionGate({ children }: { children: ReactNode }) {
   }
 
   // ── Soft warning (trial / grace) ────────────────────────────────────────────
-  const showBanner = status === "trial" || status === "grace";
+  const isGrace = status === "grace";
+  const days = daysRemaining ?? 0;
+  // Super-admin-configured per-tenant threshold: the trial banner stays hidden
+  // until the tenant is within this many days of the deadline. Grace (already
+  // lapsed) always shows regardless of the threshold.
+  const threshold = sub.bannerThresholdDays ?? 7;
+  const showBanner = isGrace || (status === "trial" && days <= threshold);
   if (!showBanner) return <>{children}</>;
 
-  const days = daysRemaining ?? 0;
-  const urgent = days <= 1;
-  const isGrace = status === "grace";
-
-  let bannerText: string;
-  if (isGrace) {
-    bannerText =
-      days <= 1
-        ? "Your subscription has lapsed — renew today to avoid losing access."
-        : `Your subscription has lapsed. You have ${days} days left to renew before access is suspended.`;
-  } else if (days <= 0) {
-    bannerText = "Your free trial ends today — subscribe to continue using BOT.";
-  } else if (days === 1) {
-    bannerText = "1 day left in your free trial. Subscribe to continue using BOT seamlessly.";
-  } else {
-    bannerText = `${days} days left in your free trial. Subscribe anytime to continue without interruption.`;
-  }
+  const urgent = isGrace || days <= 1;
+  const deadline = sub.deadline ?? sub.trialEndDate ?? sub.currentPeriodEnd ?? null;
+  const prefix = isGrace ? "Your subscription has lapsed — " : "Your free trial ends in ";
+  const suffix = isGrace
+    ? " left to renew before access is suspended."
+    : ". Subscribe anytime to continue without interruption.";
 
   return (
     <div>
-      <SubscriptionBanner urgent={urgent || isGrace} text={bannerText} />
+      <SubscriptionBanner urgent={urgent} prefix={prefix} suffix={suffix} deadline={deadline} />
       {children}
     </div>
   );
 }
 
-function SubscriptionBanner({ urgent, text }: { urgent: boolean; text: string }) {
+// Live "Xd HH:MM:SS" countdown that re-renders once per second. Kept as its own
+// component so the per-second re-render is isolated to the countdown text.
+function Countdown({ deadline }: { deadline: string | null }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (!deadline) return <span className="font-semibold">soon</span>;
+
+  const ms = Math.max(0, new Date(deadline).getTime() - now);
+  const totalSec = Math.floor(ms / 1000);
+  const d = Math.floor(totalSec / 86400);
+  const h = Math.floor((totalSec % 86400) / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const clock = `${pad(h)}:${pad(m)}:${pad(s)}`;
+  const label = d > 0 ? `${d} ${d === 1 ? "day" : "days"} ${clock}` : clock;
+
+  return <span className="font-semibold tabular-nums">{label}</span>;
+}
+
+function SubscriptionBanner({
+  urgent,
+  prefix,
+  suffix,
+  deadline,
+}: {
+  urgent: boolean;
+  prefix: string;
+  suffix: string;
+  deadline: string | null;
+}) {
   return (
     <div
       className={cn(
@@ -155,7 +184,11 @@ function SubscriptionBanner({ urgent, text }: { urgent: boolean; text: string })
         ) : (
           <Clock className="h-5 w-5 shrink-0" />
         )}
-        <p className="text-sm font-medium">{text}</p>
+        <p className="text-sm font-medium">
+          {prefix}
+          <Countdown deadline={deadline} />
+          {suffix}
+        </p>
       </div>
       <Button
         asChild

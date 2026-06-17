@@ -27,7 +27,9 @@ export interface MySubscription {
   trialEndDate?: string | null;
   currentPeriodEnd?: string | null;
   graceEndDate?: string | null;
+  deadline?: string | null;
   daysRemaining: number | null;
+  bannerThresholdDays?: number;
   employeesUsed?: number;
   maxEmployees?: number | null;
 }
