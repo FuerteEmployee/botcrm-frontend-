@@ -13,12 +13,25 @@ export interface SalaryRecord {
   bonus: number;
   deductions: number;
   totalSalary: number;
+  grossSalary?: number;
+  netSalary?: number;
   month: number;
   year: number;
-  status: "paid" | "pending";
+  status: "paid" | "pending" | "final" | "review";
   breakdown?: any;
   workingDays?: number;
+  // Engine audit fields (populated when payroll.enabled)
+  payableDays?: number;
+  totalDaysInWindow?: number;
+  dailyRateBasis?: string;
+  needsReview?: boolean;
+  buckets?: {
+    present?: number; wfh?: number; halfDay?: number; paidLeave?: number;
+    weeklyOff?: number; holiday?: number; absent?: number; unpaidLeave?: number;
+  };
   createdAt: string;
+  remarks?: string;
+  employmentType?: string;
 }
 
 export function useSalaryService(month?: number, year?: number) {
@@ -37,7 +50,7 @@ export function useSalaryService(month?: number, year?: number) {
   });
 
   const updateSalary = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: "paid" | "pending" }) => {
+    mutationFn: async ({ id, status }: { id: string; status: "paid" | "pending" | "final" | "review" }) => {
       const { data } = await apiClient.put(`/salary/${id}`, { status });
       return data;
     },

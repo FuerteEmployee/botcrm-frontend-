@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { LogOut, Bell, Lock, Building2, Palette, AlertCircle, Mail, Phone, MapPin, Camera, User, LayoutGrid, List, CheckCircle2, ShieldCheck, Globe, Trash2, Edit2, Loader2, Clock, CalendarDays, Plus, X, GitBranch, Receipt, Search, LogIn, Copy, Check } from "lucide-react";
+import { LogOut, Bell, Lock, Building2, Palette, AlertCircle, Mail, Phone, MapPin, Camera, User, LayoutGrid, List, CheckCircle2, ShieldCheck, Globe, Trash2, Edit2, Loader2, Clock, CalendarDays, Plus, X, GitBranch, Receipt, Search, LogIn, Copy, Check, Banknote } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -80,12 +80,13 @@ function SettingsPage() {
     { id: "general", label: "Org", icon: Building2 },
     { id: "branches", label: "Branches", icon: GitBranch },
     { id: "attendance", label: "Attendance", icon: Clock },
+    { id: "payroll", label: "Payroll", icon: Banknote },
     { id: "salary_templates", label: "Pay Templates", icon: Receipt },
     { id: "preferences", label: "Prefs", icon: Bell },
     { id: "security", label: "Security", icon: Lock },
   ] as const;
 
-  const [activeTab, setActiveTab] = useState<"general" | "branches" | "attendance" | "salary_templates" | "preferences" | "security">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "branches" | "attendance" | "payroll" | "salary_templates" | "preferences" | "security">("general");
   const [loading, setLoading] = useState(false);
   const [isProfileLoading, setIsProfileLoading] = useState(true);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -102,6 +103,16 @@ function SettingsPage() {
     workDays: ["M", "T", "W", "Th", "F"],
     requireLocation: false,
     remotePunch: true,
+  });
+  const [payroll, setPayroll] = useState({
+    enabled: false,
+    dailyRateBasis: "fixed30" as "fixed30" | "fixed26" | "calendar" | "workingDay",
+    sandwichRuleEnabled: true,
+    rounding: { mode: "nearest" as "none" | "nearest" | "floor" | "ceil", precision: 0 },
+    bucketWeights: {
+      present: 1, wfh: 1, halfDay: 0.5, paidLeave: 1,
+      weeklyOff: 1, holiday: 1, absent: 0, unpaidLeave: 0,
+    },
   });
   const [salaryTemplates, setSalaryTemplates] = useState<{name: string; components: any}[]>([]);
   const [company, setCompany] = useState({
@@ -147,6 +158,15 @@ function SettingsPage() {
           });
         }
         
+        if (data.payroll) {
+          setPayroll(p => ({
+            ...p,
+            ...data.payroll,
+            rounding: data.payroll.rounding || p.rounding,
+            bucketWeights: { ...p.bucketWeights, ...(data.payroll.bucketWeights || {}) },
+          }));
+        }
+
         if (data.salaryTemplates) {
           setSalaryTemplates(data.salaryTemplates);
         }
@@ -441,6 +461,149 @@ function SettingsPage() {
                         variant="add"
                         showLabel
                         label="Apply Attendance Rules"
+                        className="px-10 h-11 rounded-xl shadow-lg shadow-primary/20"
+                      />
+                    </div>
+                  )}
+                </form>
+              </Card>
+            </div>
+          )}
+
+          {activeTab === "payroll" && (
+            <div className="space-y-6">
+              <Card className="p-8 border border-border/60 bg-white rounded-2xl shadow-sm">
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    setLoading(true);
+                    try {
+                      await apiClient.put("/settings", { payroll });
+                      toast.success("Payroll rules updated");
+                    } catch {
+                      toast.error("Failed to update payroll rules");
+                    } finally { setLoading(false); }
+                  }}
+                  className="space-y-10"
+                >
+                  {/* Master toggle */}
+                  <div>
+                    <SectionHeader icon={Banknote} label="Deterministic Payroll Engine"
+                      description="When ON, every rupee is derived from the 8-bucket day classification. When OFF, the legacy formula is used — safe for existing tenants." />
+                    <div className="flex items-center justify-between p-4 rounded-xl bg-muted/20 border border-border/40">
+                      <div>
+                        <div className="text-[13px] font-bold">Enable Payroll Engine</div>
+                        <div className="text-[11px] text-muted-foreground">Uses configured daily-rate basis, sandwich rule and per-bucket weights.</div>
+                      </div>
+                      <Switch checked={payroll.enabled} onCheckedChange={(v) => setPayroll(p => ({ ...p, enabled: v }))} />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
+                    {/* Daily rate basis */}
+                    <div className="space-y-4">
+                      <SectionHeader icon={Clock} label="Daily Rate Basis" description="How one day's salary is derived from the monthly CTC." />
+                      {[
+                        { value: "fixed30", label: "Fixed ÷ 30", desc: "CTC / 30 — same every month" },
+                        { value: "fixed26", label: "Fixed ÷ 26", desc: "CTC / 26 — excludes weekends" },
+                        { value: "calendar", label: "Calendar days", desc: "CTC / actual days in month" },
+                        { value: "workingDay", label: "Working days", desc: "CTC / working days in month" },
+                      ].map(opt => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setPayroll(p => ({ ...p, dailyRateBasis: opt.value as any }))}
+                          className={cn(
+                            "w-full text-left p-4 rounded-xl border-2 transition-all",
+                            payroll.dailyRateBasis === opt.value
+                              ? "border-primary bg-primary/5 text-primary"
+                              : "border-muted bg-muted/10 hover:border-primary/30"
+                          )}
+                        >
+                          <div className="text-[13px] font-bold">{opt.label}</div>
+                          <div className="text-[11px] text-muted-foreground mt-0.5">{opt.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Rules */}
+                    <div className="space-y-6">
+                      <div>
+                        <SectionHeader icon={ShieldCheck} label="Rules" />
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between p-4 rounded-xl bg-muted/20 border border-border/40">
+                            <div>
+                              <div className="text-[13px] font-bold">Sandwich Rule</div>
+                              <div className="text-[11px] text-muted-foreground">Weekly-off/holiday flanked by absent on both sides becomes LOP.</div>
+                            </div>
+                            <Switch checked={payroll.sandwichRuleEnabled} onCheckedChange={(v) => setPayroll(p => ({ ...p, sandwichRuleEnabled: v }))} />
+                          </div>
+                        </div>
+                      </div>
+
+                      <div>
+                        <SectionHeader icon={CheckCircle2} label="Rounding" description="Applied once to the final net salary." />
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1">
+                            <Label className="text-[11px] font-bold uppercase tracking-wide">Mode</Label>
+                            <select
+                              value={payroll.rounding.mode}
+                              onChange={(e) => setPayroll(p => ({ ...p, rounding: { ...p.rounding, mode: e.target.value as any } }))}
+                              className="w-full h-10 rounded-xl border border-border/60 bg-muted/10 text-[13px] px-3 font-medium"
+                            >
+                              <option value="nearest">Round to nearest</option>
+                              <option value="floor">Floor</option>
+                              <option value="ceil">Ceiling</option>
+                              <option value="none">None (exact)</option>
+                            </select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[11px] font-bold uppercase tracking-wide">Decimal places</Label>
+                            <Input
+                              type="number" min={0} max={4}
+                              value={payroll.rounding.precision}
+                              onChange={(e) => setPayroll(p => ({ ...p, rounding: { ...p.rounding, precision: Number(e.target.value) } }))}
+                              className="h-10 rounded-xl text-[13px]"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Per-bucket weights */}
+                  <div>
+                    <SectionHeader icon={CalendarDays} label="Day Bucket Pay Weights"
+                      description="Fraction of a full day's pay earned for each attendance bucket (0 = no pay, 1 = full pay, 0.5 = half pay)." />
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      {(Object.entries(payroll.bucketWeights) as [string, number][]).map(([bucket, weight]) => (
+                        <div key={bucket} className="space-y-1">
+                          <Label className="text-[11px] font-bold uppercase tracking-wide capitalize">
+                            {bucket.replace(/([A-Z])/g, ' $1')}
+                          </Label>
+                          <Input
+                            type="number" min={0} max={1} step={0.05}
+                            value={weight}
+                            onChange={(e) => setPayroll(p => ({
+                              ...p,
+                              bucketWeights: { ...p.bucketWeights, [bucket]: Math.min(1, Math.max(0, parseFloat(e.target.value) || 0)) }
+                            }))}
+                            className="h-10 rounded-xl text-[13px]"
+                          />
+                          <div className="text-[10px] text-muted-foreground text-right font-medium">{(weight * 100).toFixed(0)}%</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {canEdit && (
+                    <div className="pt-6 flex justify-end border-t border-border/40">
+                      <ActionButton
+                        type="submit"
+                        loading={loading}
+                        variant="add"
+                        showLabel
+                        label="Save Payroll Settings"
                         className="px-10 h-11 rounded-xl shadow-lg shadow-primary/20"
                       />
                     </div>

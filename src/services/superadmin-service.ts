@@ -38,6 +38,9 @@ export async function createTenant(payload: {
   email?: string;
   planId: string;
   billingCycle?: string;
+  status?: "trial" | "active";
+  trialDays?: number;
+  bannerThresholdDays?: number;
 }) {
   const { data } = await apiClient.post(`${BASE}/tenants`, payload);
   return data;
@@ -50,6 +53,7 @@ export async function updateTenant(
     status?: string;
     billingCycle?: string;
     trialEndDate?: string;
+    bannerThresholdDays?: number;
     note?: string;
   }
 ) {

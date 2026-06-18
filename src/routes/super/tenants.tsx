@@ -488,6 +488,9 @@ function CreateTenantDialog({
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [planId, setPlanId] = useState(plans?.[0]?._id || "");
+  const [status, setStatus] = useState<"trial" | "active">("trial");
+  const [billingCycle, setBillingCycle] = useState<"monthly" | "annual">("monthly");
+  const [trialDays, setTrialDays] = useState<string>("14");
   const [bannerThresholdDays, setBannerThresholdDays] = useState<string>("7");
   const [errorMsg, setErrorMsg] = useState("");
 
@@ -544,6 +547,43 @@ function CreateTenantDialog({
             </Select>
           </div>
           <div className="space-y-1.5">
+            <Label className="text-xs">Account type</Label>
+            <Select value={status} onValueChange={(v) => setStatus(v as "trial" | "active")}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="trial" className="text-xs">Free trial</SelectItem>
+                <SelectItem value="active" className="text-xs">Active (paid, no trial)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Billing cycle</Label>
+            <Select value={billingCycle} onValueChange={(v) => setBillingCycle(v as "monthly" | "annual")}>
+              <SelectTrigger className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="monthly" className="text-xs">Monthly</SelectItem>
+                <SelectItem value="annual" className="text-xs">Annual (2 months free)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {status === "trial" && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Trial length (days)</Label>
+              <Input
+                type="number"
+                min={0}
+                max={365}
+                className="h-8 text-xs"
+                value={trialDays}
+                onChange={(e) => setTrialDays(e.target.value)}
+              />
+            </div>
+          )}
+          <div className="space-y-1.5">
             <Label className="text-xs">Show banner when (days left)</Label>
             <Input
               type="number"
@@ -575,6 +615,9 @@ function CreateTenantDialog({
                 phone: phone.trim(),
                 email: email.trim() || undefined,
                 planId,
+                status,
+                billingCycle,
+                trialDays: status === "trial" ? Number(trialDays) : undefined,
                 bannerThresholdDays: Number(bannerThresholdDays),
               });
             }}

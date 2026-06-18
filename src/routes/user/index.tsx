@@ -1229,20 +1229,46 @@ function UserDashboard() {
 
                 <h4 className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider mt-1">
                   {selectedDate.toLocaleDateString("en-US", { month: "long" })} Earnings
+                  {dashboardData?.salary?.isMTD === true && (
+                    <span className="ml-1.5 text-[8px] bg-blue-100 text-blue-600 rounded px-1 py-0.5 font-bold normal-case">MTD</span>
+                  )}
+                  {dashboardData?.salary?.isMTD === false && (
+                    <span className="ml-1.5 text-[8px] bg-emerald-100 text-emerald-600 rounded px-1 py-0.5 font-bold normal-case">Final</span>
+                  )}
                 </h4>
 
                 <div className="flex items-baseline gap-1.5 mt-0.5">
                   <span className="text-2xl font-semibold text-slate-800 dark:text-white leading-none font-sans">
-                    ₹{currentMonthSalary ? currentMonthSalary.totalSalary.toLocaleString() : (profile?.salary || 0).toLocaleString()}
+                    ₹{(currentMonthSalary
+                      ? currentMonthSalary.totalSalary
+                      : (dashboardData?.salary?.estimatedEarnings ?? profile?.salary ?? 0)
+                    ).toLocaleString()}
                   </span>
                   <span className="text-[9.5px] text-slate-400 font-medium uppercase tracking-wider">
                     {currentMonthSalary?.employmentType || profile?.employmentType || "monthly"}
                   </span>
                 </div>
 
-                {currentMonthSalary?.remarks && (
+                {/* Projected full-month salary when engine is active and in MTD mode */}
+                {!currentMonthSalary && dashboardData?.salary?.projectedFull != null && dashboardData?.salary?.isMTD && (
+                  <p className="text-[8.5px] text-slate-400 font-medium mt-0.5">
+                    Projected full month: ₹{dashboardData.salary.projectedFull.toLocaleString()}
+                  </p>
+                )}
+
+                {dashboardData?.salary?.needsReview && (
+                  <p className="text-[8.5px] text-amber-500 font-semibold mt-0.5">
+                    ⚠ Payroll flagged for review
+                  </p>
+                )}
+
+                {currentMonthSalary?.remarks ? (
                   <p className="text-[8.5px] text-slate-400 font-medium truncate mt-1">
                     {currentMonthSalary.remarks}
+                  </p>
+                ) : (
+                  <p className="text-[8.5px] text-slate-400 font-medium truncate mt-1">
+                    Estimated · {dashboardData?.salary?.remarks || "prorated by attendance"}
                   </p>
                 )}
               </div>

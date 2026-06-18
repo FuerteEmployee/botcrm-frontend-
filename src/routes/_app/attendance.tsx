@@ -92,11 +92,13 @@ function AttendancePage() {
     } catch (err) { }
   };
 
+  const todayStr = new Date().toISOString().split("T")[0];
+  const todayList = list.filter((t) => t.date?.slice(0, 10) === todayStr);
   const counts = {
     all: list.length,
-    present: list.filter((t) => t.status === "present").length,
-    late: list.filter((t) => t.status === "late").length,
-    absent: list.filter((t) => t.status === "absent").length,
+    present: todayList.filter((t) => t.status === "present" || t.status === "late" || t.status === "wfh").length,
+    late: todayList.filter((t) => t.status === "late").length,
+    absent: todayList.filter((t) => t.status === "absent").length,
   };
 
   if (isLoading) {

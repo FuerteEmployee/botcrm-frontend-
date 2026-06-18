@@ -109,22 +109,33 @@ export function SubscriptionGate({ children }: { children: ReactNode }) {
     );
   }
 
-  // ── Soft warning (trial / grace) ────────────────────────────────────────────
+  // ── Soft warning (trial / active renewal / grace) ───────────────────────────
   const isGrace = status === "grace";
+  const isActive = status === "active";
+  const isTrial = status === "trial";
   const days = daysRemaining ?? 0;
-  // Super-admin-configured per-tenant threshold: the trial banner stays hidden
-  // until the tenant is within this many days of the deadline. Grace (already
-  // lapsed) always shows regardless of the threshold.
+  // Super-admin-configured per-tenant threshold: the trial/renewal banner stays
+  // hidden until the tenant is within this many days of the deadline. Grace
+  // (already lapsed) always shows regardless of the threshold.
   const threshold = sub.bannerThresholdDays ?? 7;
-  const showBanner = isGrace || (status === "trial" && days <= threshold);
+  const showBanner = isGrace || ((isTrial || isActive) && days <= threshold);
   if (!showBanner) return <>{children}</>;
 
   const urgent = isGrace || days <= 1;
   const deadline = sub.deadline ?? sub.trialEndDate ?? sub.currentPeriodEnd ?? null;
-  const prefix = isGrace ? "Your subscription has lapsed — " : "Your free trial ends in ";
-  const suffix = isGrace
-    ? " left to renew before access is suspended."
-    : ". Subscribe anytime to continue without interruption.";
+
+  let prefix: string;
+  let suffix: string;
+  if (isGrace) {
+    prefix = "Your subscription has lapsed — ";
+    suffix = " left to renew before access is suspended.";
+  } else if (isActive) {
+    prefix = "Your subscription expires in ";
+    suffix = ". Renew to continue without interruption.";
+  } else {
+    prefix = "Your free trial ends in ";
+    suffix = ". Subscribe anytime to continue without interruption.";
+  }
 
   return (
     <div>

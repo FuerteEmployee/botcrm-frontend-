@@ -20,7 +20,9 @@ export interface AttendanceRecord {
   lunchOutLocation?: string | { lat: number; lng: number };
   punchInPhoto?: string;
   punchOutPhoto?: string;
-  status: 'present' | 'absent' | 'half-day' | 'late';
+  status: 'present' | 'absent' | 'half-day' | 'late' | 'wfh';
+  isWFH?: boolean;
+  wasLate?: boolean;
   remarks?: string;
 }
 

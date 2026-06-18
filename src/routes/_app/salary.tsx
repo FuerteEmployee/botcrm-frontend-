@@ -291,7 +291,12 @@ function SalaryPage() {
                 <DataTableRow key={r._id}>
                   <DataTableCell isFirst className="font-medium text-[13px]">{r.employeeId?.name || "—"}</DataTableCell>
                   <DataTableCell className="text-[12px] text-muted-foreground">{MONTHS.find(m => m.m === r.month)?.label || r.month}</DataTableCell>
-                  <DataTableCell className="text-[12px] font-black">{r.workingDays || "22"}/26</DataTableCell>
+                  <DataTableCell className="text-[12px] font-black">
+                    {r.payableDays != null
+                      ? `${r.payableDays}/${r.totalDaysInWindow ?? "—"}`
+                      : (r.workingDays ? `${r.workingDays}/26` : "—")}
+                    {r.needsReview && <span className="ml-1 text-amber-500 text-[10px]">⚠</span>}
+                  </DataTableCell>
                   <DataTableCell className="text-[13px] text-right font-mono text-muted-foreground">{fmtINR(r.baseSalary)}</DataTableCell>
                   <DataTableCell className="text-[13px] text-right text-success font-medium">+{fmtINR((r.breakdown?.earnings || []).reduce((s: number, e: any) => s + (e.name !== "Basic Salary" ? e.amount : 0), 0))}</DataTableCell>
                   <DataTableCell className="text-[13px] text-right text-destructive font-medium">-{fmtINR(r.deductions)}</DataTableCell>
@@ -301,9 +306,11 @@ function SalaryPage() {
                       variant="outline"
                       className={cn(
                         "text-[10px] font-bold px-2 py-0.5",
-                        r.status === "paid" ? "border-success/40 text-success bg-success/8" : "border-warning/40 text-warning-foreground bg-warning/8"
+                        r.status === "paid" ? "border-success/40 text-success bg-success/8"
+                          : r.status === "review" ? "border-amber-400/60 text-amber-600 bg-amber-50"
+                          : "border-warning/40 text-warning-foreground bg-warning/8"
                       )}
-                    >{r.status.toUpperCase()}</Badge>
+                    >{r.status === "review" ? "REVIEW ⚠" : r.status.toUpperCase()}</Badge>
                   </DataTableCell>
                   <DataTableCell isLast>
                     <div className="flex justify-end gap-1">

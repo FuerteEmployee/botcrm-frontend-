@@ -66,6 +66,13 @@ interface AttendanceSettings {
   lateGrace: number;
   earlyGrace: number;
   lunchGrace: number;
+  halfDayRules: {
+    method: 'timeBased' | 'durationBased' | 'both';
+    bothLogic: 'or' | 'and';
+    cutoffTime: string;
+    minHours: number;
+    deductLunch: boolean;
+  };
   otThreshold: number;
   weeklyOT: number;
   otMultiplier: number;
@@ -118,6 +125,13 @@ const DEFAULT_SETTINGS: AttendanceSettings = {
   lateGrace: 10,
   earlyGrace: 5,
   lunchGrace: 5,
+  halfDayRules: {
+    method: 'durationBased',
+    bothLogic: 'or',
+    cutoffTime: '09:35',
+    minHours: 8,
+    deductLunch: true,
+  },
   otThreshold: 9,
   weeklyOT: 45,
   otMultiplier: 1.5,
@@ -158,12 +172,12 @@ function AttendanceConfigPage() {
       try {
         const { data } = await apiClient.get("/settings");
         if (data.attendance) {
-          // Merge with defaults to handle any missing fields in existing data
           setSettings({
             ...DEFAULT_SETTINGS,
             ...data.attendance,
             notifications: { ...DEFAULT_SETTINGS.notifications, ...data.attendance.notifications },
-            display: { ...DEFAULT_SETTINGS.display, ...data.attendance.display }
+            display: { ...DEFAULT_SETTINGS.display, ...data.attendance.display },
+            halfDayRules: { ...DEFAULT_SETTINGS.halfDayRules, ...(data.attendance.halfDayRules || {}) },
           });
         }
       } catch (error) {
@@ -501,6 +515,157 @@ function AttendanceConfigPage() {
                       </div>
                     }
                   />
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+
+          {/* HALF-DAY RULES */}
+          <section id="halfday" className="scroll-mt-24">
+            <Card className="border-none shadow-sm bg-white rounded-2xl overflow-hidden">
+              <CardHeader className="border-b border-border/40 px-6 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-amber-500/10 text-amber-600 flex items-center justify-center">
+                    <Calendar className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base font-bold">Half-Day Rules</CardTitle>
+                    <p className="text-[11px] text-muted-foreground font-medium">Configure when a day is marked as half day at punch-out</p>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-6 space-y-6">
+
+                {/* Method selector */}
+                <div className="space-y-2">
+                  <Label className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Detection method</Label>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    {([
+                      { value: 'durationBased', label: 'Duration Only', desc: 'Half day if net hours worked < minimum threshold' },
+                      { value: 'timeBased',     label: 'Cutoff Time Only', desc: 'Half day if punch-in is after the set cutoff time' },
+                      { value: 'both',          label: 'Both Methods', desc: 'Apply both rules — configure combination logic below' },
+                    ] as const).map(opt => (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() => setSettings({ ...settings, halfDayRules: { ...settings.halfDayRules, method: opt.value } })}
+                        className={cn(
+                          "text-left p-4 rounded-xl border-2 transition-all",
+                          settings.halfDayRules.method === opt.value
+                            ? "border-amber-500 bg-amber-50 text-amber-700"
+                            : "border-border/40 bg-muted/10 hover:border-amber-300"
+                        )}
+                      >
+                        <div className="text-[13px] font-bold">{opt.label}</div>
+                        <div className="text-[10px] text-muted-foreground mt-0.5 leading-tight">{opt.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Combination logic (only when 'both') */}
+                {settings.halfDayRules.method === 'both' && (
+                  <div className="space-y-2">
+                    <Label className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Combination logic</Label>
+                    <div className="grid grid-cols-2 gap-3">
+                      {([
+                        { value: 'or',  label: 'Either fails → half day', desc: 'Stricter: late arrival OR short hours triggers it' },
+                        { value: 'and', label: 'Both fail → half day',    desc: 'Lenient: must be late AND work short hours' },
+                      ] as const).map(opt => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setSettings({ ...settings, halfDayRules: { ...settings.halfDayRules, bothLogic: opt.value } })}
+                          className={cn(
+                            "text-left p-4 rounded-xl border-2 transition-all",
+                            settings.halfDayRules.bothLogic === opt.value
+                              ? "border-amber-500 bg-amber-50 text-amber-700"
+                              : "border-border/40 bg-muted/10 hover:border-amber-300"
+                          )}
+                        >
+                          <div className="text-[13px] font-bold">{opt.label}</div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5">{opt.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                  {/* Cutoff time (time-based or both) */}
+                  {(settings.halfDayRules.method === 'timeBased' || settings.halfDayRules.method === 'both') && (
+                    <div className="space-y-2">
+                      <Label className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                        Late-arrival cutoff
+                      </Label>
+                      <Input
+                        type="time"
+                        value={settings.halfDayRules.cutoffTime}
+                        onChange={(e) => setSettings({ ...settings, halfDayRules: { ...settings.halfDayRules, cutoffTime: e.target.value } })}
+                        className="h-10 rounded-xl border-border/60 text-[13px] font-bold"
+                      />
+                      <p className="text-[10px] text-muted-foreground">
+                        Punch-in strictly after this time counts as late. Exactly at {settings.halfDayRules.cutoffTime} is still on time.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Min hours (duration-based or both) */}
+                  {(settings.halfDayRules.method === 'durationBased' || settings.halfDayRules.method === 'both') && (
+                    <div className="space-y-2">
+                      <Label className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                        Minimum hours for full day
+                      </Label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="number"
+                          min={1} max={12} step={0.5}
+                          value={settings.halfDayRules.minHours}
+                          onChange={(e) => setSettings({ ...settings, halfDayRules: { ...settings.halfDayRules, minHours: parseFloat(e.target.value) || 0 } })}
+                          className="w-24 h-10 rounded-xl border-border/60 text-[13px] font-bold text-center"
+                        />
+                        <span className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">hours</span>
+                      </div>
+                      <p className="text-[10px] text-muted-foreground">
+                        Net worked time below this = half day. Currently: {settings.halfDayRules.minHours}h required.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Lunch deduction toggle (duration-based or both) */}
+                {(settings.halfDayRules.method === 'durationBased' || settings.halfDayRules.method === 'both') && (
+                  <div className="flex items-center justify-between p-4 rounded-xl bg-muted/20 border border-border/40">
+                    <div>
+                      <div className="text-[13px] font-bold">Deduct lunch break from hours</div>
+                      <div className="text-[11px] text-muted-foreground">
+                        {settings.halfDayRules.deductLunch
+                          ? `Net hours = (punch-out − punch-in) − lunch break. If lunch wasn't recorded, no deduction.`
+                          : `Gross hours = punch-out − punch-in (lunch not subtracted).`}
+                      </div>
+                    </div>
+                    <Switch
+                      checked={settings.halfDayRules.deductLunch}
+                      onCheckedChange={(v) => setSettings({ ...settings, halfDayRules: { ...settings.halfDayRules, deductLunch: v } })}
+                    />
+                  </div>
+                )}
+
+                {/* Live preview */}
+                <div className="rounded-xl bg-muted/10 border border-border/30 p-4 text-[11px] text-muted-foreground space-y-1">
+                  <p className="font-bold text-foreground text-[12px] mb-2">Current rule summary</p>
+                  {settings.halfDayRules.method === 'durationBased' && (
+                    <p>Half day if net {settings.halfDayRules.deductLunch ? '(post-lunch)' : '(gross)'} hours worked &lt; <strong>{settings.halfDayRules.minHours}h</strong></p>
+                  )}
+                  {settings.halfDayRules.method === 'timeBased' && (
+                    <p>Half day if punch-in is after <strong>{settings.halfDayRules.cutoffTime}</strong> (strictly)</p>
+                  )}
+                  {settings.halfDayRules.method === 'both' && (
+                    <>
+                      <p>Half day if punch-in after <strong>{settings.halfDayRules.cutoffTime}</strong> <strong>{settings.halfDayRules.bothLogic === 'or' ? 'OR' : 'AND'}</strong> net hours &lt; <strong>{settings.halfDayRules.minHours}h</strong></p>
+                      <p className="opacity-70">{settings.halfDayRules.bothLogic === 'or' ? 'Stricter: either condition alone triggers half day.' : 'Lenient: both conditions must be true.'}</p>
+                    </>
+                  )}
                 </div>
               </CardContent>
             </Card>
