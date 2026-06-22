@@ -3,7 +3,7 @@ import { Outlet, useNavigate, Link, useLocation, createFileRoute, redirect } fro
 import { useAuth } from "@/hooks/use-auth";
 import { clearSession, getSession } from "@/lib/auth";
 import { 
-  Home, History, CalendarDays, Ticket, User, LogOut, Sun, Moon, Sparkles
+  Home, History, CalendarDays, Ticket, User, LogOut, Sun, Moon, Sparkles, Coins
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
@@ -77,6 +77,7 @@ function UserLayout() {
     { to: "/user", label: "Home", icon: Home },
     { to: "/user/history", label: "History", icon: History },
     { to: "/user/leaves", label: "Leaves", icon: CalendarDays },
+    { to: "/user/advance-salary", label: "My Requests", icon: Coins },
     { to: "/user/tickets", label: "Tickets", icon: Ticket },
     { to: "/user/profile", label: "Profile", icon: User },
   ];

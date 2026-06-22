@@ -19,6 +19,7 @@ import { Route as UserTicketsRouteImport } from './routes/user/tickets'
 import { Route as UserProfileRouteImport } from './routes/user/profile'
 import { Route as UserLeavesRouteImport } from './routes/user/leaves'
 import { Route as UserHistoryRouteImport } from './routes/user/history'
+import { Route as UserAdvanceSalaryRouteImport } from './routes/user/advance-salary'
 import { Route as SuperTenantsRouteImport } from './routes/super/tenants'
 import { Route as SuperPlansRouteImport } from './routes/super/plans'
 import { Route as SuperOverviewRouteImport } from './routes/super/overview'
@@ -44,6 +45,7 @@ import { Route as AppAttendanceConfigRouteImport } from './routes/_app/attendanc
 import { Route as AppAttendanceRouteImport } from './routes/_app/attendance'
 import { Route as AppAssetsRouteImport } from './routes/_app/assets'
 import { Route as AppAnnouncementsRouteImport } from './routes/_app/announcements'
+import { Route as AppAdvanceSalaryRouteImport } from './routes/_app/advance-salary'
 import { Route as AppEmployeesIndexRouteImport } from './routes/_app/employees.index'
 import { Route as AppAssetsIndexRouteImport } from './routes/_app/assets.index'
 import { Route as AppEmployeesCreateRouteImport } from './routes/_app/employees.create'
@@ -97,6 +99,11 @@ const UserLeavesRoute = UserLeavesRouteImport.update({
 const UserHistoryRoute = UserHistoryRouteImport.update({
   id: '/history',
   path: '/history',
+  getParentRoute: () => UserRoute,
+} as any)
+const UserAdvanceSalaryRoute = UserAdvanceSalaryRouteImport.update({
+  id: '/advance-salary',
+  path: '/advance-salary',
   getParentRoute: () => UserRoute,
 } as any)
 const SuperTenantsRoute = SuperTenantsRouteImport.update({
@@ -224,6 +231,11 @@ const AppAnnouncementsRoute = AppAnnouncementsRouteImport.update({
   path: '/announcements',
   getParentRoute: () => AppRoute,
 } as any)
+const AppAdvanceSalaryRoute = AppAdvanceSalaryRouteImport.update({
+  id: '/advance-salary',
+  path: '/advance-salary',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppEmployeesIndexRoute = AppEmployeesIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -255,6 +267,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/super': typeof SuperRouteWithChildren
   '/user': typeof UserRouteWithChildren
+  '/advance-salary': typeof AppAdvanceSalaryRoute
   '/announcements': typeof AppAnnouncementsRoute
   '/assets': typeof AppAssetsRouteWithChildren
   '/attendance': typeof AppAttendanceRoute
@@ -280,6 +293,7 @@ export interface FileRoutesByFullPath {
   '/super/overview': typeof SuperOverviewRoute
   '/super/plans': typeof SuperPlansRoute
   '/super/tenants': typeof SuperTenantsRoute
+  '/user/advance-salary': typeof UserAdvanceSalaryRoute
   '/user/history': typeof UserHistoryRoute
   '/user/leaves': typeof UserLeavesRoute
   '/user/profile': typeof UserProfileRoute
@@ -295,6 +309,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/super': typeof SuperRouteWithChildren
+  '/advance-salary': typeof AppAdvanceSalaryRoute
   '/announcements': typeof AppAnnouncementsRoute
   '/attendance': typeof AppAttendanceRoute
   '/attendance-config': typeof AppAttendanceConfigRoute
@@ -318,6 +333,7 @@ export interface FileRoutesByTo {
   '/super/overview': typeof SuperOverviewRoute
   '/super/plans': typeof SuperPlansRoute
   '/super/tenants': typeof SuperTenantsRoute
+  '/user/advance-salary': typeof UserAdvanceSalaryRoute
   '/user/history': typeof UserHistoryRoute
   '/user/leaves': typeof UserLeavesRoute
   '/user/profile': typeof UserProfileRoute
@@ -336,6 +352,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/super': typeof SuperRouteWithChildren
   '/user': typeof UserRouteWithChildren
+  '/_app/advance-salary': typeof AppAdvanceSalaryRoute
   '/_app/announcements': typeof AppAnnouncementsRoute
   '/_app/assets': typeof AppAssetsRouteWithChildren
   '/_app/attendance': typeof AppAttendanceRoute
@@ -361,6 +378,7 @@ export interface FileRoutesById {
   '/super/overview': typeof SuperOverviewRoute
   '/super/plans': typeof SuperPlansRoute
   '/super/tenants': typeof SuperTenantsRoute
+  '/user/advance-salary': typeof UserAdvanceSalaryRoute
   '/user/history': typeof UserHistoryRoute
   '/user/leaves': typeof UserLeavesRoute
   '/user/profile': typeof UserProfileRoute
@@ -379,6 +397,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/super'
     | '/user'
+    | '/advance-salary'
     | '/announcements'
     | '/assets'
     | '/attendance'
@@ -404,6 +423,7 @@ export interface FileRouteTypes {
     | '/super/overview'
     | '/super/plans'
     | '/super/tenants'
+    | '/user/advance-salary'
     | '/user/history'
     | '/user/leaves'
     | '/user/profile'
@@ -419,6 +439,7 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/super'
+    | '/advance-salary'
     | '/announcements'
     | '/attendance'
     | '/attendance-config'
@@ -442,6 +463,7 @@ export interface FileRouteTypes {
     | '/super/overview'
     | '/super/plans'
     | '/super/tenants'
+    | '/user/advance-salary'
     | '/user/history'
     | '/user/leaves'
     | '/user/profile'
@@ -459,6 +481,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/super'
     | '/user'
+    | '/_app/advance-salary'
     | '/_app/announcements'
     | '/_app/assets'
     | '/_app/attendance'
@@ -484,6 +507,7 @@ export interface FileRouteTypes {
     | '/super/overview'
     | '/super/plans'
     | '/super/tenants'
+    | '/user/advance-salary'
     | '/user/history'
     | '/user/leaves'
     | '/user/profile'
@@ -574,6 +598,13 @@ declare module '@tanstack/react-router' {
       path: '/history'
       fullPath: '/user/history'
       preLoaderRoute: typeof UserHistoryRouteImport
+      parentRoute: typeof UserRoute
+    }
+    '/user/advance-salary': {
+      id: '/user/advance-salary'
+      path: '/advance-salary'
+      fullPath: '/user/advance-salary'
+      preLoaderRoute: typeof UserAdvanceSalaryRouteImport
       parentRoute: typeof UserRoute
     }
     '/super/tenants': {
@@ -751,6 +782,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAnnouncementsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/advance-salary': {
+      id: '/_app/advance-salary'
+      path: '/advance-salary'
+      fullPath: '/advance-salary'
+      preLoaderRoute: typeof AppAdvanceSalaryRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/employees/': {
       id: '/_app/employees/'
       path: '/'
@@ -820,6 +858,7 @@ const AppEmployeesRouteWithChildren = AppEmployeesRoute._addFileChildren(
 )
 
 interface AppRouteChildren {
+  AppAdvanceSalaryRoute: typeof AppAdvanceSalaryRoute
   AppAnnouncementsRoute: typeof AppAnnouncementsRoute
   AppAssetsRoute: typeof AppAssetsRouteWithChildren
   AppAttendanceRoute: typeof AppAttendanceRoute
@@ -843,6 +882,7 @@ interface AppRouteChildren {
 }
 
 const AppRouteChildren: AppRouteChildren = {
+  AppAdvanceSalaryRoute: AppAdvanceSalaryRoute,
   AppAnnouncementsRoute: AppAnnouncementsRoute,
   AppAssetsRoute: AppAssetsRouteWithChildren,
   AppAttendanceRoute: AppAttendanceRoute,
@@ -886,6 +926,7 @@ const SuperRouteChildren: SuperRouteChildren = {
 const SuperRouteWithChildren = SuperRoute._addFileChildren(SuperRouteChildren)
 
 interface UserRouteChildren {
+  UserAdvanceSalaryRoute: typeof UserAdvanceSalaryRoute
   UserHistoryRoute: typeof UserHistoryRoute
   UserLeavesRoute: typeof UserLeavesRoute
   UserProfileRoute: typeof UserProfileRoute
@@ -894,6 +935,7 @@ interface UserRouteChildren {
 }
 
 const UserRouteChildren: UserRouteChildren = {
+  UserAdvanceSalaryRoute: UserAdvanceSalaryRoute,
   UserHistoryRoute: UserHistoryRoute,
   UserLeavesRoute: UserLeavesRoute,
   UserProfileRoute: UserProfileRoute,

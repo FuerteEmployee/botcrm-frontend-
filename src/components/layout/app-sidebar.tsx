@@ -21,6 +21,7 @@ import {
   Receipt,
   UserCog,
   CreditCard,
+  Coins,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
@@ -48,6 +49,7 @@ const NAV: NavItem[] = [
   { to: "/attendance", label: "Attendance Logs", icon: CalendarCheck },
   { to: "/tickets", label: "Helpdesk Tickets", icon: Ticket },
   { to: "/salary", label: "Salary", icon: Wallet },
+  { to: "/advance-salary", label: "Advance Salary & Loan", icon: Coins },
   { to: "/leads", label: "Lead Management", icon: UserCheck },
   { to: "/festivals", label: "Festivals & Holidays", icon: Gift },
   { to: "/announcements", label: "Notice Board", icon: Megaphone },

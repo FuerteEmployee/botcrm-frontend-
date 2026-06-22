@@ -37,6 +37,7 @@ const ALL_PAGES = [
   { key: "attendance",    label: "Attendance" },
   { key: "tickets",       label: "Helpdesk Tickets" },
   { key: "salary",        label: "Salary" },
+  { key: "advance-salary",label: "Advance Salary & Loan" },
   { key: "leads",         label: "Lead Management" },
   { key: "festivals",     label: "Festivals & Holidays" },
   { key: "announcements", label: "Notice Board" },
@@ -48,7 +49,7 @@ const ALL_PAGES = [
   { key: "settings",      label: "Settings" },
 ];
 
-const DEFAULT_ALLOWED = new Set(["dashboard", "employees", "leaves", "attendance", "salary", "expenses"]);
+const DEFAULT_ALLOWED = new Set(["dashboard", "employees", "leaves", "attendance", "salary", "advance-salary", "expenses"]);
 
 type Perms = Record<string, PagePermission>;
 
