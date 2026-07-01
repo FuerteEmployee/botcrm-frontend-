@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Clock, MapPin, Camera, Coffee, CheckCircle,
   AlertTriangle, Calendar, Award, Fingerprint, ChevronLeft, ChevronRight,
-  Home, RefreshCw, Sparkles
+  Home, RefreshCw, Sparkles, Settings
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,7 +15,12 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
 import { startTracking, stopTracking } from "@/services/location-tracker";
-import { Switch } from "@/components/ui/switch";
+import {
+  acquirePosition,
+  openLocationSettings,
+  getPlatform,
+  type LocationFailureReason,
+} from "@/lib/geolocation";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -53,6 +58,7 @@ interface UserProfile {
   recentAttendance?: AttendanceLog[];
   upcomingHolidays?: Array<{ _id: string; name: string; startDate: string }>;
   allowMultiplePunches?: boolean;
+  trackingEnabled?: boolean;
 }
 
 // Sleek Custom SVG Circular Progress Gauge (Lighter stroke, balanced typography)
@@ -171,6 +177,33 @@ function UserLocationMap({ lat, lng, initials }: { lat: number; lng: number; ini
   return <div ref={containerRef} style={{ height: "100%", width: "100%" }} />;
 }
 
+// Device-appropriate instructions for enabling location, shown in the help dialog.
+function locationHelpSteps(
+  platform: "android" | "ios" | "web",
+  reason: LocationFailureReason | null
+): string[] {
+  if (platform === "web") {
+    return [
+      "Tap the lock / location icon in your browser's address bar.",
+      'Set Location to "Allow" for this site.',
+      "Reload the page, then tap Retry below.",
+    ];
+  }
+  if (reason === "unavailable") {
+    return [
+      'Tap "Open Location Settings" below.',
+      "Turn on Location and set mode to High accuracy / GPS.",
+      "Return to the app and tap Retry.",
+    ];
+  }
+  return [
+    'Tap "Open App Settings" below.',
+    "Open Permissions → Location.",
+    'Choose "Allow" (While using the app is fine).',
+    "Return to the app and tap Retry.",
+  ];
+}
+
 function UserDashboard() {
   useAuth();
   const queryClient = useQueryClient();
@@ -180,7 +213,11 @@ function UserDashboard() {
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
   const [showLocationVerification, setShowLocationVerification] = useState(false);
-  const [liveTrackingConsent, setLiveTrackingConsent] = useState(true);
+  // "Enable Location" guided-help dialog (steps + deep link to OS settings).
+  const [showLocationHelp, setShowLocationHelp] = useState(false);
+  const [locationFailReason, setLocationFailReason] = useState<LocationFailureReason | null>(null);
+  // Punch action queued while we wait for the user to enable location.
+  const [pendingPunch, setPendingPunch] = useState<"punch-in" | "punch-out" | null>(null);
 
   // Custom camera scanner variables
   const [scanType, setScanType] = useState<"punch-in" | "punch-out" | null>(null);
@@ -241,26 +278,16 @@ function UserDashboard() {
   const isPunchedIn = !!todayLog?.punchIn;
   const isPunchedOut = !!todayLog?.punchOut;
 
-  // Sync live tracking consent toggle with stored preference when profile loads
+  // Real-time location tracking lifecycle. Tracking is enabled per-employee by
+  // the admin (profile.trackingEnabled) — employees no longer choose. It runs
+  // only while the employee is punched in.
   useEffect(() => {
-    if (profile?._id) {
-      setLiveTrackingConsent(localStorage.getItem(`live-tracking-allowed-${profile._id}`) !== "false");
-    }
-  }, [profile?._id]);
-
-  // Real-time location tracking lifecycle
-  useEffect(() => {
-    if (profile?._id && isPunchedIn && !isPunchedOut) {
-      const trackingAllowed = localStorage.getItem(`live-tracking-allowed-${profile._id}`) !== "false";
-      if (trackingAllowed) {
-        startTracking(profile._id);
-      } else {
-        stopTracking();
-      }
+    if (profile?._id && isPunchedIn && !isPunchedOut && profile.trackingEnabled) {
+      startTracking(profile._id);
     } else {
       stopTracking();
     }
-  }, [profile?._id, isPunchedIn, isPunchedOut]);
+  }, [profile?._id, isPunchedIn, isPunchedOut, profile?.trackingEnabled]);
 
   // Real-time Shift Progress
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -285,102 +312,66 @@ function UserDashboard() {
     return () => clearInterval(timer);
   }, []);
 
-  // Geolocation Setup — only fetch silently if permission is already granted.
-  // Never auto-prompt on page load; the Punch In button is the intentional trigger.
-  useEffect(() => {
-    if (typeof window === "undefined" || !navigator.geolocation) return;
-
-    const fetchSilently = () => {
-      navigator.geolocation.getCurrentPosition(
-        async (pos) => {
-          const lat = pos.coords.latitude;
-          const lng = pos.coords.longitude;
-          setLocation({ lat, lng });
-          setLocationAccuracy(pos.coords.accuracy);
-          if (navigator.onLine) {
-            try {
-              const response = await fetch(
-                `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`,
-                { headers: { "Accept-Language": "en", "User-Agent": "BeOnTimePortal/1.0" } }
-              );
-              if (response.ok) {
-                const geoData = await response.json();
-                setAddress(geoData.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-              } else {
-                setAddress(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-              }
-            } catch {
-              setAddress(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-            }
-          } else {
-            setAddress(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-          }
-        },
-        () => { setAddress("GPS permissions needed"); },
-        { enableHighAccuracy: true, maximumAge: 30000, timeout: 15000 }
+  // Reverse-geocode coordinates into a readable address (best-effort; falls back to raw coords).
+  const resolveAddress = async (lat: number, lng: number): Promise<string> => {
+    const fallback = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    if (typeof navigator !== "undefined" && !navigator.onLine) return fallback;
+    try {
+      const response = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`,
+        { headers: { "Accept-Language": "en", "User-Agent": "BeOnTimePortal/1.0" } }
       );
-    };
-
-    if (navigator.permissions) {
-      navigator.permissions.query({ name: "geolocation" as PermissionName }).then((result) => {
-        if (result.state === "granted") {
-          fetchSilently();
-        } else if (result.state === "denied") {
-          setAddress("GPS permissions needed");
-        }
-        // state === "prompt" → do nothing; wait for user to click Punch In
-      }).catch(() => {
-        // Permissions API not supported (old Android browsers) — fall back to direct call
-        fetchSilently();
-      });
-    } else {
-      fetchSilently();
+      if (response.ok) {
+        const geoData = await response.json();
+        return geoData.display_name || fallback;
+      }
+    } catch {
+      /* network error — fall through to raw coordinates */
     }
+    return fallback;
+  };
+
+  // Passive location fetch on load — only if permission is ALREADY granted.
+  // Never auto-prompts; tapping Punch In / Punch Out is the intentional trigger.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const result = await acquirePosition({ silent: true });
+      if (cancelled) return;
+      if (result.ok) {
+        setLocation({ lat: result.coords.lat, lng: result.coords.lng });
+        setLocationAccuracy(result.coords.accuracy);
+        const addr = await resolveAddress(result.coords.lat, result.coords.lng);
+        if (!cancelled) setAddress(addr);
+      } else {
+        setAddress("GPS permissions needed");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const refreshLocation = async () => {
-    if (typeof window === "undefined" || !navigator.geolocation) {
-      toast.error("Geolocation is not supported by your browser");
-      return;
-    }
     setLocationLoading(true);
-    try {
-      const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          maximumAge: 0,
-          timeout: 15000,
-        });
-      });
-      const lat = pos.coords.latitude;
-      const lng = pos.coords.longitude;
-      setLocation({ lat, lng });
-      setLocationAccuracy(pos.coords.accuracy);
-
-      if (navigator.onLine) {
-        try {
-          const response = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`,
-            { headers: { "Accept-Language": "en", "User-Agent": "BeOnTimePortal/1.0" } }
-          );
-          if (response.ok) {
-            const geoData = await response.json();
-            setAddress(geoData.display_name || `${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-          } else {
-            setAddress(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-          }
-        } catch {
-          setAddress(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-        }
-      } else {
-        setAddress(`${lat.toFixed(4)}, ${lng.toFixed(4)}`);
-      }
-    } catch {
-      toast.error("Failed to fetch location. Please make sure location permissions are enabled.");
+    const result = await acquirePosition(); // actively requests permission if needed
+    if (result.ok) {
+      setLocation({ lat: result.coords.lat, lng: result.coords.lng });
+      setLocationAccuracy(result.coords.accuracy);
+      setLocationFailReason(null);
+      const addr = await resolveAddress(result.coords.lat, result.coords.lng);
+      setAddress(addr);
+    } else {
+      setLocationFailReason(result.reason);
       setAddress("GPS permissions needed");
-    } finally {
-      setLocationLoading(false);
+      if (result.reason === "timeout") {
+        toast.error(`${result.message} Please try again.`);
+      } else {
+        // Permission denied / GPS off / unsupported — offer the guided fix.
+        setShowLocationHelp(true);
+      }
     }
+    setLocationLoading(false);
   };
 
   // Camera helpers for identity scanner modal
@@ -467,16 +458,8 @@ function UserDashboard() {
     }
   };
 
-  const handleOpenScanner = (type: "punch-in" | "punch-out") => {
-    // Office-based employees must have location. If GPS is blocked, show a
-    // clear instruction rather than letting them reach "Distance: Infinity".
-    if (profile?.branchId && !location) {
-      toast.error(
-        "Location access is blocked. Open browser Site Settings, allow Location, then refresh the page.",
-        { duration: 6000 }
-      );
-      return;
-    }
+  // Open the selfie scanner. Location must already be gated by the caller.
+  const openScanner = (type: "punch-in" | "punch-out") => {
     setScanType(type);
     setCapturedSelfie(null);
     setScanLoading(false);
@@ -485,36 +468,53 @@ function UserDashboard() {
     }, 150);
   };
 
+  // Entry point for Punch In / Punch Out. Office-based employees (with a branch)
+  // must have a GPS fix; if we don't have one yet we actively request it (native
+  // permission dialog / browser prompt) and, on failure, show the guided
+  // "enable location" help instead of dead-ending. WFH / branch-less employees
+  // skip the location gate entirely.
+  const beginPunch = async (type: "punch-in" | "punch-out") => {
+    if (!profile?.branchId || location) {
+      openScanner(type);
+      return;
+    }
+    setPendingPunch(type);
+    setLocationLoading(true);
+    const result = await acquirePosition(); // actively prompts
+    setLocationLoading(false);
+    if (result.ok) {
+      setLocation({ lat: result.coords.lat, lng: result.coords.lng });
+      setLocationAccuracy(result.coords.accuracy);
+      setLocationFailReason(null);
+      resolveAddress(result.coords.lat, result.coords.lng).then(setAddress);
+      setPendingPunch(null);
+      openScanner(type);
+    } else {
+      setLocationFailReason(result.reason);
+      if (result.reason === "timeout") {
+        toast.error(`${result.message} Please try again.`);
+      } else {
+        setShowLocationHelp(true);
+      }
+    }
+  };
+
   const getFreshLocation = async () => {
     let currentLocation = location;
     let currentAddress = address;
 
     if (!currentLocation || currentAddress === "Locating...") {
-      try {
-        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
-        });
-        currentLocation = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-
-        if (navigator.onLine) {
-          try {
-            const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${pos.coords.latitude}&lon=${pos.coords.longitude}`);
-            if (response.ok) {
-              const geoData = await response.json();
-              currentAddress = geoData.display_name || `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`;
-            } else {
-              currentAddress = `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`;
-            }
-          } catch {
-            currentAddress = `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`;
-          }
-        } else {
-          currentAddress = `${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`;
-        }
+      const result = await acquirePosition();
+      if (result.ok) {
+        currentLocation = { lat: result.coords.lat, lng: result.coords.lng };
+        currentAddress = await resolveAddress(result.coords.lat, result.coords.lng);
         setLocation(currentLocation);
+        setLocationAccuracy(result.coords.accuracy);
         setAddress(currentAddress);
-      } catch (e) {
+        setLocationFailReason(null);
+      } else {
         currentAddress = "Location Capturing Bypassed";
+        setLocationFailReason(result.reason);
       }
     }
     return { currentLocation, currentAddress };
@@ -896,11 +896,16 @@ function UserDashboard() {
               {/* Location indicator */}
               <div className="flex items-center justify-center gap-1.5 text-[9px] pt-0.5">
                 <MapPin className={`h-3 w-3 shrink-0 ${!location ? "text-red-400" : "text-white/80"}`} />
-                <span className={`font-medium truncate ${!location ? "text-red-400" : "text-white/60"}`}>
-                  {!location
-                    ? "Location blocked — enable GPS in Site Settings"
-                    : address}
-                </span>
+                {!location ? (
+                  <button
+                    onClick={() => setShowLocationHelp(true)}
+                    className="font-semibold text-red-400 underline underline-offset-2 truncate"
+                  >
+                    Location blocked — tap to enable GPS
+                  </button>
+                ) : (
+                  <span className="font-medium truncate text-white/60">{address}</span>
+                )}
               </div>
             </div>
           </div>
@@ -930,7 +935,7 @@ function UserDashboard() {
                   // Punched In but hasn't started lunch: Can start lunch OR punch out
                   <div className="grid grid-cols-2 gap-3">
                     <Button
-                      onClick={() => handleOpenScanner("punch-out")}
+                      onClick={() => beginPunch("punch-out")}
                       className="h-11 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-700 hover:to-red-600 text-white font-semibold rounded-[16px] shadow-xs border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all text-xs tracking-wider"
                     >
                       <Fingerprint className="h-4 w-4 text-white" />
@@ -970,7 +975,7 @@ function UserDashboard() {
                 ) : (
                   // Lunch completed: Only Punch Out button is available
                   <Button
-                    onClick={() => handleOpenScanner("punch-out")}
+                    onClick={() => beginPunch("punch-out")}
                     className="w-full h-11 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-700 hover:to-red-600 text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-xs tracking-wider group"
                   >
                     <Fingerprint className="h-4.5 w-4.5 text-white group-hover:scale-110 transition-transform duration-300" />
@@ -1375,7 +1380,14 @@ function UserDashboard() {
                   <div className="flex flex-col items-center justify-center text-center p-4 text-slate-400 gap-2">
                     <MapPin className="h-8 w-8 text-rose-500 animate-bounce" />
                     <p className="text-xs font-semibold text-rose-500">GPS Permission or Coordinates Required</p>
-                    <p className="text-[10px] text-slate-500">Enable location access in browser settings</p>
+                    <p className="text-[10px] text-slate-500">Enable location access to continue</p>
+                    <Button
+                      size="sm"
+                      onClick={() => setShowLocationHelp(true)}
+                      className="mt-1 h-7 px-3 text-[10px] font-bold bg-rose-500 hover:bg-rose-600 text-white rounded-lg flex items-center gap-1"
+                    >
+                      <Settings className="h-3 w-3" /> Enable Location
+                    </Button>
                   </div>
                 )}
               </div>
@@ -1412,22 +1424,6 @@ function UserDashboard() {
                 )}
               </div>
 
-              {/* Live Tracking Consent toggle switch */}
-              <div className="flex items-center justify-between p-3 bg-[#501537]/5 dark:bg-white/5 rounded-xl border border-[#501537]/10 dark:border-white/5">
-                <div className="flex flex-col text-left gap-0.5 max-w-[85%]">
-                  <span className="text-[9.5px] font-bold text-[#501537] dark:text-white uppercase tracking-wider">
-                    Enable Real-time Tracking
-                  </span>
-                  <span className="text-[9px] text-slate-500 dark:text-slate-400 leading-tight">
-                    Allows reporting your live position to the manager during this shift.
-                  </span>
-                </div>
-                <Switch
-                  checked={liveTrackingConsent}
-                  onCheckedChange={setLiveTrackingConsent}
-                />
-              </div>
-
               {/* Action buttons */}
               <div className="w-full flex gap-3 mt-2">
                 <button
@@ -1441,17 +1437,112 @@ function UserDashboard() {
                 <Button
                   onClick={() => {
                     if (profile?.branchId && !location) {
-                      toast.error("Location access is required to punch in at your office branch.");
+                      setShowLocationHelp(true);
                       return;
                     }
-                    localStorage.setItem(`live-tracking-allowed-${profile?._id}`, liveTrackingConsent ? "true" : "false");
                     setShowLocationVerification(false);
-                    handleOpenScanner("punch-in");
+                    openScanner("punch-in");
                   }}
                   className="flex-1 h-9 bg-gradient-to-r from-[#501537] to-[#7B2453] hover:from-[#6B1C4B] hover:to-[#912D64] text-white font-semibold rounded-xl shadow-xs border-none flex items-center justify-center cursor-pointer transition-all text-xs"
                 >
                   Confirm & Proceed
                 </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Location Access Help Dialog — device-aware steps + deep link to OS settings + retry */}
+      <AnimatePresence>
+        {showLocationHelp && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.93, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.93, y: 15 }}
+              className="bg-white dark:bg-slate-900 rounded-[28px] overflow-hidden max-w-md w-full shadow-2xl border border-slate-100 dark:border-white/5 relative p-5 flex flex-col gap-4"
+            >
+              {/* Header */}
+              <div className="w-full text-center">
+                <div className="mx-auto mb-2 h-12 w-12 rounded-2xl bg-rose-500/10 flex items-center justify-center">
+                  <MapPin className="h-6 w-6 text-rose-500" />
+                </div>
+                <h4 className="text-sm font-semibold text-slate-800 dark:text-white uppercase tracking-wider">
+                  {locationFailReason === "unavailable" ? "Turn On Location" : "Location Access Needed"}
+                </h4>
+                <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                  {locationFailReason === "unavailable"
+                    ? "Your device location (GPS) is switched off. Turn it on so we can verify you're at your branch."
+                    : "We couldn't access your location. Please allow location access to punch in and out."}
+                </p>
+              </div>
+
+              {/* Step-by-step instructions */}
+              <div className="bg-slate-50 dark:bg-slate-950/40 border border-slate-100 dark:border-white/5 p-3.5 rounded-xl text-left">
+                <ol className="space-y-2.5">
+                  {locationHelpSteps(getPlatform(), locationFailReason).map((step, i) => (
+                    <li key={i} className="flex gap-2.5 items-start">
+                      <span className="shrink-0 h-4 w-4 rounded-full bg-[#501537] dark:bg-[#8C2059] text-white text-[8px] font-bold flex items-center justify-center mt-0.5">
+                        {i + 1}
+                      </span>
+                      <span className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">{step}</span>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+
+              {/* Actions */}
+              <div className="w-full flex flex-col gap-2">
+                {getPlatform() !== "web" && (
+                  <Button
+                    onClick={async () => {
+                      const opened = await openLocationSettings(locationFailReason ?? undefined);
+                      if (!opened) {
+                        toast.error("Couldn't open settings automatically. Please open your device Settings manually.");
+                      }
+                    }}
+                    className="w-full h-10 bg-gradient-to-r from-[#501537] to-[#7B2453] hover:from-[#6B1C4B] hover:to-[#912D64] text-white font-semibold rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Settings className="h-4 w-4" />
+                    {locationFailReason === "unavailable" ? "Open Location Settings" : "Open App Settings"}
+                  </Button>
+                )}
+                <Button
+                  onClick={async () => {
+                    setLocationLoading(true);
+                    const result = await acquirePosition();
+                    setLocationLoading(false);
+                    if (result.ok) {
+                      setLocation({ lat: result.coords.lat, lng: result.coords.lng });
+                      setLocationAccuracy(result.coords.accuracy);
+                      setLocationFailReason(null);
+                      resolveAddress(result.coords.lat, result.coords.lng).then(setAddress);
+                      setShowLocationHelp(false);
+                      const resume = pendingPunch;
+                      setPendingPunch(null);
+                      if (resume) openScanner(resume);
+                    } else {
+                      setLocationFailReason(result.reason);
+                      toast.error(result.message);
+                    }
+                  }}
+                  disabled={locationLoading}
+                  variant="outline"
+                  className="w-full h-10 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <RefreshCw className={`h-4 w-4 ${locationLoading ? "animate-spin" : ""}`} />
+                  {locationLoading ? "Checking..." : "I've Enabled It — Retry"}
+                </Button>
+                <button
+                  onClick={() => {
+                    setShowLocationHelp(false);
+                    setPendingPunch(null);
+                  }}
+                  className="w-full py-1.5 text-center text-[11px] font-semibold text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                >
+                  Cancel
+                </button>
               </div>
             </motion.div>
           </div>

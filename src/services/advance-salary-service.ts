@@ -18,6 +18,7 @@ export interface AdvanceSalaryRequest {
   companyId: string;
   type: "advance-salary" | "loan";
   amount: number;
+  approvedAmount?: number;
   reason: string;
   notes?: string;
   status: "pending" | "approved" | "rejected" | "repaid";
@@ -80,10 +81,13 @@ export function useAdvanceSalaryService() {
     }
   });
 
-  // PATCH approve request
+  // PATCH approve request (optionally for less than the requested amount)
   const approveRequest = useMutation({
-    mutationFn: async (id: string) => {
-      const { data } = await apiClient.patch(`/advance-salary/${id}/approve`);
+    mutationFn: async ({ id, approvedAmount }: { id: string; approvedAmount?: number }) => {
+      const { data } = await apiClient.patch(
+        `/advance-salary/${id}/approve`,
+        approvedAmount !== undefined ? { approvedAmount } : {}
+      );
       return data;
     },
     onSuccess: (data) => {

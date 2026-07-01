@@ -25,6 +25,16 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { toast } from 'sonner';
 
 const RUPEE_FORMATTER = new Intl.NumberFormat('en-IN', {
   style: 'currency',
@@ -33,13 +43,17 @@ const RUPEE_FORMATTER = new Intl.NumberFormat('en-IN', {
 });
 
 export function AdvanceSalaryPage() {
-  const { user } = useAuth();
+  const { session } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'repaid'>('all');
   const [typeFilter, setTypeFilter] = useState<'all' | 'advance-salary' | 'loan'>('all');
   const [newRequestOpen, setNewRequestOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+  // Approve dialog — lets the admin approve the full amount or a lesser amount.
+  const [approveDialogOpen, setApproveDialogOpen] = useState(false);
+  const [approveTarget, setApproveTarget] = useState<AdvanceSalaryRequest | null>(null);
+  const [approveAmountInput, setApproveAmountInput] = useState('');
 
   const {
     requests,
@@ -118,9 +132,27 @@ export function AdvanceSalaryPage() {
     }
   };
 
-  const handleApprove = async (id: string) => {
+  const openApproveDialog = (request: AdvanceSalaryRequest) => {
+    setApproveTarget(request);
+    setApproveAmountInput(String(request.amount));
+    setApproveDialogOpen(true);
+  };
+
+  const confirmApprove = async () => {
+    if (!approveTarget) return;
+    const amt = Number(approveAmountInput);
+    if (!Number.isFinite(amt) || amt < 1) {
+      toast.error('Enter a valid approved amount');
+      return;
+    }
+    if (amt > approveTarget.amount) {
+      toast.error('Approved amount cannot exceed the requested amount');
+      return;
+    }
     try {
-      await approveRequest(id);
+      await approveRequest({ id: approveTarget._id, approvedAmount: amt });
+      setApproveDialogOpen(false);
+      setApproveTarget(null);
     } catch (error) {
       console.error('Error approving request:', error);
     }
@@ -142,7 +174,7 @@ export function AdvanceSalaryPage() {
     }
   };
 
-  const isAdminRole = user?.role === 'admin' || user?.role === 'superadmin';
+  const isAdminRole = session?.role === 'admin' || session?.role === 'superadmin';
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-4 md:p-8">
@@ -154,7 +186,7 @@ export function AdvanceSalaryPage() {
             </h1>
             <p className="text-slate-600 dark:text-slate-400">Manage advance salary and loan requests</p>
           </div>
-          {user?.role === 'employee' && (
+          {session?.role === 'employee' && (
             <Button
               onClick={() => setNewRequestOpen(true)}
               className="bg-primary hover:bg-primary/90 text-white font-bold rounded-lg"
@@ -285,7 +317,7 @@ export function AdvanceSalaryPage() {
           <Card>
             <CardContent className="p-12 text-center">
               <p className="text-muted-foreground mb-4">No requests found</p>
-              {user?.role === 'employee' && (
+              {session?.role === 'employee' && (
                 <Button
                   onClick={() => setNewRequestOpen(true)}
                   variant="outline"
@@ -340,6 +372,13 @@ export function AdvanceSalaryPage() {
                         <p className="text-2xl font-bold text-slate-900 dark:text-white">
                           {RUPEE_FORMATTER.format(request.amount)}
                         </p>
+                        {request.status === 'approved' &&
+                          request.approvedAmount != null &&
+                          request.approvedAmount !== request.amount && (
+                            <p className="text-xs font-semibold text-green-600 dark:text-green-400 mt-0.5">
+                              Approved: {RUPEE_FORMATTER.format(request.approvedAmount)}
+                            </p>
+                          )}
                         <Badge variant={getStatusBadgeVariant(request.status)} className="mt-2 rounded-md">
                           <span className="flex items-center gap-1">
                             {getStatusIcon(request.status)}
@@ -357,7 +396,7 @@ export function AdvanceSalaryPage() {
                                 size="sm"
                                 variant="outline"
                                 className="rounded-lg border-green-200 text-green-700 hover:bg-green-50 dark:border-green-800/40 dark:text-green-400 dark:hover:bg-green-950/30"
-                                onClick={() => handleApprove(request._id)}
+                                onClick={() => openApproveDialog(request)}
                                 disabled={isApproving}
                               >
                                 {isApproving ? (
@@ -415,6 +454,64 @@ export function AdvanceSalaryPage() {
         onSubmit={createRequest}
         isLoading={isCreating}
       />
+
+      {/* Approve Dialog — approve full or a lesser amount */}
+      <Dialog open={approveDialogOpen} onOpenChange={setApproveDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Approve Request</DialogTitle>
+            <DialogDescription>
+              {approveTarget
+                ? `${approveTarget.employeeId.name} requested ${RUPEE_FORMATTER.format(approveTarget.amount)}. Approve the full amount or enter a lower amount.`
+                : ''}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-2">
+            <Label htmlFor="approve-amount" className="text-sm font-semibold">
+              Approved amount (₹)
+            </Label>
+            <Input
+              id="approve-amount"
+              type="number"
+              min={1}
+              max={approveTarget?.amount}
+              value={approveAmountInput}
+              onChange={(e) => setApproveAmountInput(e.target.value)}
+              className="h-10 rounded-lg"
+            />
+            {approveTarget && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {[100, 75, 50].map((pct) => (
+                  <button
+                    key={pct}
+                    type="button"
+                    onClick={() =>
+                      setApproveAmountInput(String(Math.round((approveTarget.amount * pct) / 100)))
+                    }
+                    className="px-2.5 py-1 text-xs font-semibold rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
+                  >
+                    {pct === 100 ? 'Full' : `${pct}%`}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" className="rounded-lg" onClick={() => setApproveDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              className="rounded-lg bg-green-600 hover:bg-green-700 text-white"
+              onClick={confirmApprove}
+              disabled={isApproving}
+            >
+              {isApproving ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Approve'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>

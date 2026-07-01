@@ -16,6 +16,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { useLayoutSettings } from "@/hooks/use-layout-settings";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
@@ -160,8 +161,15 @@ function TrackingMap({
 }
 
 function TrackingPage() {
-  const { employees, isLoading: loadingEmployees } = useEmployeeService({ limit: 1000, status: "active" });
+  const { employees, isLoading: loadingEmployees, updateEmployee } = useEmployeeService({ limit: 1000, status: "active" });
   const { locations: restLocations, isLoading: loadingLocations } = useTrackingService();
+
+  // Admin toggles per-employee live tracking. updateEmployee persists the flag
+  // and refetches the list, so the switch reflects the saved state. Employees
+  // are only tracked while punched in AND when this is enabled.
+  const toggleTracking = (e: any) => {
+    updateEmployee({ id: e._id, data: { trackingEnabled: !e.trackingEnabled } }).catch(() => {});
+  };
 
   // Fetch today's attendance in two formats — some backends need date, some need none
   const today = new Date().toISOString().split("T")[0];
@@ -340,12 +348,14 @@ function TrackingPage() {
                   const isOnline = att && att.punchIn && !att.punchOut;
                   const isOnLunch = att && att.lunchInTime && !att.lunchOutTime;
                   return (
-                    <motion.button
+                    <motion.div
                       key={e._id}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setSelectedId(e._id)}
                       whileHover={{ x: 2 }}
                       className={cn(
-                        "w-full text-left flex items-center gap-3 p-2.5 rounded-lg border transition-all",
+                        "w-full text-left flex items-center gap-3 p-2.5 rounded-lg border transition-all cursor-pointer",
                         selectedId === e._id
                           ? "border-primary/30 bg-primary/5 shadow-sm"
                           : "border-border/50 hover:bg-muted/30 hover:border-border",
@@ -379,7 +389,14 @@ function TrackingPage() {
                       >
                         {isOnline ? (isOnLunch ? "On Lunch" : "Online") : "Away"}
                       </Badge>
-                    </motion.button>
+                      <span
+                        onClick={(ev) => ev.stopPropagation()}
+                        className="shrink-0 flex items-center"
+                        title={e.trackingEnabled ? "Live tracking ON" : "Live tracking OFF"}
+                      >
+                        <Switch checked={!!e.trackingEnabled} onCheckedChange={() => toggleTracking(e)} />
+                      </span>
+                    </motion.div>
                   );
                 })}
               </div>
@@ -475,7 +492,7 @@ function TrackingPage() {
             exit={{ opacity: 0, y: -10 }}
           >
             <DataTable
-              headers={["Employee", "Status", "Connectivity", "Last Location", "Last Updated"]}
+              headers={["Employee", "Tracking", "Status", "Connectivity", "Last Location", "Last Updated"]}
               isEmpty={filtered.length === 0}
             >
               {filtered.map((e) => {
@@ -497,6 +514,11 @@ function TrackingPage() {
                           <span className="text-[11px] text-muted-foreground">{e.phone}</span>
                         </div>
                       </div>
+                    </DataTableCell>
+                    <DataTableCell>
+                      <span title={e.trackingEnabled ? "Live tracking ON" : "Live tracking OFF"}>
+                        <Switch checked={!!e.trackingEnabled} onCheckedChange={() => toggleTracking(e)} />
+                      </span>
                     </DataTableCell>
                     <DataTableCell>
                       <Badge

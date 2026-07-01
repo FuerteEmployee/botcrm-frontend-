@@ -49,6 +49,7 @@ export interface Employee {
   joiningDate?: string;
   employmentType?: 'monthly' | 'daily' | 'hourly';
   leadDeletionPermission?: boolean;
+  trackingEnabled?: boolean;
   address?: string;
   bloodGroup?: string;
   contactPersonName?: string;

@@ -82,6 +82,12 @@ function UserLayout() {
     { to: "/user/profile", label: "Profile", icon: User },
   ];
 
+  // Profile is reached via the avatar in the top bar on mobile, so it is
+  // excluded from the bottom bar — this keeps the bar uncluttered and lets the
+  // remaining items distribute evenly on small screens.
+  const bottomNavItems = navItems.filter((item) => item.to !== "/user/profile");
+  const isProfileActive = location.pathname === "/user/profile";
+
   const initials = (session?.name ?? "User").split(" ").map(s => s[0]).slice(0, 2).join("");
 
   return (
@@ -179,7 +185,21 @@ function UserLayout() {
             </div>
           </div>
 
-          <div className="flex items-center">
+          <div className="flex items-center gap-2">
+            {/* Profile avatar — replaces the Profile item that used to live in the bottom bar */}
+            <Link
+              to="/user/profile"
+              aria-label="Profile"
+              className={`rounded-full transition-all active:scale-95 ${
+                isProfileActive ? "ring-2 ring-[#501537] dark:ring-white" : "ring-2 ring-[#501537]/10 dark:ring-white/10"
+              }`}
+            >
+              <Avatar className="h-8 w-8">
+                <AvatarFallback className="bg-gradient-to-br from-[#4A0E2E] to-[#7B2453] text-white text-[11px] font-bold uppercase">
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+            </Link>
             <button
               onClick={handleLogout}
               className="p-1.5 rounded-lg text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all cursor-pointer"
@@ -224,8 +244,8 @@ function UserLayout() {
       </div>
 
       {/* ─── FLOATING GLASS MOBILE BOTTOM BAR NAVIGATION ────────────────────── */}
-      <nav className="md:hidden fixed bottom-4 left-4 right-4 z-40 bg-white/70 dark:bg-slate-900/70 backdrop-blur-lg border border-white/20 dark:border-white/5 px-2 py-1.5 rounded-[24px] flex justify-around shadow-[0_12px_40px_rgba(80,21,55,0.08)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.5)] shrink-0">
-        {navItems.map((item) => {
+      <nav className="md:hidden fixed bottom-4 left-3 right-3 z-40 bg-white/70 dark:bg-slate-900/70 backdrop-blur-lg border border-white/20 dark:border-white/5 px-1.5 py-1.5 rounded-[24px] flex items-center justify-between gap-0.5 shadow-[0_12px_40px_rgba(80,21,55,0.08)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.5)] shrink-0">
+        {bottomNavItems.map((item) => {
           const isActive = location.pathname === item.to || (item.to === "/user" && location.pathname === "/user/");
           const IconComponent = item.icon;
 
@@ -233,21 +253,21 @@ function UserLayout() {
             <Link
               key={item.to}
               to={item.to}
-              className={`flex flex-col items-center gap-0.5 px-3.5 py-1.5 rounded-xl transition-all duration-300 relative shrink-0 ${
-                isActive 
-                  ? "text-[#501537] dark:text-white font-bold scale-105" 
-                  : "text-slate-400 hover:text-slate-655 dark:text-slate-500 dark:hover:text-slate-300"
+              className={`flex flex-1 min-w-0 flex-col items-center gap-0.5 px-0.5 py-1.5 rounded-xl transition-all duration-300 relative ${
+                isActive
+                  ? "text-[#501537] dark:text-white font-bold"
+                  : "text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
               }`}
             >
               {isActive && (
-                <motion.div 
+                <motion.div
                   layoutId="mobileNavIndicator"
                   className="absolute inset-0 bg-[#501537]/10 dark:bg-white/10 rounded-xl"
                   transition={{ type: "spring", stiffness: 380, damping: 30 }}
                 />
               )}
-              <IconComponent className={`h-[18px] w-[18px] relative z-10 ${isActive ? "stroke-[2.5px] text-[#501537] dark:text-white" : "stroke-[2px]"}`} />
-              <span className="text-[8.5px] tracking-wider font-semibold uppercase leading-none mt-0.5 relative z-10">{item.label}</span>
+              <IconComponent className={`h-[18px] w-[18px] shrink-0 relative z-10 ${isActive ? "stroke-[2.5px] text-[#501537] dark:text-white" : "stroke-[2px]"}`} />
+              <span className="w-full text-center text-[8px] tracking-tight font-semibold uppercase leading-none mt-0.5 relative z-10 truncate px-0.5">{item.label}</span>
             </Link>
           );
         })}
