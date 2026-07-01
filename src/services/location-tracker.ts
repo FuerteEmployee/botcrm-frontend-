@@ -1,5 +1,5 @@
 import { apiClient } from "@/lib/api-client";
-import { getSocket } from "@/lib/socket-client";
+import { canUseSocket, getSocket } from "@/lib/socket-client";
 
 const SEND_INTERVAL_MS = 15000;
 
@@ -80,11 +80,9 @@ export class LocationTracker {
     };
 
     // Send via Socket.IO (real-time channel the tracking server listens on)
-    try {
+    if (canUseSocket()) {
       const socket = getSocket();
-      socket.emit("location:update", payload);
-    } catch {
-      // ignore socket errors
+      socket?.emit("location:update", payload);
     }
 
     // Also send via REST — covers: (a) socket not connected yet,

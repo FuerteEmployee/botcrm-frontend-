@@ -1,15 +1,18 @@
 import { io, Socket } from "socket.io-client";
 
-// Derive socket URL from API URL if VITE_SOCKET_URL is not explicitly set.
-// This way, if the HRMS backend itself has Socket.IO (same server), it just works.
-const apiBase = import.meta.env.VITE_API_URL || "https://gray-crab-756474.hostingersite.com/api";
-const derivedSocketUrl = apiBase.replace(/\/api\/?$/, ""); // strip /api suffix
-const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || derivedSocketUrl;
+// Socket.IO is only enabled when an explicit socket endpoint is configured.
+// Do not derive a socket URL from the API host unless the backend supports Socket.IO.
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL || "";
+const isSocketEnabled = Boolean(SOCKET_URL);
 
 let socket: Socket | null = null;
 
-export function getSocket(): Socket {
-  if (!socket) {
+export function canUseSocket(): boolean {
+  return isSocketEnabled;
+}
+
+export function getSocket(): Socket | null {
+  if (!socket && isSocketEnabled) {
     socket = io(SOCKET_URL, {
       transports: ["websocket", "polling"],
       autoConnect: true,

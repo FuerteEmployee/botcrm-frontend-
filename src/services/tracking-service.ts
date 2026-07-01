@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { apiClient } from "@/lib/api-client";
-import { getSocket } from "@/lib/socket-client";
+import { canUseSocket, getSocket } from "@/lib/socket-client";
 
 export interface Location {
   _id: string;
@@ -64,25 +64,24 @@ export function useTrackingService() {
       .finally(() => setIsLoading(false));
 
     // 2. Socket.IO — real-time channel the server uses
-    const socket = getSocket();
-
+    const socket = canUseSocket() ? getSocket() : null;
     const joinAdmin = () => {
-      socket.emit("join:admin");
+      socket?.emit("join:admin");
     };
 
     // Join admin room immediately (and on every reconnect)
     joinAdmin();
-    socket.on("connect", joinAdmin);
+    socket?.on("connect", joinAdmin);
 
     // Full snapshot: server sends this right after 'join:admin'
-    socket.on("location:snapshot", (snapshot: Record<string, any>) => {
+    socket?.on("location:snapshot", (snapshot: Record<string, any>) => {
       const locs = snapshotToLocations(snapshot);
       setLocations(locs);
       setIsLoading(false);
     });
 
     // Single employee update
-    socket.on("location:broadcast", (data: any) => {
+    socket?.on("location:broadcast", (data: any) => {
       const { employeeId, lat, lng, latitude, longitude, accuracy, timestamp } = data;
       const resolvedLat = lat ?? latitude ?? 0;
       const resolvedLng = lng ?? longitude ?? 0;
@@ -104,7 +103,7 @@ export function useTrackingService() {
     });
 
     // Employee went offline — remove from map
-    socket.on("employee:offline", ({ employeeId }: { employeeId: string }) => {
+    socket?.on("employee:offline", ({ employeeId }: { employeeId: string }) => {
       setLocations((prev) => prev.filter((l) => l.employeeId !== employeeId));
     });
 
@@ -120,10 +119,10 @@ export function useTrackingService() {
     }, 30000);
 
     return () => {
-      socket.off("connect", joinAdmin);
-      socket.off("location:snapshot");
-      socket.off("location:broadcast");
-      socket.off("employee:offline");
+      socket?.off("connect", joinAdmin);
+      socket?.off("location:snapshot");
+      socket?.off("location:broadcast");
+      socket?.off("employee:offline");
       clearInterval(pollInterval);
     };
   }, []);
