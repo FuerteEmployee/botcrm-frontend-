@@ -16,6 +16,7 @@ interface GridCardProps {
   metaLeft?: {
     icon: any;
     label: string;
+    onClick?: () => void;
   };
   metaRight?: {
     icon: any;
@@ -118,10 +119,21 @@ export function GridCard({
         {(metaLeft || metaRight) && (
           <div className="pt-3 border-t border-border/40 flex items-center justify-between mt-auto gap-2">
             {metaLeft && (
-              <div className="flex items-center gap-1.5 text-[11px] font-bold text-primary/80 bg-primary/5 px-2 py-0.5 rounded-md truncate max-w-[60%]">
-                <metaLeft.icon className="h-3.5 w-3.5 shrink-0" /> 
-                <span className="truncate">{metaLeft.label}</span>
-              </div>
+              metaLeft.onClick ? (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); metaLeft.onClick?.(); }}
+                  className="flex items-center gap-1.5 text-[11px] font-bold text-primary/80 bg-primary/5 px-2 py-0.5 rounded-md truncate max-w-[60%] cursor-pointer hover:bg-primary/15 hover:underline transition-colors"
+                >
+                  <metaLeft.icon className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{metaLeft.label}</span>
+                </button>
+              ) : (
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-primary/80 bg-primary/5 px-2 py-0.5 rounded-md truncate max-w-[60%]">
+                  <metaLeft.icon className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{metaLeft.label}</span>
+                </div>
+              )
             )}
             {metaRight && (
               <span className="text-[11px] text-muted-foreground/60 flex items-center gap-1 shrink-0">

@@ -74,14 +74,23 @@ function AttendancePage() {
     status: "present" as any
   });
 
+  const [dateFilter, setDateFilter] = useState<string>("");
+
+  // Punched in but not yet punched out — shown as "On Duty" instead of the
+  // backend's raw status (which is assigned at punch-in and doesn't reflect
+  // whether the shift is still in progress).
+  const getDisplayStatus = (t: AttendanceRecord) => (t.punchIn && !t.punchOut ? "on-duty" : t.status);
+
   const filtered = useMemo(() => {
     return list.filter((t) => {
       const name = t.employeeId?.name || "";
-      const matchesTab = tab === "all" || t.status === tab;
+      const displayStatus = getDisplayStatus(t);
+      const matchesTab = tab === "all" || displayStatus === tab || t.status === tab;
       const matchesSearch = !search || name.toLowerCase().includes(search.toLowerCase());
-      return matchesTab && matchesSearch;
+      const matchesDate = !dateFilter || t.date?.slice(0, 10) === dateFilter;
+      return matchesTab && matchesSearch && matchesDate;
     });
-  }, [list, tab, search]);
+  }, [list, tab, search, dateFilter]);
 
   const saveRemark = async () => {
     if (!remarkOpenId) return;
@@ -147,17 +156,37 @@ function AttendancePage() {
 
           <Select value={tab} onValueChange={setTab}>
             <SelectTrigger className="w-full md:w-[130px] h-10 border border-primary/20 bg-primary/5 text-primary hover:bg-primary/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
-              <div className={cn("h-2 w-2 rounded-full", tab === 'present' ? "bg-success" : tab === 'late' ? "bg-warning" : "bg-primary")} />
+              <div className={cn("h-2 w-2 rounded-full", tab === 'present' ? "bg-success" : tab === 'late' ? "bg-warning" : tab === 'on-duty' ? "bg-blue-500" : "bg-primary")} />
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent className="rounded-xl border-border/60">
               <SelectItem value="all">All Logs</SelectItem>
+              <SelectItem value="on-duty">On Duty</SelectItem>
               <SelectItem value="present">Present</SelectItem>
               <SelectItem value="late">Late</SelectItem>
               <SelectItem value="absent">Absent</SelectItem>
               <SelectItem value="half-day">Half Day</SelectItem>
             </SelectContent>
           </Select>
+
+          <FormInput
+            type="date"
+            icon={CalendarDays}
+            className="h-10 w-full md:w-[170px] shadow-none"
+            value={dateFilter}
+            onChange={(e) => setDateFilter(e.target.value)}
+          />
+          {dateFilter && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setDateFilter("")}
+              className="h-10 px-3 rounded-xl text-[12px] text-muted-foreground hover:text-foreground"
+            >
+              Clear date
+            </Button>
+          )}
         </div>
 
         <FormInput
@@ -201,11 +230,12 @@ function AttendancePage() {
                     variant="outline"
                     className={cn(
                       "capitalize text-[10px] font-bold px-2 py-0 border-transparent rounded-full",
-                      t.status === "present" ? "bg-success/10 text-success" :
-                        t.status === "late" ? "bg-warning/15 text-warning-foreground" :
-                          "bg-destructive/10 text-destructive"
+                      getDisplayStatus(t) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
+                        t.status === "present" ? "bg-success/10 text-success" :
+                          t.status === "late" ? "bg-warning/15 text-warning-foreground" :
+                            "bg-destructive/10 text-destructive"
                     )}
-                  >{t.status}</Badge>
+                  >{getDisplayStatus(t) === "on-duty" ? "On Duty" : t.status}</Badge>
                 }
                 actions={
                   canEdit ? (
@@ -337,11 +367,12 @@ function AttendancePage() {
                       variant="outline"
                       className={cn(
                         "capitalize text-[10px] font-bold px-2 py-0.5 border-transparent",
-                        t.status === "present" ? "bg-success/10 text-success" :
-                          t.status === "late" ? "bg-warning/15 text-warning-foreground" :
-                            "bg-destructive/10 text-destructive"
+                        getDisplayStatus(t) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
+                          t.status === "present" ? "bg-success/10 text-success" :
+                            t.status === "late" ? "bg-warning/15 text-warning-foreground" :
+                              "bg-destructive/10 text-destructive"
                       )}
-                    >{t.status}</Badge>
+                    >{getDisplayStatus(t) === "on-duty" ? "On Duty" : t.status}</Badge>
                   </DataTableCell>
                   <DataTableCell isLast>
                     <div className="flex justify-end items-center gap-1">

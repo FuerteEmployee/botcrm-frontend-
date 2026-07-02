@@ -2,6 +2,21 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
 
+// Different endpoints on this backend don't all shape validation errors the
+// same way — some use `message`, some `error`, some an `errors[]` array.
+// Try each so the user actually sees why a request was rejected instead of
+// a generic fallback.
+function extractErrorMessage(error: any, fallback: string): string {
+  const data = error?.response?.data;
+  if (!data) return fallback;
+  if (typeof data.message === "string" && data.message) return data.message;
+  if (typeof data.error === "string" && data.error) return data.error;
+  if (Array.isArray(data.errors) && data.errors.length) {
+    return data.errors.map((e: any) => (typeof e === "string" ? e : e.msg || e.message)).filter(Boolean).join(", ") || fallback;
+  }
+  return fallback;
+}
+
 export interface WeeklyHoliday {
   day: 'Monday' | 'Tuesday' | 'Wednesday' | 'Thursday' | 'Friday' | 'Saturday' | 'Sunday';
   weeks: number[]; // [] = all, [1,3] = 1st & 3rd
@@ -136,7 +151,8 @@ export function useEmployeeService(params: EmployeeParams = {}) {
       toast.success("Employee created successfully");
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || "Failed to create employee");
+      console.error("Create employee failed:", error.response?.data ?? error);
+      toast.error(extractErrorMessage(error, "Failed to create employee"));
     },
   });
 
@@ -150,7 +166,8 @@ export function useEmployeeService(params: EmployeeParams = {}) {
       toast.success("Employee updated successfully");
     },
     onError: (error: any) => {
-      toast.error(error.response?.data?.message || "Failed to update employee");
+      console.error("Update employee failed:", error.response?.data ?? error);
+      toast.error(extractErrorMessage(error, "Failed to update employee"));
     },
   });
 

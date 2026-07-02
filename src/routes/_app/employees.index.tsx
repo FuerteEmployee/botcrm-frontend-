@@ -1,5 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState, useEffect } from "react";
+import { z } from "zod";
 import { Plus, Search, Pencil, Trash2, Eye, Filter, LayoutGrid, List, MoreVertical, MoreHorizontal, Phone, Mail, MapPin, Building2, UserCircle2, Calendar, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/shared/page-header";
@@ -36,7 +37,12 @@ import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { useLayoutSettings } from "@/hooks/use-layout-settings";
 import { usePermission } from "@/hooks/use-permission";
 
+const employeesSearchSchema = z.object({
+  departmentId: z.string().optional(),
+});
+
 export const Route = createFileRoute("/_app/employees/")({
+  validateSearch: (search) => employeesSearchSchema.parse(search),
   component: EmployeesPage,
 });
 
@@ -44,10 +50,17 @@ const PAGE_SIZE = 10;
 
 function EmployeesPage() {
   const navigate = useNavigate();
+  const { departmentId } = Route.useSearch();
   const [hasMounted, setHasMounted] = useState(false);
   const [search, setSearch] = useState("");
-  const [deptFilter, setDeptFilter] = useState<string>("all");
+  const [deptFilter, setDeptFilter] = useState<string>(departmentId || "all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
+
+  useEffect(() => {
+    if (departmentId) {
+      setDeptFilter(departmentId);
+    }
+  }, [departmentId]);
   const [page, setPage] = useState(1);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();

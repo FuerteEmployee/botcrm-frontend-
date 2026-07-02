@@ -365,8 +365,11 @@ function AddEmployeePage() {
       // Submission succeeded — clear the saved draft.
       try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
       navigate({ to: "/employees" });
-    } catch (error) {
-      console.error(error);
+    } catch (error: any) {
+      // The actual validation reason (shown to the user via the toast in
+      // useEmployeeService) lives in the response body, not the AxiosError
+      // wrapper — log that directly so it's visible without expanding the object.
+      console.error("Employee save failed:", error?.response?.data ?? error);
     } finally {
       setIsSubmitting(false);
     }

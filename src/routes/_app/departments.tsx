@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, useMemo, useEffect } from "react";
 import { Plus, Pencil, Trash2, Building2, Search, LayoutGrid, List, Users, Crown, Calendar, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -32,6 +32,7 @@ export const Route = createFileRoute("/_app/departments")({
 });
 
 function DepartmentsPage() {
+  const navigate = useNavigate();
   const [hasMounted, setHasMounted] = useState(false);
   const { departments: list, isLoading, createDepartment, updateDepartment, deleteDepartment } = useDepartmentService();
   const [open, setOpen] = useState(false);
@@ -162,7 +163,11 @@ function DepartmentsPage() {
                 delay={i * 0.04}
                 onEdit={canEdit ? () => openEdit(d) : undefined}
                 onDelete={canDelete ? () => setDeleteId(d._id) : undefined}
-                metaLeft={{ icon: Users, label: `${d.employees || 0} staff` }}
+                metaLeft={{
+                  icon: Users,
+                  label: `${d.employees || 0} staff`,
+                  onClick: () => navigate({ to: "/employees", search: { departmentId: d._id } }),
+                }}
                 metaRight={{ icon: Calendar, label: new Date(d.createdAt).toLocaleDateString() }}
               />
             ))}
@@ -186,7 +191,13 @@ function DepartmentsPage() {
                     <span className="text-[14px] font-medium">{d.name}</span>
                   </DataTableCell>
                   <DataTableCell>
-                    <Badge variant="secondary" className="text-[11px] font-medium px-2 py-0.5">{d.employees}</Badge>
+                    <button
+                      type="button"
+                      onClick={() => navigate({ to: "/employees", search: { departmentId: d._id } })}
+                      className="cursor-pointer"
+                    >
+                      <Badge variant="secondary" className="text-[11px] font-medium px-2 py-0.5 hover:bg-primary/15 hover:text-primary transition-colors">{d.employees}</Badge>
+                    </button>
                   </DataTableCell>
                   <DataTableCell className="text-[14px] text-muted-foreground">
                     {new Date(d.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, ' - ')}

@@ -145,10 +145,14 @@ function UserHistory() {
     return new Date(isoString).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   };
 
+  // For a shift still in progress (punched in, not yet out) this ticks live off
+  // the `time` clock already updated every second; completed shifts use the
+  // stored punch-out timestamp so the value stays stable after a refresh.
   const formatDuration = (record: AttendanceLog) => {
     if (!record.punchIn) return "00h 00m";
-    if (!record.punchOut) return "00h 00m";
-    const diff = new Date(record.punchOut).getTime() - new Date(record.punchIn).getTime();
+    const endTime = record.punchOut ? new Date(record.punchOut) : time;
+    const diff = endTime.getTime() - new Date(record.punchIn).getTime();
+    if (diff <= 0) return "00h 00m";
     const hrs = Math.floor(diff / (1000 * 60 * 60));
     const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
     return `${hrs.toString().padStart(2, '0')}h ${mins.toString().padStart(2, '0')}m`;

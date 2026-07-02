@@ -224,6 +224,7 @@ function UserDashboard() {
   const [isScanning, setIsScanning] = useState(false);
   const [capturedSelfie, setCapturedSelfie] = useState<string | null>(null);
   const [scanLoading, setScanLoading] = useState(false);
+  const [scanResult, setScanResult] = useState<{ type: "punch-in" | "punch-out"; workHoursLabel?: string } | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   // Selected Month/Year for statistics navigation (Synchronized via localStorage)
@@ -237,7 +238,7 @@ function UserDashboard() {
   }, [selectedDate]);
 
   // 1. Fetch User Profile
-  const { data: profile, isLoading: isProfileLoading } = useQuery<UserProfile>({
+  const { data: profile, isLoading: isProfileLoading, refetch: refetchProfile } = useQuery<UserProfile>({
     queryKey: ["user-profile"],
     queryFn: async () => {
       const { data } = await apiClient.get("/users/profile");
@@ -404,6 +405,46 @@ function UserDashboard() {
     setIsScanning(false);
   };
 
+  // A punch request can error on the client (dropped connection, a 500 while
+  // the response was serialized, etc.) even though the backend already wrote
+  // the record. Refetch the profile before assuming it truly failed, so we
+  // don't reopen the camera for a retry that the backend will then reject
+  // with 400 "already punched in/out".
+  // Messages that are clearly a raw JS runtime crash leaking through (backend
+  // bug), rather than a real human-readable validation message — never show
+  // these to the user as-is.
+  const looksLikeRawCrash = (msg?: string) =>
+    !!msg && /is not defined|cannot read propert|undefined is not a function|typeerror|referenceerror/i.test(msg);
+
+  const handlePunchError = async (type: "punch-in" | "punch-out", err?: any) => {
+    setScanLoading(false);
+    const fresh = await refetchProfile();
+    const freshLog = fresh.data?.todayAttendance;
+    const alreadyDone = type === "punch-in" ? !!freshLog?.punchIn : !!freshLog?.punchOut;
+    if (alreadyDone) {
+      // The backend recorded the punch even though the request errored — show
+      // the same success confirmation the happy path would, no error toast.
+      setScanResult({
+        type,
+        workHoursLabel: type === "punch-out" && freshLog?.punchIn && freshLog?.punchOut
+          ? formatWorkedDuration(freshLog.punchIn, freshLog.punchOut)
+          : undefined,
+      });
+      setTimeout(() => {
+        setScanType(null);
+        setCapturedSelfie(null);
+        setScanResult(null);
+      }, 1800);
+    } else {
+      const rawMsg = err?.response?.data?.message as string | undefined;
+      const fallback = `${type === "punch-in" ? "Punch In" : "Punch Out"} failed. Please try again.`;
+      toast.error(rawMsg && !looksLikeRawCrash(rawMsg) ? rawMsg : fallback);
+      setTimeout(() => {
+        startScannerCamera();
+      }, 200);
+    }
+  };
+
   const captureScannerPhoto = async () => {
     if (videoRef.current) {
       const canvas = document.createElement("canvas");
@@ -421,15 +462,14 @@ function UserDashboard() {
           punchInMutation.mutate(dataUrl, {
             onSuccess: () => {
               setScanLoading(false);
-              setScanType(null);
-              setCapturedSelfie(null);
-            },
-            onError: () => {
-              setScanLoading(false);
+              setScanResult({ type: "punch-in" });
               setTimeout(() => {
-                startScannerCamera();
-              }, 200);
-            }
+                setScanType(null);
+                setCapturedSelfie(null);
+                setScanResult(null);
+              }, 1800);
+            },
+            onError: (err) => handlePunchError("punch-in", err),
           });
         } else if (scanType === "punch-out") {
           // Auto-end lunch before punching out if employee is currently on a lunch break
@@ -441,17 +481,16 @@ function UserDashboard() {
             }
           }
           punchOutMutation.mutate(dataUrl, {
-            onSuccess: () => {
+            onSuccess: (data) => {
               setScanLoading(false);
-              setScanType(null);
-              setCapturedSelfie(null);
-            },
-            onError: () => {
-              setScanLoading(false);
+              setScanResult({ type: "punch-out", workHoursLabel: data?.workHours ? `${data.workHours} hrs` : undefined });
               setTimeout(() => {
-                startScannerCamera();
-              }, 200);
-            }
+                setScanType(null);
+                setCapturedSelfie(null);
+                setScanResult(null);
+              }, 1800);
+            },
+            onError: (err) => handlePunchError("punch-out", err),
           });
         }
       }
@@ -551,9 +590,9 @@ function UserDashboard() {
       queryClient.invalidateQueries({ queryKey: ["user-profile"] });
       queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
     },
-    onError: (err: any) => {
-      toast.error(err.response?.data?.message || "Punch In Failed");
-    }
+    // No toast here — handlePunchError (called from the scanner) decides what to
+    // show, since a request can error while the punch still went through on the
+    // backend; surfacing the raw error immediately would be misleading in that case.
   });
 
   const punchOutMutation = useMutation({
@@ -583,9 +622,7 @@ function UserDashboard() {
       queryClient.invalidateQueries({ queryKey: ["user-profile"] });
       queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
     },
-    onError: (err: any) => {
-      toast.error(err.response?.data?.message || "Punch Out Failed");
-    }
+    // No toast here — see punchInMutation above for why.
   });
 
   // Lunch Break Actions — use already-fetched location; never request new GPS permission
@@ -705,6 +742,15 @@ function UserDashboard() {
     const m = Math.floor((totalSecs % 3600) / 60);
     const s = totalSecs % 60;
     return `${h.toString().padStart(2, '0')}h ${m.toString().padStart(2, '0')}m ${s.toString().padStart(2, '0')}s`;
+  };
+
+  // Final worked duration for a completed shift (punch-in to punch-out), stable across refresh.
+  const formatWorkedDuration = (punchIn?: string, punchOut?: string) => {
+    if (!punchIn || !punchOut) return "00h 00m";
+    const diffSecs = Math.max(0, Math.floor((new Date(punchOut).getTime() - new Date(punchIn).getTime()) / 1000));
+    const h = Math.floor(diffSecs / 3600);
+    const m = Math.floor((diffSecs % 3600) / 60);
+    return `${h.toString().padStart(2, '0')}h ${m.toString().padStart(2, '0')}m`;
   };
 
   const getShiftPercent = () => {
@@ -1020,6 +1066,18 @@ function UserDashboard() {
                   <CheckCircle className="h-4.5 w-4.5 text-emerald-500" />
                   <span>Today's Shift Successfully Completed!</span>
                 </div>
+
+                {/* Final worked hours — computed from stored punch times, so it stays correct on refresh */}
+                <div className="p-4 bg-white dark:bg-slate-900/50 backdrop-blur-md rounded-[18px] border border-slate-100 dark:border-white/5 shadow-xs flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Clock className="h-3.5 w-3.5 text-emerald-500" />
+                    <span className="text-[9.5px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Total Worked Today</span>
+                  </div>
+                  <span className="text-[13px] font-mono font-bold text-slate-700 dark:text-slate-200">
+                    {formatWorkedDuration(todayLog?.punchIn, todayLog?.punchOut)}
+                  </span>
+                </div>
+
                 {profile?.allowMultiplePunches && (
                   <Button
                     onClick={() => {
@@ -1605,6 +1663,19 @@ function UserDashboard() {
                     <span className="text-[9.5px] font-semibold text-white tracking-widest uppercase animate-pulse">Uploading Selfie...</span>
                   </div>
                 )}
+
+                {/* Success confirmation overlay, shown after the punch is recorded */}
+                {scanResult && (
+                  <div className="absolute inset-0 bg-black/80 backdrop-blur-xs flex flex-col items-center justify-center gap-2 text-center px-4">
+                    <CheckCircle className="h-9 w-9 text-emerald-400" />
+                    <span className="text-[12px] font-bold text-white tracking-wide">
+                      {scanResult.type === "punch-in" ? "Punched In Successfully!" : "Punched Out Successfully!"}
+                    </span>
+                    {scanResult.type === "punch-out" && scanResult.workHoursLabel && (
+                      <span className="text-[10px] text-emerald-300 font-mono">Worked: {scanResult.workHoursLabel}</span>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Actions */}
@@ -1618,6 +1689,11 @@ function UserDashboard() {
                     <Camera className="h-4 w-4" />
                     <span>Capture Selfie & Done</span>
                   </Button>
+                ) : scanResult ? (
+                  <div className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest flex items-center justify-center gap-1 py-1.5">
+                    <CheckCircle className="h-4 w-4 text-emerald-500" />
+                    <span>Done</span>
+                  </div>
                 ) : (
                   <div className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest flex items-center justify-center gap-1 py-1.5 animate-pulse">
                     <CheckCircle className="h-4 w-4 text-emerald-500" />
@@ -1625,17 +1701,19 @@ function UserDashboard() {
                   </div>
                 )}
 
-                <button
-                  onClick={() => {
-                    stopScannerCamera();
-                    setScanType(null);
-                    setCapturedSelfie(null);
-                  }}
-                  disabled={scanLoading}
-                  className="w-full py-2 text-center text-xs font-semibold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 transition-all border border-slate-200 dark:border-slate-850 rounded-xl cursor-pointer"
-                >
-                  Cancel Scanner
-                </button>
+                {!scanResult && (
+                  <button
+                    onClick={() => {
+                      stopScannerCamera();
+                      setScanType(null);
+                      setCapturedSelfie(null);
+                    }}
+                    disabled={scanLoading}
+                    className="w-full py-2 text-center text-xs font-semibold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 transition-all border border-slate-200 dark:border-slate-850 rounded-xl cursor-pointer"
+                  >
+                    Cancel Scanner
+                  </button>
+                )}
               </div>
             </motion.div>
           </div>
