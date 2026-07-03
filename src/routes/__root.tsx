@@ -4,7 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SplashScreen } from "@/components/shared/splash-screen";
 import { useAuth } from "@/hooks/use-auth";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { getSession, patchSession } from "@/lib/auth";
 import { apiClient } from "@/lib/api-client";
@@ -79,6 +79,28 @@ export const Route = createRootRoute({
 
 function RootComponent() {
   const { session } = useAuth();
+
+  // The session lives in a single shared localStorage key across every role
+  // (employee/admin/subadmin/superadmin), and logout/login navigate client-side
+  // rather than reloading the page — so the module-level QueryClient survives
+  // an account switch. Without this, switching accounts in the same tab leaves
+  // the previous account's cached data (e.g. tickets, employees) on screen,
+  // and acting on it 404s against the new account's tenant scope.
+  const lastTokenRef = useRef<string | undefined>(getSession()?.token);
+  useEffect(() => {
+    const handleAuthChange = () => {
+      const token = getSession()?.token;
+      if (token !== lastTokenRef.current) {
+        lastTokenRef.current = token;
+        queryClient.clear();
+      }
+    };
+
+    window.addEventListener("bot-auth-change", handleAuthChange);
+    return () => {
+      window.removeEventListener("bot-auth-change", handleAuthChange);
+    };
+  }, []);
 
   useEffect(() => {
     const handleUpgradeRequired = (e: Event) => {
