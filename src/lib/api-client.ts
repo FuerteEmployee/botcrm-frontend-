@@ -32,8 +32,15 @@ apiClient.interceptors.response.use(
     if (error.response?.status === 401) {
       clearSession();
       if (typeof window !== "undefined" && window.location.pathname !== "/login") {
-        if (error.response?.data?.code === "another_device") {
+        const code = error.response?.data?.code;
+        const message: string = error.response?.data?.message || "";
+        if (code === "another_device") {
           window.localStorage.setItem("bot_logout_reason", "another_device");
+        } else if (code === "inactive" || code === "employee_inactive" || code === "account_inactive" || /inactive|deactivat/i.test(message)) {
+          // No dedicated backend `code` for this yet (unlike "another_device") —
+          // sniff the message as a fallback so a deactivated employee mid-session
+          // still lands on a clear explanation instead of a silent redirect.
+          window.localStorage.setItem("bot_logout_reason", "inactive");
         }
         window.location.href = "/login";
       }

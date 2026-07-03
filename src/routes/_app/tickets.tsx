@@ -33,7 +33,7 @@ export const Route = createFileRoute("/_app/tickets")({
 });
 
 function TicketsPage() {
-  const { tickets, isLoading, updateTicketStatus, deleteTicket } = useTicketService();
+  const { tickets, isLoading, updateTicketStatus, deleteTicket, isUpdating, isDeleting } = useTicketService();
   const [tab, setTab] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
@@ -62,7 +62,10 @@ function TicketsPage() {
       await updateTicketStatus({ id, status, adminRemark: remarkText });
       setSelectedTicket(null);
       setRemarkText("");
-    } catch (err) {}
+    } catch (err) {
+      // useTicketService's onError toast already surfaces the failure reason;
+      // keep the dialog open so the admin can retry instead of silently closing it.
+    }
   };
 
   const counts = {
@@ -166,7 +169,7 @@ function TicketsPage() {
                         <DropdownMenuItem onClick={() => { setSelectedTicket(t); setRemarkText(t.adminRemark || ""); }}>Review Ticket</DropdownMenuItem>
                       )}
                       {canDelete && (
-                        <DropdownMenuItem className="text-destructive" onClick={() => deleteTicket(t._id)}>Delete</DropdownMenuItem>
+                        <DropdownMenuItem className="text-destructive" disabled={isDeleting} onClick={() => deleteTicket(t._id)}>Delete</DropdownMenuItem>
                       )}
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -245,6 +248,7 @@ function TicketsPage() {
                         <ActionButton
                           variant="delete"
                           tooltip="Delete Ticket"
+                          disabled={isDeleting}
                           onClick={() => deleteTicket(t._id)}
                         />
                       )}
@@ -294,6 +298,7 @@ function TicketsPage() {
                   label="REJECT"
                   icon={X}
                   className="flex-1 h-10 rounded-xl"
+                  disabled={isUpdating}
                   onClick={() => handleStatusUpdate(selectedTicket._id, "rejected")}
                 />
                 <ActionButton
@@ -302,6 +307,7 @@ function TicketsPage() {
                   label="APPROVE"
                   icon={Check}
                   className="flex-1 h-10 rounded-xl bg-success text-success-foreground hover:bg-success/90"
+                  disabled={isUpdating}
                   onClick={() => handleStatusUpdate(selectedTicket._id, "approved")}
                 />
               </div>

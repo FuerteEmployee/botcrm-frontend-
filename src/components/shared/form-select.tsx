@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { LucideIcon } from "lucide-react";
+import { LucideIcon, Plus } from "lucide-react";
 
 interface FormSelectProps {
   label: string;
@@ -21,6 +21,8 @@ interface FormSelectProps {
   className?: string;
   error?: string;
   required?: boolean;
+  onAddNew?: () => void;
+  addNewLabel?: string;
 }
 
 export function FormSelect({
@@ -34,14 +36,27 @@ export function FormSelect({
   className,
   error,
   required,
+  onAddNew,
+  addNewLabel = "Add New",
 }: FormSelectProps) {
   return (
     <div className={cn("space-y-4", containerClassName)}>
       {label && (
-        <Label className="text-[11px] font-bold text-muted-foreground tracking-widest ml-1">
-          {label}
-          {required && <span className="text-destructive ml-0.5">*</span>}
-        </Label>
+        <div className="flex items-center justify-between ml-1">
+          <Label className="text-[11px] font-bold text-muted-foreground tracking-widest">
+            {label}
+            {required && <span className="text-destructive ml-0.5">*</span>}
+          </Label>
+          {onAddNew && (
+            <button
+              type="button"
+              onClick={onAddNew}
+              className="flex items-center gap-1 text-[10px] font-bold text-primary hover:text-primary/70 transition-colors cursor-pointer"
+            >
+              <Plus className="h-3 w-3" /> {addNewLabel}
+            </button>
+          )}
+        </div>
       )}
       <Select value={value} onValueChange={onValueChange}>
         <SelectTrigger

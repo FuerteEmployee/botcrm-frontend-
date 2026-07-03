@@ -48,6 +48,7 @@ import { useBranchService } from "@/services/branch-service";
 import { useShiftService } from "@/services/shift-service";
 import { FormInput } from "@/components/shared/form-input";
 import { FormSelect } from "@/components/shared/form-select";
+import { QuickAddBranchDialog, QuickAddDepartmentDialog, QuickAddShiftDialog } from "@/components/shared/quick-add-dialogs";
 import { cn, formatTime12h } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
 import { DAYS, WEEKS, DAY_LABELS } from "@/lib/constants";
@@ -104,6 +105,7 @@ function AddEmployeePage() {
   const { shifts } = useShiftService();
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [quickAddOpen, setQuickAddOpen] = useState<"branch" | "department" | "shift" | null>(null);
   const isEditing = !!employeeId;
   const { can } = usePermission();
   const isAllowed = isEditing ? can("employees", "edit") : can("employees", "create");
@@ -123,7 +125,7 @@ function AddEmployeePage() {
     gender: "male",
     dob: "",
     salary: "",
-    joiningDate: "",
+    joiningDate: new Date().toISOString().slice(0, 10),
     departmentId: "",
     branchId: "",
     branchIds: [] as string[],
@@ -521,7 +523,6 @@ function AddEmployeePage() {
                 icon={Calendar}
                 value={form.dob}
                 onChange={e => setForm({ ...form, dob: e.target.value })}
-                required
               />
 
             </div>
@@ -588,10 +589,19 @@ function AddEmployeePage() {
 
               {allowMultipleBranches ? (
                 <div className="space-y-4 md:col-span-2">
-                  <label className="text-[11px] font-bold text-muted-foreground tracking-widest ml-1">
-                    BRANCH LOCATIONS<span className="text-destructive ml-0.5">*</span>
-                    <span className="ml-2 font-semibold normal-case tracking-normal text-[10px] text-primary">Select one or more</span>
-                  </label>
+                  <div className="flex items-center justify-between ml-1">
+                    <label className="text-[11px] font-bold text-muted-foreground tracking-widest">
+                      BRANCH LOCATIONS<span className="text-destructive ml-0.5">*</span>
+                      <span className="ml-2 font-semibold normal-case tracking-normal text-[10px] text-primary">Select one or more</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setQuickAddOpen("branch")}
+                      className="flex items-center gap-1 text-[10px] font-bold text-primary hover:text-primary/70 transition-colors cursor-pointer"
+                    >
+                      <Plus className="h-3 w-3" /> Add New
+                    </button>
+                  </div>
                   <div className="flex flex-wrap gap-2 rounded-xl border border-border/60 bg-background p-3 shadow-sm min-h-12">
                     {(branches || []).length === 0 && (
                       <span className="text-[12px] text-muted-foreground">No branches available</span>
@@ -641,6 +651,7 @@ function AddEmployeePage() {
                   options={(branches || []).map((b: any) => ({ label: b.branchName, value: b._id }))}
                   error={touched.branchId ? errors.branchId : undefined}
                   required
+                  onAddNew={() => setQuickAddOpen("branch")}
                 />
               )}
 
@@ -653,6 +664,7 @@ function AddEmployeePage() {
                 options={(departments || []).map((d: any) => ({ label: d.name, value: d._id }))}
                 error={touched.departmentId ? errors.departmentId : undefined}
                 required
+                onAddNew={() => setQuickAddOpen("department")}
               />
 
               <FormSelect
@@ -661,12 +673,13 @@ function AddEmployeePage() {
                 placeholder="Select Shift"
                 value={form.shiftId}
                 onValueChange={(v) => { setForm({ ...form, shiftId: v }); handleBlur('shiftId'); }}
-                options={(shifts || []).map((s: any) => ({ 
-                  label: s.name + (globalSettings?.attendance?.defaultShiftId === s._id ? " (Global Default)" : ""), 
-                  value: s._id 
+                options={(shifts || []).map((s: any) => ({
+                  label: s.name + (globalSettings?.attendance?.defaultShiftId === s._id ? " (Global Default)" : ""),
+                  value: s._id
                 }))}
                 error={touched.shiftId ? errors.shiftId : undefined}
                 required
+                onAddNew={() => setQuickAddOpen("shift")}
               />
 
               {/* Weekly Holidays */}
@@ -1085,6 +1098,28 @@ function AddEmployeePage() {
           </div>
         </div>
       </form>
+
+      <QuickAddBranchDialog
+        open={quickAddOpen === "branch"}
+        onOpenChange={(o) => setQuickAddOpen(o ? "branch" : null)}
+        onCreated={(id) => {
+          if (allowMultipleBranches) {
+            setForm(prev => prev.branchIds.includes(id) ? prev : { ...prev, branchIds: [...prev.branchIds, id] });
+          } else {
+            setForm(prev => ({ ...prev, branchId: id }));
+          }
+        }}
+      />
+      <QuickAddDepartmentDialog
+        open={quickAddOpen === "department"}
+        onOpenChange={(o) => setQuickAddOpen(o ? "department" : null)}
+        onCreated={(id) => setForm(prev => ({ ...prev, departmentId: id }))}
+      />
+      <QuickAddShiftDialog
+        open={quickAddOpen === "shift"}
+        onOpenChange={(o) => setQuickAddOpen(o ? "shift" : null)}
+        onCreated={(id) => setForm(prev => ({ ...prev, shiftId: id }))}
+      />
     </div>
   );
 }

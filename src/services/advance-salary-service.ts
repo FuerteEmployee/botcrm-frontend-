@@ -51,15 +51,6 @@ export function useAdvanceSalaryService() {
     }
   });
 
-  // GET summary stats
-  const { data: summary = {} as AdvanceSalarySummary } = useQuery<AdvanceSalarySummary>({
-    queryKey: ["advance-salary-summary"],
-    queryFn: async () => {
-      const { data } = await apiClient.get("/advance-salary/summary");
-      return data.data;
-    }
-  });
-
   // POST create new request
   const createRequest = useMutation({
     mutationFn: async (payload: {
@@ -73,7 +64,6 @@ export function useAdvanceSalaryService() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["advance-salary-requests"] });
-      queryClient.invalidateQueries({ queryKey: ["advance-salary-summary"] });
       toast.success(data.message || "Request submitted successfully");
     },
     onError: (error: any) => {
@@ -92,7 +82,6 @@ export function useAdvanceSalaryService() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["advance-salary-requests"] });
-      queryClient.invalidateQueries({ queryKey: ["advance-salary-summary"] });
       toast.success(data.message || "Request approved");
     },
     onError: (error: any) => {
@@ -108,7 +97,6 @@ export function useAdvanceSalaryService() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["advance-salary-requests"] });
-      queryClient.invalidateQueries({ queryKey: ["advance-salary-summary"] });
       toast.success(data.message || "Request rejected");
     },
     onError: (error: any) => {
@@ -124,7 +112,6 @@ export function useAdvanceSalaryService() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["advance-salary-requests"] });
-      queryClient.invalidateQueries({ queryKey: ["advance-salary-summary"] });
       toast.success(data.message || "Marked as repaid");
     },
     onError: (error: any) => {
@@ -133,9 +120,8 @@ export function useAdvanceSalaryService() {
   });
 
   return {
-    // List and Summary
+    // List
     requests,
-    summary,
     isLoading,
     error,
     refetch,

@@ -43,12 +43,13 @@ function LoginPage() {
   // Detect existing session on mount
   const [existingSession, setExistingSession] = useState<Session | null>(null);
   const [step, setStep] = useState<"session" | "phone" | "otp">("phone");
-  const [kickedOut, setKickedOut] = useState(false);
+  const [logoutReason, setLogoutReason] = useState<"another_device" | "inactive" | null>(null);
+  const [inactiveName, setInactiveName] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     const reason = window.localStorage.getItem("bot_logout_reason");
-    if (reason === "another_device") {
-      setKickedOut(true);
+    if (reason === "another_device" || reason === "inactive") {
+      setLogoutReason(reason);
       window.localStorage.removeItem("bot_logout_reason");
     }
     const s = getSession();
@@ -57,6 +58,19 @@ function LoginPage() {
       setStep("session");
     }
   }, []);
+
+  // Backend doesn't (yet) send a dedicated `code` for a deactivated employee
+  // the way it does for "another_device" (see api-client.ts) — until it does,
+  // fall back to sniffing the error message text so the login page can still
+  // show a clear, dedicated banner instead of a generic toast.
+  const readInactiveError = (error: any): { name?: string } | null => {
+    const data = error?.response?.data;
+    if (!data) return null;
+    const isInactiveCode = data.code === "inactive" || data.code === "employee_inactive" || data.code === "account_inactive";
+    const isInactiveMessage = typeof data.message === "string" && /inactive|deactivat/i.test(data.message);
+    if (!isInactiveCode && !isInactiveMessage) return null;
+    return { name: data.name || data.employeeName };
+  };
 
   const companyLogo = existingSession?.companyLogo || logo;
 
@@ -98,6 +112,7 @@ function LoginPage() {
       return;
     }
     setLoading(true);
+    setLogoutReason(null);
     try {
       await apiClient.post("/users/login-request", { phone: cleaned });
       issueOtp(cleaned);
@@ -108,7 +123,13 @@ function LoginPage() {
       setLiveMessage("OTP sent. Enter the 6-digit code.");
       toast.success("OTP sent successfully");
     } catch (error: any) {
-      toast.error(error.response?.data?.message || "Failed to send OTP");
+      const inactive = readInactiveError(error);
+      if (inactive) {
+        setLogoutReason("inactive");
+        setInactiveName(inactive.name);
+      } else {
+        toast.error(error.response?.data?.message || "Failed to send OTP");
+      }
     } finally {
       setLoading(false);
     }
@@ -222,6 +243,14 @@ function LoginPage() {
       toast.success("Welcome back!");
       navigate({ to: roleDashboard(data.role) });
     } catch (error: any) {
+      const inactive = readInactiveError(error);
+      if (inactive) {
+        setLogoutReason("inactive");
+        setInactiveName(inactive.name);
+        setStep("phone");
+        setOtp(["", "", "", "", "", ""]);
+        return;
+      }
       setOtpStatus("error");
       setOtp(["", "", "", "", "", ""]);
       setTimeout(() => inputsRef.current[0]?.focus(), 50);
@@ -406,11 +435,20 @@ function LoginPage() {
                   className="space-y-6"
                   noValidate
                 >
-                  {kickedOut && (
+                  {logoutReason === "another_device" && (
                     <div className="flex items-start gap-3 bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 text-orange-800">
                       <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-orange-500" />
                       <p className="text-xs font-semibold leading-relaxed">
                         You were signed out because your account was logged in on another device.
+                      </p>
+                    </div>
+                  )}
+
+                  {logoutReason === "inactive" && (
+                    <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-800">
+                      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-red-500" />
+                      <p className="text-xs font-semibold leading-relaxed">
+                        {inactiveName ? `${inactiveName}'s account` : "This account"} has been deactivated. Please contact your administrator.
                       </p>
                     </div>
                   )}

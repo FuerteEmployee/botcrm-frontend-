@@ -33,11 +33,22 @@ export function MyAdvanceSalary({ onOpenNewRequest }: MyAdvanceSalaryProps) {
 
   const {
     requests,
-    summary,
     isLoading,
     createRequest,
     isCreating,
   } = useAdvanceSalaryService();
+
+  // The backend's /advance-salary/summary endpoint isn't returning correct
+  // totals (always 0s), so compute the stat cards directly from the request
+  // list — same status/amount fields already proven correct by the row rendering below.
+  const summary = useMemo(() => {
+    const totals = { pending: 0, approved: 0, rejected: 0, repaid: 0 };
+    for (const req of requests) {
+      const value = req.status === 'approved' ? (req.approvedAmount ?? req.amount) : req.amount;
+      if (req.status in totals) totals[req.status] += value;
+    }
+    return totals;
+  }, [requests]);
 
   // Filter to only user's requests and apply filters
   const filteredRequests = useMemo(() => {

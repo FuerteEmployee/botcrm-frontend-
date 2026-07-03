@@ -60,14 +60,21 @@ export function useTicketService() {
       queryClient.invalidateQueries({ queryKey: ["tickets"] });
       toast.success("Ticket updated successfully");
     },
+    onError: (error: any) => {
+      if (error?.response?.status === 404) {
+        // Surface this distinctly rather than hiding the ticket — a 404 here on an
+        // otherwise-visible ticket points at a backend route/contract mismatch,
+        // not a genuinely deleted ticket. Hiding it would look like a fix while
+        // actually discarding the admin's approve/reject action silently.
+        toast.error("Update failed: the server couldn't find this ticket (404). This looks like a backend issue — the ticket has not been changed.");
+        return;
+      }
+      toast.error(error.response?.data?.message || "Failed to update ticket");
+    },
   });
 
   const deleteTicket = useMutation({
     mutationFn: async (id: string) => {
-      // If already in deleted list, skip the API call (avoids repeated 404 errors)
-      const deletedIds = getDeletedIds();
-      if (deletedIds.has(id)) return { serverDeleted: false };
-
       try {
         await apiClient.delete(`/tickets/${id}`);
         return { serverDeleted: true };

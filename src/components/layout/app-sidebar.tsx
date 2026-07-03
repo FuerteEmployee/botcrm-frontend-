@@ -22,12 +22,15 @@ import {
   UserCog,
   CreditCard,
   Coins,
+  Search,
+  GripVertical,
 } from "lucide-react";
 import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
+import { motion, Reorder, useDragControls } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { clearSession } from "@/lib/auth";
 import { useAuth } from "@/hooks/use-auth";
+import { useSidebarOrder } from "@/hooks/use-sidebar-order";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import logo from "@/assets/bot-logo.png";
@@ -91,6 +94,19 @@ export function AppSidebar({
     return permissions[key]?.view === true;
   });
 
+  const { orderedKeys, reorder } = useSidebarOrder(visibleNav.map((item) => item.to));
+  const orderedNav = orderedKeys
+    .map((key) => visibleNav.find((item) => item.to === key))
+    .filter((item): item is NavItem => Boolean(item));
+
+  const [search, setSearch] = useState("");
+  const query = search.trim().toLowerCase();
+  const displayedNav = query
+    ? orderedNav.filter((item) => item.label.toLowerCase().includes(query))
+    : orderedNav;
+  // Reordering only makes sense against the full, unfiltered list.
+  const canReorder = !query;
+
   const handleLogout = () => {
     clearSession();
     toast.success("Logged out");
@@ -136,47 +152,61 @@ export function AppSidebar({
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto scrollbar-thin px-2.5 py-3 space-y-0.5">
-          <div className="mb-2 px-2">
+        <nav className="flex-1 flex flex-col min-h-0 px-2.5 py-3">
+          <div className="mb-2 px-2 shrink-0">
             <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/50">Main Menu</span>
           </div>
-          {visibleNav.map((item, idx) => {
-            const active =
-              pathname === item.to ||
-              (item.to !== "/" && pathname.startsWith(`${item.to}/`));
-            const Icon = item.icon;
-            return (
-              <motion.div
-                key={item.to}
-                initial={{ opacity: 0, x: -8 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: idx * 0.025 }}
-              >
-                <Link
-                  to={item.to}
-                  onClick={onClose}
-                  className={cn(
-                    "relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-all duration-300 group mb-0.5",
-                    active
-                      ? "bg-primary/10 text-primary"
-                      : "text-sidebar-foreground/60 hover:text-primary hover:bg-primary/3"
-                  )}
-                >
-                  {active && (
-                    <motion.div
-                      layoutId="sidebar-active"
-                      className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary"
-                    />
-                  )}
-                  <Icon className={cn(
-                    "h-[18px] w-[18px] shrink-0 transition-all duration-300",
-                    active ? "text-primary scale-110" : "group-hover:text-primary group-hover:scale-110"
-                  )} />
-                  <span className={cn("truncate", active)}>{item.label}</span>
-                </Link>
-              </motion.div>
-            );
-          })}
+
+          <div className="relative mb-2.5 px-0.5 shrink-0">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground/40 pointer-events-none" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search menu..."
+              className="w-full h-8 pl-8 pr-2 rounded-lg bg-muted/40 border border-sidebar-border/60 text-[12px] text-sidebar-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary/30 transition-all"
+            />
+          </div>
+
+          {displayedNav.length === 0 && (
+            <p className="px-2 py-4 text-center text-[11px] text-muted-foreground/50 shrink-0">No matching menu items.</p>
+          )}
+
+          {/* This element itself is the scroll container — layoutScroll needs to sit
+              on the same node whose scrollTop actually changes, or drag-position
+              math drifts as soon as the list is scrolled. */}
+          {canReorder ? (
+            <Reorder.Group
+              axis="y"
+              values={orderedNav.map((item) => item.to)}
+              onReorder={reorder}
+              layoutScroll
+              className="flex-1 min-h-0 overflow-y-auto scrollbar-thin space-y-0.5"
+            >
+              {orderedNav.map((item, idx) => (
+                <SidebarNavItem
+                  key={item.to}
+                  item={item}
+                  active={isNavItemActive(item, pathname)}
+                  onClose={onClose}
+                  idx={idx}
+                  draggable
+                />
+              ))}
+            </Reorder.Group>
+          ) : (
+            <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin space-y-0.5">
+              {displayedNav.map((item, idx) => (
+                <SidebarNavItem
+                  key={item.to}
+                  item={item}
+                  active={isNavItemActive(item, pathname)}
+                  onClose={onClose}
+                  idx={idx}
+                  draggable={false}
+                />
+              ))}
+            </div>
+          )}
         </nav>
 
         {/* User Profile & Logout */}
@@ -210,5 +240,84 @@ export function AppSidebar({
         </div>
       </aside>
     </>
+  );
+}
+
+function isNavItemActive(item: NavItem, pathname: string) {
+  return pathname === item.to || (item.to !== "/" && pathname.startsWith(`${item.to}/`));
+}
+
+function SidebarNavItem({
+  item,
+  active,
+  onClose,
+  idx,
+  draggable,
+}: {
+  item: NavItem;
+  active: boolean;
+  onClose: () => void;
+  idx: number;
+  draggable: boolean;
+}) {
+  const dragControls = useDragControls();
+  const Icon = item.icon;
+
+  const link = (
+    <Link
+      to={item.to}
+      onClick={onClose}
+      className={cn(
+        "relative flex flex-1 min-w-0 items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-all duration-300 group",
+        active
+          ? "bg-primary/10 text-primary"
+          : "text-sidebar-foreground/60 hover:text-primary hover:bg-primary/3"
+      )}
+    >
+      {active && (
+        <motion.div
+          layoutId="sidebar-active"
+          className="absolute left-0 top-1/2 -translate-y-1/2 h-5 w-1 rounded-r-full bg-primary"
+        />
+      )}
+      <Icon className={cn(
+        "h-[18px] w-[18px] shrink-0 transition-all duration-300",
+        active ? "text-primary scale-110" : "group-hover:text-primary group-hover:scale-110"
+      )} />
+      <span className="truncate">{item.label}</span>
+    </Link>
+  );
+
+  if (!draggable) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, x: -8 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ delay: idx * 0.025 }}
+        className="mb-0.5"
+      >
+        {link}
+      </motion.div>
+    );
+  }
+
+  return (
+    <Reorder.Item
+      value={item.to}
+      dragListener={false}
+      dragControls={dragControls}
+      className="mb-0.5 flex items-center gap-0.5 rounded-xl bg-sidebar"
+      whileDrag={{ scale: 1.02, boxShadow: "0 8px 20px rgba(0,0,0,0.15)", zIndex: 10 }}
+    >
+      <button
+        type="button"
+        onPointerDown={(e) => dragControls.start(e)}
+        className="flex h-9 w-4 shrink-0 cursor-grab items-center justify-center text-muted-foreground/25 hover:text-muted-foreground/70 active:cursor-grabbing touch-none"
+        aria-label={`Drag to reorder ${item.label}`}
+      >
+        <GripVertical className="h-3.5 w-3.5" />
+      </button>
+      {link}
+    </Reorder.Item>
   );
 }

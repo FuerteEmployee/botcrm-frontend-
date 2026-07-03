@@ -224,7 +224,7 @@ function UserDashboard() {
   const [isScanning, setIsScanning] = useState(false);
   const [capturedSelfie, setCapturedSelfie] = useState<string | null>(null);
   const [scanLoading, setScanLoading] = useState(false);
-  const [scanResult, setScanResult] = useState<{ type: "punch-in" | "punch-out"; workHoursLabel?: string } | null>(null);
+  const [scanResult, setScanResult] = useState<{ type: "punch-in" | "punch-out"; workHoursLabel?: string; timeLabel?: string } | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
   // Selected Month/Year for statistics navigation (Synchronized via localStorage)
@@ -416,6 +416,8 @@ function UserDashboard() {
   const looksLikeRawCrash = (msg?: string) =>
     !!msg && /is not defined|cannot read propert|undefined is not a function|typeerror|referenceerror/i.test(msg);
 
+  const nowLabel = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
+
   const handlePunchError = async (type: "punch-in" | "punch-out", err?: any) => {
     setScanLoading(false);
     const fresh = await refetchProfile();
@@ -426,6 +428,7 @@ function UserDashboard() {
       // the same success confirmation the happy path would, no error toast.
       setScanResult({
         type,
+        timeLabel: nowLabel(),
         workHoursLabel: type === "punch-out" && freshLog?.punchIn && freshLog?.punchOut
           ? formatWorkedDuration(freshLog.punchIn, freshLog.punchOut)
           : undefined,
@@ -462,7 +465,7 @@ function UserDashboard() {
           punchInMutation.mutate(dataUrl, {
             onSuccess: () => {
               setScanLoading(false);
-              setScanResult({ type: "punch-in" });
+              setScanResult({ type: "punch-in", timeLabel: nowLabel() });
               setTimeout(() => {
                 setScanType(null);
                 setCapturedSelfie(null);
@@ -483,7 +486,7 @@ function UserDashboard() {
           punchOutMutation.mutate(dataUrl, {
             onSuccess: (data) => {
               setScanLoading(false);
-              setScanResult({ type: "punch-out", workHoursLabel: data?.workHours ? `${data.workHours} hrs` : undefined });
+              setScanResult({ type: "punch-out", timeLabel: nowLabel(), workHoursLabel: data?.workHours ? `${data.workHours} hrs` : undefined });
               setTimeout(() => {
                 setScanType(null);
                 setCapturedSelfie(null);
@@ -1671,6 +1674,11 @@ function UserDashboard() {
                     <span className="text-[12px] font-bold text-white tracking-wide">
                       {scanResult.type === "punch-in" ? "Punched In Successfully!" : "Punched Out Successfully!"}
                     </span>
+                    {scanResult.timeLabel && (
+                      <span className="text-[10px] text-white/70 font-mono">
+                        {scanResult.type === "punch-in" ? "Punch In" : "Punch Out"}: {scanResult.timeLabel}
+                      </span>
+                    )}
                     {scanResult.type === "punch-out" && scanResult.workHoursLabel && (
                       <span className="text-[10px] text-emerald-300 font-mono">Worked: {scanResult.workHoursLabel}</span>
                     )}
