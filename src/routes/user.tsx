@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { Outlet, useNavigate, Link, useLocation, createFileRoute, redirect } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/use-auth";
 import { clearSession, getSession } from "@/lib/auth";
-import { 
-  Home, History, CalendarDays, Ticket, User, LogOut, Sun, Moon, Sparkles, Coins
+import {
+  Home, CalendarDays, Ticket, LogOut, Sparkles, Coins, Gift, Zap,
+  type LucideIcon
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
@@ -73,25 +74,22 @@ function UserLayout() {
 
   if (!isAuthenticated) return null;
 
-  const navItems = [
+  const navItems: { to: string; label: string; icon: LucideIcon; hash?: string }[] = [
     { to: "/user", label: "Home", icon: Home },
-    { to: "/user/history", label: "History", icon: History },
     { to: "/user/leaves", label: "Leaves", icon: CalendarDays },
+    { to: "/user/holidays", label: "Holidays", icon: Gift },
     { to: "/user/advance-salary", label: "My Requests", icon: Coins },
     { to: "/user/tickets", label: "Tickets", icon: Ticket },
-    { to: "/user/profile", label: "Profile", icon: User },
+    { to: "/user/profile", label: "Quick Action", icon: Zap, hash: "quick-actions" },
   ];
 
-  // Profile is reached via the avatar in the top bar on mobile, so it is
-  // excluded from the bottom bar — this keeps the bar uncluttered and lets the
-  // remaining items distribute evenly on small screens.
-  const bottomNavItems = navItems.filter((item) => item.to !== "/user/profile");
-  const isProfileActive = location.pathname === "/user/profile";
+  const bottomNavItems = navItems;
+  const isProfileActive = location.pathname === "/user/account";
 
   const initials = (session?.name ?? "User").split(" ").map(s => s[0]).slice(0, 2).join("");
 
   return (
-    <div className="h-screen w-full flex bg-[#FAF7F9] dark:bg-[#0D070B] transition-colors duration-500 overflow-hidden relative font-sans">
+    <div className="h-screen w-full flex bg-[#FAF7F9] dark:bg-[#0D070B] transition-colors duration-500 overflow-clip relative font-sans">
       
       {/* ─── DYNAMIC AMBIENT BACKDROP GLOWS ─────────────────────────────────── */}
       <div className="absolute top-[-10%] left-[-10%] w-[45%] aspect-square rounded-full bg-gradient-to-br from-[#501537]/15 via-purple-500/5 to-transparent blur-[120px] pointer-events-none z-0" />
@@ -118,8 +116,9 @@ function UserLayout() {
 
             return (
               <Link
-                key={item.to}
+                key={`${item.to}-${item.label}`}
                 to={item.to}
+                hash={item.hash}
                 className={`flex items-center gap-3.5 px-4 py-3 rounded-xl transition-all duration-300 font-semibold text-xs relative ${
                   isActive
                     ? "text-[#501537] dark:text-white"
@@ -143,10 +142,13 @@ function UserLayout() {
           })}
         </nav>
 
-        {/* Desktop Sidebar Footer (Inline Icon-Only Log Out style) */}
+        {/* Desktop Sidebar Footer — click through to the Profile summary page */}
         <div className="p-4 border-t border-[#501537]/10 dark:border-white/5 bg-slate-50/50 dark:bg-slate-950/20">
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0 flex-1">
+            <Link
+              to="/user/account"
+              className="flex items-center gap-3 min-w-0 flex-1 rounded-xl px-1.5 py-1 -mx-1.5 -my-1 hover:bg-[#501537]/5 dark:hover:bg-white/5 transition-all cursor-pointer"
+            >
               <Avatar className="h-9 w-9 ring-2 ring-[#501537]/10 dark:ring-white/10 shrink-0">
                 <AvatarFallback className="bg-gradient-to-br from-[#4A0E2E] to-[#7B2453] text-white text-[12px] font-bold uppercase">
                   {initials}
@@ -156,7 +158,7 @@ function UserLayout() {
                 <p className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">{session?.name}</p>
                 <p className="text-[9px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-widest truncate">{session?.role}</p>
               </div>
-            </div>
+            </Link>
 
             {/* Icon-Only Log Out Button */}
             <button
@@ -172,7 +174,7 @@ function UserLayout() {
       </aside>
 
       {/* ─── MAIN CONTENT CONTAINER ────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-hidden z-10 relative">
+      <div className="flex-1 flex flex-col overflow-clip z-10 relative">
         {/* Mobile Glass Header */}
         <header className="md:hidden sticky top-0 z-30 bg-white/70 dark:bg-slate-900/60 backdrop-blur-xl border-b border-[#501537]/10 dark:border-white/5 px-4 sm:px-6 py-3 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
@@ -188,7 +190,7 @@ function UserLayout() {
           <div className="flex items-center gap-2">
             {/* Profile avatar — replaces the Profile item that used to live in the bottom bar */}
             <Link
-              to="/user/profile"
+              to="/user/account"
               aria-label="Profile"
               className={`rounded-full transition-all active:scale-95 ${
                 isProfileActive ? "ring-2 ring-[#501537] dark:ring-white" : "ring-2 ring-[#501537]/10 dark:ring-white/10"
@@ -251,8 +253,9 @@ function UserLayout() {
 
           return (
             <Link
-              key={item.to}
+              key={`${item.to}-${item.label}`}
               to={item.to}
+              hash={item.hash}
               className={`flex flex-1 min-w-0 flex-col items-center gap-0.5 px-0.5 py-1.5 rounded-xl transition-all duration-300 relative ${
                 isActive
                   ? "text-[#501537] dark:text-white font-bold"

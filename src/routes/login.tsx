@@ -45,12 +45,18 @@ function LoginPage() {
   const [step, setStep] = useState<"session" | "phone" | "otp">("phone");
   const [logoutReason, setLogoutReason] = useState<"another_device" | "inactive" | null>(null);
   const [inactiveName, setInactiveName] = useState<string | undefined>(undefined);
+  const [inactiveMessage, setInactiveMessage] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     const reason = window.localStorage.getItem("bot_logout_reason");
     if (reason === "another_device" || reason === "inactive") {
       setLogoutReason(reason);
+      if (reason === "inactive") {
+        const msg = window.localStorage.getItem("bot_logout_message");
+        if (msg) setInactiveMessage(msg);
+      }
       window.localStorage.removeItem("bot_logout_reason");
+      window.localStorage.removeItem("bot_logout_message");
     }
     const s = getSession();
     if (s) {
@@ -59,17 +65,15 @@ function LoginPage() {
     }
   }, []);
 
-  // Backend doesn't (yet) send a dedicated `code` for a deactivated employee
-  // the way it does for "another_device" (see api-client.ts) — until it does,
-  // fall back to sniffing the error message text so the login page can still
-  // show a clear, dedicated banner instead of a generic toast.
-  const readInactiveError = (error: any): { name?: string } | null => {
+  // Backend sends { code: 'account_inactive', message, name } when the account
+  // is deactivated — message may be a custom reason the admin set per employee.
+  const readInactiveError = (error: any): { name?: string; message?: string } | null => {
     const data = error?.response?.data;
     if (!data) return null;
     const isInactiveCode = data.code === "inactive" || data.code === "employee_inactive" || data.code === "account_inactive";
     const isInactiveMessage = typeof data.message === "string" && /inactive|deactivat/i.test(data.message);
     if (!isInactiveCode && !isInactiveMessage) return null;
-    return { name: data.name || data.employeeName };
+    return { name: data.name || data.employeeName, message: data.message };
   };
 
   const companyLogo = existingSession?.companyLogo || logo;
@@ -127,6 +131,7 @@ function LoginPage() {
       if (inactive) {
         setLogoutReason("inactive");
         setInactiveName(inactive.name);
+        setInactiveMessage(inactive.message);
       } else {
         toast.error(error.response?.data?.message || "Failed to send OTP");
       }
@@ -247,6 +252,7 @@ function LoginPage() {
       if (inactive) {
         setLogoutReason("inactive");
         setInactiveName(inactive.name);
+        setInactiveMessage(inactive.message);
         setStep("phone");
         setOtp(["", "", "", "", "", ""]);
         return;
@@ -448,7 +454,9 @@ function LoginPage() {
                     <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-800">
                       <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-red-500" />
                       <p className="text-xs font-semibold leading-relaxed">
-                        {inactiveName ? `${inactiveName}'s account` : "This account"} has been deactivated. Please contact your administrator.
+                        {inactiveMessage
+                          ? inactiveMessage
+                          : `${inactiveName ? `${inactiveName}'s account` : "This account"} has been deactivated. Please contact your administrator.`}
                       </p>
                     </div>
                   )}

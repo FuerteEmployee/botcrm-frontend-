@@ -1,20 +1,21 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import { 
-  User, Mail, Phone, MapPin, ShieldAlert, Library, 
-  Settings, CreditCard, Save, Edit2, RefreshCw, Briefcase, Calendar, HeartPulse,
-  Badge as LucideBadge, Clock
+import {
+  Mail, Phone, MapPin, ShieldAlert,
+  Settings, CreditCard, Briefcase, Calendar, HeartPulse,
+  Clock, Receipt, Contact2, ChevronRight, IndianRupee,
+  Landmark, IdCard, FileText
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { toast } from "sonner";
-import { motion } from "framer-motion";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { useExpenseService } from "@/services/expense-service";
+import { NewExpenseModal } from "@/components/pages/NewExpenseModal";
+import { useLeadService } from "@/services/lead-service";
+import { NewLeadModal } from "@/components/pages/NewLeadModal";
 
 export const Route = createFileRoute("/user/profile")({
   component: UserProfilePage,
@@ -33,6 +34,10 @@ interface UserProfile {
   address?: string;
   contactPersonName?: string;
   contactPersonMobile?: string;
+  aadhaarNo?: string;
+  panNo?: string;
+  panCardUrls?: string[];
+  aadhaarCardUrls?: string[];
   departmentId?: { name: string };
   branchId?: { name: string };
   shiftId?: { name: string; startTime: string; endTime: string };
@@ -46,13 +51,12 @@ interface UserProfile {
 }
 
 function UserProfilePage() {
-  const queryClient = useQueryClient();
-  const [isEditing, setIsEditing] = useState(false);
-
-  // Edit fields
-  const [address, setAddress] = useState("");
-  const [emergencyName, setEmergencyName] = useState("");
-  const [emergencyPhone, setEmergencyPhone] = useState("");
+  const navigate = useNavigate();
+  const [newExpenseOpen, setNewExpenseOpen] = useState(false);
+  const { expenses, createExpense, isCreating } = useExpenseService();
+  const pendingExpenseCount = expenses.filter((e) => e.status === "pending").length;
+  const [newLeadOpen, setNewLeadOpen] = useState(false);
+  const { createLead, isCreating: isCreatingLead } = useLeadService();
 
   // 1. Fetch Profile
   const { data: profile, isLoading } = useQuery<UserProfile>({
@@ -63,60 +67,15 @@ function UserProfilePage() {
     }
   });
 
-  useEffect(() => {
-    if (profile) {
-      setAddress(profile.address || "");
-      setEmergencyName(profile.contactPersonName || "");
-      setEmergencyPhone(profile.contactPersonMobile || "");
-    }
-  }, [profile]);
-
-  // 2. Update Profile Mutation
-  const updateProfileMutation = useMutation({
-    mutationFn: async () => {
-      const payload = {
-        address,
-        contactPersonName: emergencyName,
-        contactPersonMobile: emergencyPhone
-      };
-      const { data } = await apiClient.put("/users/profile", payload);
-      return data;
-    },
-    onSuccess: () => {
-      toast.success("Profile updated successfully!");
-      queryClient.invalidateQueries({ queryKey: ["user-profile"] });
-      setIsEditing(false);
-    },
-    onError: (err: any) => {
-      toast.error(err.response?.data?.message || "Profile Update Failed");
-    }
-  });
-
   if (isLoading) {
     return (
       <div className="w-full space-y-6 animate-pulse">
-        {/* Title skeleton */}
         <div className="space-y-2 text-left">
           <div className="h-5 w-40 bg-slate-200 dark:bg-slate-800 rounded-md" />
           <div className="h-3 w-64 bg-slate-100 dark:bg-slate-800/60 rounded-md" />
         </div>
-
-        {/* Hero Profile Banner Card Skeleton */}
         <div className="h-[120px] bg-slate-200 dark:bg-slate-800/80 rounded-[28px] border-t-8 border-[#501537]/50" />
-
-        {/* Grid layout */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          {/* Left skeleton */}
-          <div className="col-span-1 lg:col-span-6 space-y-6">
-            <div className="h-[280px] bg-slate-200 dark:bg-slate-800/60 rounded-[24px]" />
-          </div>
-
-          {/* Right skeleton */}
-          <div className="col-span-1 lg:col-span-6 space-y-6">
-            <div className="h-[160px] bg-slate-200 dark:bg-slate-800/60 rounded-[28px]" />
-            <div className="h-[220px] bg-slate-200 dark:bg-slate-800/60 rounded-[28px]" />
-          </div>
-        </div>
+        <div className="h-[280px] bg-slate-200 dark:bg-slate-800/60 rounded-[24px]" />
       </div>
     );
   }
@@ -125,14 +84,14 @@ function UserProfilePage() {
 
   return (
     <div className="w-full space-y-6">
-      
+
       {/* Title */}
       <div className="text-left">
         <h2 className="text-lg font-bold tracking-tight text-slate-800 dark:text-slate-100">
-          My Profile settings
+          My Account
         </h2>
         <p className="text-slate-500 text-xs mt-1">
-          Review emergency contacts, bank details, branch settings, and customize residential addresses.
+          Review your personal, bank, and other details.
         </p>
       </div>
 
@@ -144,7 +103,7 @@ function UserProfilePage() {
               {initials}
             </AvatarFallback>
           </Avatar>
-          
+
           <div className="space-y-3 flex-1">
             <div className="space-y-1">
               <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100 leading-none">{profile?.name}</h3>
@@ -152,7 +111,7 @@ function UserProfilePage() {
                 {profile?.departmentId?.name || "Operations"} Department
               </p>
             </div>
-            
+
             <div className="flex flex-wrap items-center justify-center md:justify-start gap-3 pt-1">
               <Badge className="bg-[#501537]/5 text-[#501537] dark:bg-[#7B2453]/10 dark:text-[#7B2453] border-none font-bold text-[8.5px] uppercase tracking-wider rounded-full px-2.5 py-0.5">
                 • {profile?.employmentType || "Monthly"} Base Staff
@@ -166,126 +125,124 @@ function UserProfilePage() {
         </CardContent>
       </Card>
 
-      {/* Main Info Columns */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        
-        {/* LEFT COLUMN: Contact & Emergency Details (Editable) */}
-        <div className="col-span-1 lg:col-span-6 space-y-6">
+      {/* Joining Date / Deadline stats */}
+      <div className="grid grid-cols-2 gap-3">
+        <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-2xl">
+          <CardContent className="p-4 text-center">
+            <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Joining Date</span>
+            <span className="text-sm font-black text-slate-800 dark:text-slate-100 mt-1 block">
+              {profile?.joiningDate ? new Date(profile.joiningDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "N/A"}
+            </span>
+          </CardContent>
+        </Card>
+        <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-2xl">
+          <CardContent className="p-4 text-center">
+            <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Deadline</span>
+            <span className="text-sm font-black text-slate-800 dark:text-slate-100 mt-1 block">N/A</span>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Quick Actions */}
+      <div id="quick-actions" className="space-y-3 scroll-mt-24">
+        <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-1">Quick Actions</h4>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <button
+            onClick={() => setNewExpenseOpen(true)}
+            className="text-left p-4 rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer relative"
+          >
+            {pendingExpenseCount > 0 && (
+              <Badge className="absolute top-3 right-3 bg-white/20 text-white border-none font-bold text-[8.5px] uppercase tracking-wider rounded-full px-2 py-0.5">
+                {pendingExpenseCount} Pending
+              </Badge>
+            )}
+            <div className="h-9 w-9 rounded-xl bg-white/20 flex items-center justify-center mb-3">
+              <IndianRupee className="h-4.5 w-4.5" />
+            </div>
+            <p className="text-sm font-bold">New Expense</p>
+            <p className="text-xs text-white/80 flex items-center gap-1 mt-0.5">Add Details <ChevronRight className="h-3 w-3" /></p>
+          </button>
+
+          <button
+            onClick={() => navigate({ to: "/user/expenses" })}
+            className="text-left p-4 rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+          >
+            <div className="h-9 w-9 rounded-xl bg-white/20 flex items-center justify-center mb-3">
+              <Receipt className="h-4.5 w-4.5" />
+            </div>
+            <p className="text-sm font-bold">Expenses</p>
+            <p className="text-xs text-white/80 flex items-center gap-1 mt-0.5">View Details <ChevronRight className="h-3 w-3" /></p>
+          </button>
+
+          <button
+            onClick={() => setNewLeadOpen(true)}
+            className="text-left p-4 rounded-2xl bg-gradient-to-br from-pink-500 to-rose-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+          >
+            <div className="h-9 w-9 rounded-xl bg-white/20 flex items-center justify-center mb-3">
+              <Contact2 className="h-4.5 w-4.5" />
+            </div>
+            <p className="text-sm font-bold">Lead</p>
+            <p className="text-xs text-white/80 flex items-center gap-1 mt-0.5">Add Lead <ChevronRight className="h-3 w-3" /></p>
+          </button>
+        </div>
+      </div>
+
+      {/* Tabs: Personal Info / Bank Info / Other Info */}
+      <Tabs defaultValue="personal" className="w-full">
+        <TabsList className="grid w-full grid-cols-3 bg-slate-100 dark:bg-slate-800">
+          <TabsTrigger value="personal">Personal Info</TabsTrigger>
+          <TabsTrigger value="bank">Bank Info</TabsTrigger>
+          <TabsTrigger value="other">Other Info</TabsTrigger>
+        </TabsList>
+
+        {/* Personal Info */}
+        <TabsContent value="personal" className="mt-4 space-y-6">
           <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-[24px] overflow-hidden">
             <CardContent className="p-6 space-y-5">
-              <div className="flex items-center justify-between border-b border-slate-50 dark:border-slate-800/40 pb-3">
-                <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-2">
-                  <ShieldAlert className="h-4 w-4 text-[#501537]" /> Contact & Emergency Details
-                </h4>
-                
-                <Button
-                  variant="ghost"
-                  onClick={() => setIsEditing(!isEditing)}
-                  className="rounded-xl h-8 px-3 text-xs font-bold bg-slate-50 hover:bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 border-none cursor-pointer"
-                >
-                  <Edit2 className="h-3 w-3 mr-1.5" />
-                  <span>{isEditing ? "Cancel" : "Edit Profile"}</span>
-                </Button>
+              <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 flex items-center gap-2 border-b border-slate-50 dark:border-slate-800/40 pb-3">
+                <ShieldAlert className="h-4 w-4 text-[#501537]" /> Contact Details
+              </h4>
+
+              <div className="space-y-4 pt-1">
+                <div className="flex items-center gap-3.5">
+                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] flex items-center justify-center shrink-0">
+                    <Mail className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-slate-400 font-bold block uppercase leading-none mb-1">Email Address</span>
+                    <span className="text-xs font-black text-slate-850 dark:text-slate-200">{profile?.email || "No Email Configured"}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3.5">
+                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] flex items-center justify-center shrink-0">
+                    <Phone className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-slate-400 font-bold block uppercase leading-none mb-1">Mobile Contact</span>
+                    <span className="text-xs font-black text-slate-850 dark:text-slate-200">{profile?.phone}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3.5">
+                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] flex items-center justify-center shrink-0">
+                    <MapPin className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-slate-400 font-bold block uppercase leading-none mb-1">Residential Address</span>
+                    <span className="text-xs font-black text-slate-850 dark:text-slate-200 leading-snug">{profile?.address || "No Address Added"}</span>
+                  </div>
+                </div>
               </div>
-
-              {isEditing ? (
-                <div className="space-y-4 pt-1">
-                  <div className="space-y-1.5">
-                    <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Residential Address</Label>
-                    <Input 
-                      value={address} 
-                      onChange={(e) => setAddress(e.target.value)} 
-                      className="rounded-xl h-11 text-xs dark:bg-slate-950 border-slate-200 dark:border-slate-800 px-3 focus-visible:ring-1 focus-visible:ring-primary"
-                    />
-                  </div>
-                  
-                  <div className="space-y-1.5">
-                    <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Emergency Contact Name</Label>
-                    <Input 
-                      value={emergencyName} 
-                      onChange={(e) => setEmergencyName(e.target.value)} 
-                      className="rounded-xl h-11 text-xs dark:bg-slate-950 border-slate-200 dark:border-slate-800 px-3 focus-visible:ring-1 focus-visible:ring-primary"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">Emergency Contact Mobile</Label>
-                    <Input 
-                      value={emergencyPhone} 
-                      onChange={(e) => setEmergencyPhone(e.target.value)} 
-                      className="rounded-xl h-11 text-xs dark:bg-slate-950 border-slate-200 dark:border-slate-800 px-3 focus-visible:ring-1 focus-visible:ring-primary"
-                    />
-                  </div>
-
-                  <Button 
-                    onClick={() => updateProfileMutation.mutate()}
-                    disabled={updateProfileMutation.isPending}
-                    className="w-full bg-gradient-primary text-white font-extrabold rounded-xl h-11 border-none shadow-md shadow-primary/20 text-xs mt-2 cursor-pointer"
-                  >
-                    {updateProfileMutation.isPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : "Save Changes"}
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-4 pt-1">
-                  
-                  <div className="flex items-center gap-3.5">
-                    <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] flex items-center justify-center shrink-0">
-                      <Mail className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <span className="text-[9px] text-slate-400 font-bold block uppercase leading-none mb-1">Email Address</span>
-                      <span className="text-xs font-black text-slate-850 dark:text-slate-200">{profile?.email || "No Email Configured"}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3.5">
-                    <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] flex items-center justify-center shrink-0">
-                      <Phone className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <span className="text-[9px] text-slate-400 font-bold block uppercase leading-none mb-1">Mobile Contact</span>
-                      <span className="text-xs font-black text-slate-850 dark:text-slate-200">{profile?.phone}</span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-3.5">
-                    <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] flex items-center justify-center shrink-0">
-                      <MapPin className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <span className="text-[9px] text-slate-400 font-bold block uppercase leading-none mb-1">Residential Address</span>
-                      <span className="text-xs font-black text-slate-850 dark:text-slate-200 leading-snug">{profile?.address || "No Address Added"}</span>
-                    </div>
-                  </div>
-
-                  <div className="pt-3 border-t border-slate-50 dark:border-slate-850/50 flex items-center gap-3.5">
-                    <div className="h-8 w-8 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0">
-                      <ShieldAlert className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <span className="text-[9px] text-slate-400 font-bold block uppercase leading-none mb-1">Emergency Contact Info</span>
-                      <span className="text-xs font-black text-slate-850 dark:text-slate-200">
-                        {profile?.contactPersonName ? `${profile.contactPersonName} (${profile.contactPersonMobile})` : "Not Configured"}
-                      </span>
-                    </div>
-                  </div>
-
-                </div>
-              )}
             </CardContent>
           </Card>
-        </div>
 
-        {/* RIGHT COLUMN: Work Settings & Financial Bank details ( salary account mockup card) */}
-        <div className="col-span-1 lg:col-span-6 space-y-6">
-          
-          {/* Work settings details */}
           <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-[28px] overflow-hidden">
             <CardContent className="p-6 space-y-5">
               <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 flex items-center gap-2 border-b border-slate-50 dark:border-slate-800/40 pb-3">
                 <Settings className="h-4 w-4 text-[#501537]" /> Duty configurations
               </h4>
-              
+
               <div className="grid grid-cols-2 gap-5 pt-1">
                 <div className="space-y-0.5">
                   <span className="text-[9px] text-slate-400 font-bold block uppercase tracking-wider">Assigned Shift</span>
@@ -310,32 +267,22 @@ function UserProfilePage() {
                     {profile?.joiningDate ? new Date(profile.joiningDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "Not Listed"}
                   </span>
                 </div>
-
-                <div className="space-y-0.5">
-                  <span className="text-[9px] text-slate-400 font-bold block uppercase tracking-wider">Blood Group</span>
-                  <span className="text-[12px] font-black text-slate-850 dark:text-slate-250 flex items-center gap-1">
-                    <HeartPulse className="h-3.5 w-3.5 text-slate-400" />
-                    {profile?.bloodGroup || "Not Listed"}
-                  </span>
-                </div>
               </div>
             </CardContent>
           </Card>
+        </TabsContent>
 
-          {/* salary account credit card mockup visual */}
+        {/* Bank Info */}
+        <TabsContent value="bank" className="mt-4">
           <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-[28px] overflow-hidden">
-            <CardContent className="p-6 space-y-4">
+            <CardContent className="p-6 space-y-5">
               <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 flex items-center gap-2 border-b border-slate-50 dark:border-slate-800/40 pb-3">
-                <CreditCard className="h-4 w-4 text-[#501537]" /> Salary Disbursement Account
+                <Landmark className="h-4 w-4 text-[#501537]" /> Salary Disbursement Account
               </h4>
 
               {profile?.bankDetails?.accountNumber ? (
                 <div className="pt-1">
-                  
-                  {/* Credit Card Mockup design */}
                   <div className="relative p-6 rounded-3xl bg-gradient-to-tr from-slate-900 via-indigo-950 to-slate-950 text-white overflow-hidden border border-white/10 shadow-lg select-none">
-                    
-                    {/* Watermark symbol */}
                     <div className="absolute top-0 right-0 p-4 opacity-5">
                        <CreditCard className="h-28 w-28" />
                     </div>
@@ -367,26 +314,107 @@ function UserProfilePage() {
                          </div>
                       </div>
                     </div>
-
                   </div>
-
-                  <span className="text-[9.5px] text-slate-400 block font-bold italic text-center mt-3">
-                    *Account details can only be edited by HR administrators for safety.
-                  </span>
-
                 </div>
               ) : (
                 <div className="p-6 rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-xs text-slate-400">
                   <CreditCard className="h-7 w-7 text-slate-350 mx-auto mb-2" />
-                  <span>Salary bank account has not been uploaded by HR.</span>
+                  <span>No bank account added yet. Contact HR/Admin to have it configured.</span>
                 </div>
               )}
             </CardContent>
           </Card>
+        </TabsContent>
 
-        </div>
+        {/* Other Info */}
+        <TabsContent value="other" className="mt-4">
+          <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-[28px] overflow-hidden">
+            <CardContent className="p-6 space-y-5">
+              <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 flex items-center gap-2 border-b border-slate-50 dark:border-slate-800/40 pb-3">
+                <IdCard className="h-4 w-4 text-[#501537]" /> Other Info
+              </h4>
 
-      </div>
+              <div className="space-y-4 pt-1">
+                <div className="flex items-center gap-3.5">
+                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] flex items-center justify-center shrink-0">
+                    <IdCard className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-slate-400 font-bold block uppercase leading-none mb-1">PAN No</span>
+                    <span className="text-xs font-black text-slate-850 dark:text-slate-200">{profile?.panNo || "Not Added"}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3.5">
+                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] flex items-center justify-center shrink-0">
+                    <IdCard className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-slate-400 font-bold block uppercase leading-none mb-1">Aadhaar Card No</span>
+                    <span className="text-xs font-black text-slate-850 dark:text-slate-200">{profile?.aadhaarNo || "Not Added"}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3.5">
+                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] flex items-center justify-center shrink-0">
+                    <HeartPulse className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-slate-400 font-bold block uppercase leading-none mb-1">Blood Group</span>
+                    <span className="text-xs font-black text-slate-850 dark:text-slate-200">{profile?.bloodGroup || "Not Listed"}</span>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-50 dark:border-slate-850/50 flex items-center gap-3.5">
+                  <div className="h-8 w-8 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center shrink-0">
+                    <ShieldAlert className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <span className="text-[9px] text-slate-400 font-bold block uppercase leading-none mb-1">Emergency Contact Info</span>
+                    <span className="text-xs font-black text-slate-850 dark:text-slate-200">
+                      {profile?.contactPersonName ? `${profile.contactPersonName} (${profile.contactPersonMobile})` : "Not Configured"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-slate-50 dark:border-slate-850/50 space-y-2">
+                  <span className="text-[9px] text-slate-400 font-bold block uppercase leading-none">Uploaded Documents</span>
+                  {(!profile?.panCardUrls?.length && !profile?.aadhaarCardUrls?.length) ? (
+                    <span className="text-xs text-slate-400">No documents uploaded yet.</span>
+                  ) : (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      {(profile?.panCardUrls || []).map((url, i) => (
+                        <a key={`pan-${i}`} href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-[11px] font-bold text-primary px-3 py-1.5 rounded-lg bg-primary/5 hover:bg-primary/10">
+                          <FileText className="h-3.5 w-3.5" /> PAN Card {i + 1}
+                        </a>
+                      ))}
+                      {(profile?.aadhaarCardUrls || []).map((url, i) => (
+                        <a key={`aadhaar-${i}`} href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-[11px] font-bold text-primary px-3 py-1.5 rounded-lg bg-primary/5 hover:bg-primary/10">
+                          <FileText className="h-3.5 w-3.5" /> Aadhaar Card {i + 1}
+                        </a>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      <NewExpenseModal
+        open={newExpenseOpen}
+        onOpenChange={setNewExpenseOpen}
+        onSubmit={createExpense}
+        isLoading={isCreating}
+      />
+
+      <NewLeadModal
+        open={newLeadOpen}
+        onOpenChange={setNewLeadOpen}
+        onSubmit={createLead}
+        isLoading={isCreatingLead}
+      />
 
     </div>
   );

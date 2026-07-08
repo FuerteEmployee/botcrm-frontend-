@@ -1,25 +1,28 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useMemo, useEffect } from "react";
-import { Search, Download, Wallet, Filter, CalendarDays, Loader2, Sparkles, Receipt, Info, ArrowUpRight, ArrowDownRight, Building2, MapPin } from "lucide-react";
+import { Search, Download, Wallet, Filter, CalendarDays, Loader2, Sparkles, Receipt, Info, ArrowUpRight, ArrowDownRight, Building2, MapPin, HandCoins } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card } from "@/components/ui/card";
 import { ViewToggle } from "@/components/shared/view-toggle";
 import { FormInput } from "@/components/shared/form-input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { DataTable, DataTableCell, DataTableRow } from "@/components/shared/data-table";
 import { ActionButton } from "@/components/shared/action-button";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog";
 import { StatCard } from "@/components/shared/stat-card";
 import { useLayoutSettings } from "@/hooks/use-layout-settings";
 import { usePermission } from "@/hooks/use-permission";
 import { GridCard } from "@/components/shared/grid-card";
 import { useSalaryService, type SalaryRecord } from "@/services/salary-service";
+import { fetchApprovedAdvancesForEmployee, type AdvanceSalaryRequest } from "@/services/advance-salary-service";
+import { fetchApprovedExpensesForEmployee, type Expense } from "@/services/expense-service";
 import { toast } from "sonner";
 import { cn, formatTime12h } from "@/lib/utils";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
@@ -52,6 +55,14 @@ function SalaryPage() {
   const [branchFilter, setBranchFilter] = useState("all");
   const [selectedMonth, setSelectedMonth] = useState(`${new Date().getMonth() + 1}-${new Date().getFullYear()}`);
   const [detailsRecord, setDetailsRecord] = useState<SalaryRecord | null>(null);
+  const [advanceModalRecord, setAdvanceModalRecord] = useState<SalaryRecord | null>(null);
+  const [advanceOptions, setAdvanceOptions] = useState<AdvanceSalaryRequest[]>([]);
+  const [isLoadingAdvances, setIsLoadingAdvances] = useState(false);
+  const [selectedAdvanceIds, setSelectedAdvanceIds] = useState<Set<string>>(new Set());
+  const [expenseModalRecord, setExpenseModalRecord] = useState<SalaryRecord | null>(null);
+  const [expenseOptions, setExpenseOptions] = useState<Expense[]>([]);
+  const [isLoadingExpenses, setIsLoadingExpenses] = useState(false);
+  const [selectedExpenseIds, setSelectedExpenseIds] = useState<Set<string>>(new Set());
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
   const [view, setView] = useState<"grid" | "list">(defaultLayout);
   const { can } = usePermission();
@@ -66,7 +77,10 @@ function SalaryPage() {
   }, [defaultLayout]);
 
   const [m, y] = selectedMonth.split("-").map(Number);
-  const { salaryRecords: list, isLoading, updateSalary, generateSalaries, isGenerating } = useSalaryService(m, y);
+  const {
+    salaryRecords: list, isLoading, updateSalary, generateSalaries, isGenerating,
+    generateSalaryForEmployee, isGeneratingOne,
+  } = useSalaryService(m, y);
 
   const filtered = useMemo(() => list.filter((s) => {
     const name = s.employeeId?.name || "";
@@ -91,6 +105,78 @@ function SalaryPage() {
   const handleGenerate = async () => {
     try {
       await generateSalaries({ month: m, year: y });
+    } catch (err) { }
+  };
+
+  const openAdvanceModal = async (record: SalaryRecord) => {
+    setAdvanceModalRecord(record);
+    setSelectedAdvanceIds(new Set());
+    setIsLoadingAdvances(true);
+    try {
+      const advances = await fetchApprovedAdvancesForEmployee(record.employeeId._id);
+      setAdvanceOptions(advances);
+    } catch (err) {
+      setAdvanceOptions([]);
+    } finally {
+      setIsLoadingAdvances(false);
+    }
+  };
+
+  const toggleAdvanceSelected = (id: string) => {
+    setSelectedAdvanceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const confirmAdvanceDeduction = async () => {
+    if (!advanceModalRecord) return;
+    try {
+      await generateSalaryForEmployee({
+        employeeId: advanceModalRecord.employeeId._id,
+        month: advanceModalRecord.month,
+        year: advanceModalRecord.year,
+        advanceRequestIds: Array.from(selectedAdvanceIds),
+      });
+      setAdvanceModalRecord(null);
+    } catch (err) { }
+  };
+
+  const openExpenseModal = async (record: SalaryRecord) => {
+    setExpenseModalRecord(record);
+    setSelectedExpenseIds(new Set());
+    setIsLoadingExpenses(true);
+    try {
+      const expenses = await fetchApprovedExpensesForEmployee(record.employeeId._id);
+      setExpenseOptions(expenses);
+    } catch (err) {
+      setExpenseOptions([]);
+    } finally {
+      setIsLoadingExpenses(false);
+    }
+  };
+
+  const toggleExpenseSelected = (id: string) => {
+    setSelectedExpenseIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const confirmExpenseReimbursement = async () => {
+    if (!expenseModalRecord) return;
+    try {
+      await generateSalaryForEmployee({
+        employeeId: expenseModalRecord.employeeId._id,
+        month: expenseModalRecord.month,
+        year: expenseModalRecord.year,
+        expenseIds: Array.from(selectedExpenseIds),
+      });
+      setExpenseModalRecord(null);
     } catch (err) { }
   };
 
@@ -252,6 +338,24 @@ function SalaryPage() {
                       onClick={() => setDetailsRecord(r)}
                       className="flex-1 h-9"
                     />
+                    {(r.status === "pending" || r.status === "review") && canEdit && (
+                      <ActionButton
+                        variant="comment"
+                        icon={HandCoins}
+                        tooltip="Apply Advance Deduction"
+                        onClick={() => openAdvanceModal(r)}
+                        className="h-9 w-9"
+                      />
+                    )}
+                    {(r.status === "pending" || r.status === "review") && canEdit && (
+                      <ActionButton
+                        variant="comment"
+                        icon={Receipt}
+                        tooltip="Apply Expense Reimbursement"
+                        onClick={() => openExpenseModal(r)}
+                        className="h-9 w-9"
+                      />
+                    )}
                     {r.status === "pending" && canEdit && (
                       <ActionButton
                         variant="approve"
@@ -315,6 +419,12 @@ function SalaryPage() {
                   <DataTableCell isLast>
                     <div className="flex justify-end gap-1">
                       <ActionButton variant="view" tooltip="View Details" onClick={() => setDetailsRecord(r)} />
+                      {(r.status === "pending" || r.status === "review") && canEdit && (
+                        <ActionButton variant="comment" icon={HandCoins} tooltip="Apply Advance Deduction" onClick={() => openAdvanceModal(r)} />
+                      )}
+                      {(r.status === "pending" || r.status === "review") && canEdit && (
+                        <ActionButton variant="comment" icon={Receipt} tooltip="Apply Expense Reimbursement" onClick={() => openExpenseModal(r)} />
+                      )}
                       {r.status === "pending" && canEdit && (
                         <ActionButton variant="approve" tooltip="Pay Now" onClick={() => handlePay(r._id)} className="bg-emerald-500 text-white" />
                       )}
@@ -392,6 +502,160 @@ function SalaryPage() {
               </Badge>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Advance Salary Deduction Dialog */}
+      <Dialog open={!!advanceModalRecord} onOpenChange={(o) => !o && setAdvanceModalRecord(null)}>
+        <DialogContent className="max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-[18px] font-black tracking-tight">
+              Apply Advance Deduction
+            </DialogTitle>
+            <DialogDescription className="text-[13px] text-muted-foreground">
+              {advanceModalRecord?.employeeId?.name} — {MONTHS.find(mo => mo.m === advanceModalRecord?.month)?.label}.
+              Select approved advance salary / loan requests to recover from this month's payroll.
+            </DialogDescription>
+          </DialogHeader>
+
+          {isLoadingAdvances ? (
+            <div className="py-8 flex justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : advanceOptions.length === 0 ? (
+            <p className="py-6 text-center text-[13px] text-muted-foreground">
+              No approved advance/loan requests pending recovery for this employee.
+            </p>
+          ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {advanceOptions.map((req) => (
+                <label
+                  key={req._id}
+                  className="flex items-center justify-between gap-3 p-3 rounded-xl border border-border/60 cursor-pointer hover:bg-muted/20"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Checkbox
+                      checked={selectedAdvanceIds.has(req._id)}
+                      onCheckedChange={() => toggleAdvanceSelected(req._id)}
+                    />
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-bold truncate">
+                        {req.type === "loan" ? "Loan" : "Advance Salary"}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground truncate">{req.reason}</p>
+                    </div>
+                  </div>
+                  <span className="text-[13px] font-black text-foreground shrink-0">
+                    {fmtINR(req.approvedAmount ?? req.amount)}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between px-1 pt-2 border-t border-border/40">
+            <span className="text-[12px] font-bold text-muted-foreground">Total selected</span>
+            <span className="text-[15px] font-black text-primary">
+              {fmtINR(advanceOptions
+                .filter((req) => selectedAdvanceIds.has(req._id))
+                .reduce((s, req) => s + (req.approvedAmount ?? req.amount), 0))}
+            </span>
+          </div>
+
+          <DialogFooter className="gap-2 mt-2">
+            <Button
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => setAdvanceModalRecord(null)}
+              disabled={isGeneratingOne}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="rounded-xl bg-gradient-primary text-primary-foreground"
+              onClick={confirmAdvanceDeduction}
+              disabled={isGeneratingOne || selectedAdvanceIds.size === 0}
+            >
+              {isGeneratingOne ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
+              Apply & Recalculate
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Expense Reimbursement Dialog */}
+      <Dialog open={!!expenseModalRecord} onOpenChange={(o) => !o && setExpenseModalRecord(null)}>
+        <DialogContent className="max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-[18px] font-black tracking-tight">
+              Apply Expense Reimbursement
+            </DialogTitle>
+            <DialogDescription className="text-[13px] text-muted-foreground">
+              {expenseModalRecord?.employeeId?.name} — {MONTHS.find(mo => mo.m === expenseModalRecord?.month)?.label}.
+              Select approved expense claims to add to this month's payroll.
+            </DialogDescription>
+          </DialogHeader>
+
+          {isLoadingExpenses ? (
+            <div className="py-8 flex justify-center">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          ) : expenseOptions.length === 0 ? (
+            <p className="py-6 text-center text-[13px] text-muted-foreground">
+              No approved expense claims pending reimbursement for this employee.
+            </p>
+          ) : (
+            <div className="space-y-2 max-h-64 overflow-y-auto">
+              {expenseOptions.map((exp) => (
+                <label
+                  key={exp._id}
+                  className="flex items-center justify-between gap-3 p-3 rounded-xl border border-border/60 cursor-pointer hover:bg-muted/20"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Checkbox
+                      checked={selectedExpenseIds.has(exp._id)}
+                      onCheckedChange={() => toggleExpenseSelected(exp._id)}
+                    />
+                    <div className="min-w-0">
+                      <p className="text-[13px] font-bold truncate">{exp.category}</p>
+                      <p className="text-[11px] text-muted-foreground truncate">{exp.description || "—"}</p>
+                    </div>
+                  </div>
+                  <span className="text-[13px] font-black text-foreground shrink-0">
+                    {fmtINR(exp.amount)}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+
+          <div className="flex items-center justify-between px-1 pt-2 border-t border-border/40">
+            <span className="text-[12px] font-bold text-muted-foreground">Total selected</span>
+            <span className="text-[15px] font-black text-primary">
+              {fmtINR(expenseOptions
+                .filter((exp) => selectedExpenseIds.has(exp._id))
+                .reduce((s, exp) => s + exp.amount, 0))}
+            </span>
+          </div>
+
+          <DialogFooter className="gap-2 mt-2">
+            <Button
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => setExpenseModalRecord(null)}
+              disabled={isGeneratingOne}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="rounded-xl bg-gradient-primary text-primary-foreground"
+              onClick={confirmExpenseReimbursement}
+              disabled={isGeneratingOne || selectedExpenseIds.size === 0}
+            >
+              {isGeneratingOne ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
+              Apply & Recalculate
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

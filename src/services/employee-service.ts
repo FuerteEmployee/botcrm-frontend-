@@ -39,9 +39,11 @@ export interface Employee {
   departmentId?: string;
   branchId?: string;
   shiftId?: string;
+  shiftIds?: string[]; // all shifts assigned; shiftId is kept as the primary one for attendance timing
   salary: number;
   profileImage?: string;
   status: 'active' | 'inactive';
+  inactiveReason?: string;
   weeklyHolidays: WeeklyHoliday[];
   salaryComponents: {
     tds: SalaryComponent;
@@ -97,36 +99,39 @@ interface EmployeeParams {
   limit?: number;
   search?: string;
   departmentId?: string;
+  shiftId?: string;
   status?: string;
 }
 
 export function useEmployeeService(params: EmployeeParams = {}) {
   const queryClient = useQueryClient();
-  const { page = 1, limit = 10, search = "", departmentId = "all", status = "active" } = params;
+  const { page = 1, limit = 10, search = "", departmentId = "all", shiftId = "all", status = "active" } = params;
 
   const { data, isLoading, isFetching } = useQuery<EmployeeResponse>({
-    queryKey: ["employees", page, limit, search, departmentId, status],
+    queryKey: ["employees", page, limit, search, departmentId, shiftId, status],
     queryFn: async () => {
       const qp = new URLSearchParams();
       qp.append("page", page.toString());
       qp.append("limit", limit.toString());
       if (search) qp.append("search", search);
       if (departmentId && departmentId !== "all") qp.append("departmentId", departmentId);
+      if (shiftId && shiftId !== "all") qp.append("shiftId", shiftId);
       if (status && status !== "all") qp.append("status", status);
 
       const { data } = await apiClient.get(`/users/employees?${qp.toString()}`);
-      
+
       // Handle both formats (if API returns raw array or paginated object)
       if (Array.isArray(data)) {
         // If it's a raw array, we simulate server-side pagination client-side
         // so the UI remains consistent while the backend is being updated.
         const filteredData = data.filter(e => {
-          const matchesSearch = !search || 
+          const matchesSearch = !search ||
             e.name?.toLowerCase().includes(search.toLowerCase()) ||
             e.phone?.includes(search);
           const matchesDept = departmentId === "all" || e.departmentId === departmentId || (e.departmentId as any)?._id === departmentId;
+          const matchesShift = shiftId === "all" || e.shiftId === shiftId || (e.shiftId as any)?._id === shiftId;
           const matchesStatus = status === "all" || e.status === status;
-          return matchesSearch && matchesDept && matchesStatus;
+          return matchesSearch && matchesDept && matchesShift && matchesStatus;
         });
 
         const start = (page - 1) * limit;

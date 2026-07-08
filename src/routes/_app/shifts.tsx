@@ -123,7 +123,7 @@ const SHIFT_ICON_COLORS: Record<string, string> = {
 
 function ShiftsPage() {
   const { shifts: list, isLoading, createShift, updateShift, deleteShift, isCreating, isUpdating } = useShiftService();
-  const { employees = [] } = useEmployeeService();
+  const { employees = [], updateEmployee, isUpdating: isAssigning } = useEmployeeService({ limit: 1000, status: "active" });
   
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<BackendShift | null>(null);
@@ -151,13 +151,57 @@ function ShiftsPage() {
   }, []);
 
   const [assignOpen, setAssignOpen] = useState(false);
-  const [assignForm, setAssignForm] = useState({ employeeId: "", shiftId: "" });
+  const [assignForm, setAssignForm] = useState<{ employeeId: string; shiftIds: string[] }>({ employeeId: "", shiftIds: [] });
 
   const filtered = list.filter((s) =>
     s.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  const totalAssigned = list.reduce((s, sh) => s + (sh.assigned || 0), 0);
+  // Assignment lives on the employee record (User.shiftId / shiftIds), not on
+  // the Shift document, so both the count and the actual names per shift have
+  // to be derived from the employees list rather than trusting a
+  // `shift.assigned` field the backend never sets. An employee can now be
+  // assigned multiple shifts (shiftIds), with shiftId kept as the primary one
+  // used for attendance/lateness timing — dedupe the two here.
+  const getEmployeeShiftIds = (e: any): string[] => {
+    const ids = new Set<string>();
+    const primary = e?.shiftId && typeof e.shiftId === "object" ? e.shiftId._id : e?.shiftId;
+    if (primary) ids.add(primary);
+    if (Array.isArray(e?.shiftIds)) {
+      e.shiftIds.forEach((s: any) => {
+        const id = s && typeof s === "object" ? s._id : s;
+        if (id) ids.add(id);
+      });
+    }
+    return Array.from(ids);
+  };
+
+  const assignedEmployeesByShift = employees.reduce<Record<string, { _id: string; name: string }[]>>((acc, e: any) => {
+    getEmployeeShiftIds(e).forEach((shiftId) => {
+      (acc[shiftId] ||= []).push({ _id: e._id, name: e.name });
+    });
+    return acc;
+  }, {});
+
+  const assignedCounts = Object.fromEntries(
+    Object.entries(assignedEmployeesByShift).map(([shiftId, list]) => [shiftId, list.length])
+  );
+
+  const totalAssigned = employees.filter((e: any) => getEmployeeShiftIds(e).length > 0).length;
+
+  const handleEmployeeChange = (empId: string) => {
+    const emp = employees.find((e: any) => e._id === empId);
+    setAssignForm({ employeeId: empId, shiftIds: emp ? getEmployeeShiftIds(emp) : [] });
+  };
+
+  const toggleAssignShift = (shiftId: string) => {
+    setAssignForm((prev) => ({
+      ...prev,
+      shiftIds: prev.shiftIds.includes(shiftId)
+        ? prev.shiftIds.filter((id) => id !== shiftId)
+        : [...prev.shiftIds, shiftId],
+    }));
+  };
 
   const to12h = (time24: string) => {
     const [h, m] = time24.split(":").map(Number);
@@ -221,11 +265,18 @@ function ShiftsPage() {
     }
   };
 
-  const handleAssign = (e: React.FormEvent) => {
+  const handleAssign = async (e: React.FormEvent) => {
     e.preventDefault();
-    // This part depends on if there's a specific API for assigning shifts to employees
-    toast.success("Shift assigned successfully");
-    setAssignOpen(false);
+    if (!assignForm.employeeId || assignForm.shiftIds.length === 0) {
+      toast.error("Select an employee and at least one shift");
+      return;
+    }
+    try {
+      await updateEmployee({ id: assignForm.employeeId, data: { shiftIds: assignForm.shiftIds } });
+      setAssignOpen(false);
+    } catch (err) {
+      // Error toast handled by employee service
+    }
   };
 
   if (isLoading) {
@@ -251,8 +302,8 @@ function ShiftsPage() {
                 variant="outline"
                 className="h-9 text-[13px] rounded-lg"
                 onClick={() => {
-                  if (employees.length > 0 && list.length > 0) {
-                    setAssignForm({ employeeId: employees[0]._id, shiftId: list[0]._id });
+                  if (employees.length > 0) {
+                    handleEmployeeChange(employees[0]._id);
                   }
                   setAssignOpen(true);
                 }}
@@ -362,7 +413,7 @@ function ShiftsPage() {
 
                     <div className="pt-3 border-t border-border/40 flex items-center justify-between mt-auto">
                       <div className="flex items-center gap-1.5 text-[12px] font-medium text-primary/80 bg-primary/5 px-2 py-0.5 rounded-md">
-                        <Users className="h-3.5 w-3.5" /> {s.assigned || 0} assigned
+                        <Users className="h-3.5 w-3.5" /> {assignedCounts[s._id] || 0} assigned
                       </div>
                       <span className="text-[11px] text-muted-foreground/60 flex items-center gap-1">
                         <Calendar className="h-3 w-3" /> {new Date(s.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')}
@@ -401,7 +452,7 @@ function ShiftsPage() {
                     </Badge>
                   </DataTableCell>
                   <DataTableCell>
-                    <Badge variant="secondary" className="text-[11px] font-medium px-2 py-0.5">{s.assigned || 0}</Badge>
+                    <Badge variant="secondary" className="text-[11px] font-medium px-2 py-0.5">{assignedCounts[s._id] || 0}</Badge>
                   </DataTableCell>
                   <DataTableCell className="text-[13px] text-muted-foreground">
                     {new Date(s.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, ' - ')}
@@ -610,25 +661,44 @@ function ShiftsPage() {
               label="Employee"
               placeholder="Select Employee"
               value={assignForm.employeeId}
-              onValueChange={(v) => setAssignForm({ ...assignForm, employeeId: v })}
+              onValueChange={handleEmployeeChange}
               options={employees.map((e: any) => ({ label: e.name, value: e._id }))}
               containerClassName="space-y-1"
             />
-            <FormSelect
-              label="Shift"
-              placeholder="Select Shift"
-              value={assignForm.shiftId}
-              onValueChange={(v) => setAssignForm({ ...assignForm, shiftId: v })}
-              options={list.map((s) => ({ 
-                label: s.name, 
-                value: s._id, 
-                subLabel: `${formatTime12h(s.startTime)} – ${formatTime12h(s.endTime)}` 
-              }))}
-              containerClassName="space-y-1"
-            />
+            <div className="space-y-1.5">
+              <label className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider block">Shifts</label>
+              <div className="flex flex-wrap gap-2">
+                {list.map((s) => {
+                  const active = assignForm.shiftIds.includes(s._id);
+                  return (
+                    <button
+                      key={s._id}
+                      type="button"
+                      onClick={() => toggleAssignShift(s._id)}
+                      className={cn(
+                        "px-3 py-2 rounded-xl text-left border transition-all",
+                        active
+                          ? "bg-primary text-white border-primary shadow-sm"
+                          : "bg-white text-foreground border-border/50 hover:border-primary/40"
+                      )}
+                    >
+                      <div className="text-[13px] font-bold leading-none">{s.name}</div>
+                      <div className={cn("text-[10px] mt-1", active ? "text-white/80" : "text-muted-foreground")}>
+                        {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Select one or more shifts this employee works. The first one picked is used as their primary shift for attendance timing.
+              </p>
+            </div>
             <DialogFooter className="gap-2 pt-2 border-t border-border/40 mt-2">
-              <Button type="button" size="sm" variant="outline" onClick={() => setAssignOpen(false)} className="rounded-lg">Cancel</Button>
-              <Button type="submit" size="sm" className="bg-gradient-primary text-primary-foreground rounded-lg px-5 shadow-md">Assign</Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => setAssignOpen(false)} className="rounded-lg" disabled={isAssigning}>Cancel</Button>
+              <Button type="submit" size="sm" className="bg-gradient-primary text-primary-foreground rounded-lg px-5 shadow-md" disabled={isAssigning}>
+                {isAssigning ? <Loader2 className="h-4 w-4 animate-spin" /> : "Assign"}
+              </Button>
             </DialogFooter>
           </form>
         </DialogContent>

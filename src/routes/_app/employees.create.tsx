@@ -130,7 +130,7 @@ function AddEmployeePage() {
     branchId: "",
     branchIds: [] as string[],
     employmentType: "monthly",
-    shiftId: "",
+    shiftIds: [] as string[],
     weeklyHolidays: [] as { day: string; weeks: number[] }[],
     address: "",
     bloodGroup: "",
@@ -201,7 +201,7 @@ function AddEmployeePage() {
       err.branchId = "Branch selection is required";
     }
     if (!form.departmentId) err.departmentId = "Department selection is required";
-    if (!form.shiftId) err.shiftId = "Shift selection is required";
+    if (form.shiftIds.length === 0) err.shiftId = "Select at least one shift";
     return err;
   }, [form, allowMultipleBranches]);
 
@@ -219,8 +219,8 @@ function AddEmployeePage() {
           // Only fill empty fields so a restored draft isn't overwritten.
           setForm(prev => {
             const updates: Partial<typeof prev> = {};
-            if (!prev.shiftId && data?.attendance?.defaultShiftId) {
-              updates.shiftId = data.attendance.defaultShiftId;
+            if (prev.shiftIds.length === 0 && data?.attendance?.defaultShiftId) {
+              updates.shiftIds = [data.attendance.defaultShiftId];
             }
             if (prev.weeklyHolidays.length === 0 && data?.attendance?.workDays?.length) {
               // Days NOT in workDays are holidays — pre-populate weeklyHolidays
@@ -248,7 +248,7 @@ function AddEmployeePage() {
     setForm(prev => {
       const updates: Partial<typeof prev> = {};
       if (!prev.departmentId && departments?.length) updates.departmentId = departments[0]._id;
-      if (!prev.shiftId && shifts?.length) updates.shiftId = shifts[0]._id;
+      if (prev.shiftIds.length === 0 && shifts?.length) updates.shiftIds = [shifts[0]._id];
       if (allowMultipleBranches) {
         if ((prev.branchIds?.length || 0) === 0 && branches?.length) updates.branchIds = [branches[0]._id];
       } else if (!prev.branchId && branches?.length) {
@@ -298,7 +298,12 @@ function AddEmployeePage() {
             return primary ? [primary] : [];
           })(),
           employmentType: (emp as any).employmentType || "monthly",
-          shiftId: (emp.shiftId as any)?._id || emp.shiftId || "",
+          shiftIds: (() => {
+            const ids = ((emp as any).shiftIds || []).map((s: any) => s?._id || s).filter(Boolean);
+            if (ids.length) return ids;
+            const primary = (emp.shiftId as any)?._id || emp.shiftId;
+            return primary ? [primary] : [];
+          })(),
           weeklyHolidays: emp.weeklyHolidays || [],
           address: (emp as any).address || "",
           bloodGroup: (emp as any).bloodGroup || "",
@@ -357,6 +362,8 @@ function AddEmployeePage() {
         salary: Number(form.salary) || 0,
         branchIds,
         branchId: branchIds[0] || "",
+        shiftIds: form.shiftIds,
+        shiftId: form.shiftIds[0] || "",
       };
 
       if (isEditing && employeeId) {
@@ -667,20 +674,60 @@ function AddEmployeePage() {
                 onAddNew={() => setQuickAddOpen("department")}
               />
 
-              <FormSelect
-                label="Shift"
-                icon={Clock}
-                placeholder="Select Shift"
-                value={form.shiftId}
-                onValueChange={(v) => { setForm({ ...form, shiftId: v }); handleBlur('shiftId'); }}
-                options={(shifts || []).map((s: any) => ({
-                  label: s.name + (globalSettings?.attendance?.defaultShiftId === s._id ? " (Global Default)" : ""),
-                  value: s._id
-                }))}
-                error={touched.shiftId ? errors.shiftId : undefined}
-                required
-                onAddNew={() => setQuickAddOpen("shift")}
-              />
+              <div className="space-y-4 md:col-span-2">
+                <div className="flex items-center justify-between ml-1">
+                  <label className="text-[11px] font-bold text-muted-foreground tracking-widest">
+                    SHIFTS<span className="text-destructive ml-0.5">*</span>
+                    <span className="ml-2 font-semibold normal-case tracking-normal text-[10px] text-primary">Select one or more</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setQuickAddOpen("shift")}
+                    className="flex items-center gap-1 text-[10px] font-bold text-primary hover:text-primary/70 transition-colors cursor-pointer"
+                  >
+                    <Plus className="h-3 w-3" /> Add New
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2 rounded-xl border border-border/60 bg-background p-3 shadow-sm min-h-12">
+                  {(shifts || []).length === 0 && (
+                    <span className="text-[12px] text-muted-foreground">No shifts available</span>
+                  )}
+                  {(shifts || []).map((s: any) => {
+                    const selected = form.shiftIds.includes(s._id);
+                    return (
+                      <button
+                        type="button"
+                        key={s._id}
+                        onClick={() => {
+                          setForm(prev => ({
+                            ...prev,
+                            shiftIds: selected
+                              ? prev.shiftIds.filter(id => id !== s._id)
+                              : [...prev.shiftIds, s._id],
+                          }));
+                          handleBlur('shiftId');
+                        }}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium transition-all",
+                          selected
+                            ? "border-primary bg-primary text-white shadow-sm"
+                            : "border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted"
+                        )}
+                      >
+                        {selected ? <Check className="h-3.5 w-3.5" /> : <Clock className="h-3.5 w-3.5" />}
+                        {s.name}
+                        {globalSettings?.attendance?.defaultShiftId === s._id && " (Global Default)"}
+                      </button>
+                    );
+                  })}
+                </div>
+                {form.shiftIds.length > 0 && (
+                  <p className="text-[11px] text-muted-foreground ml-1">The first selected shift is used as the primary shift for attendance timing.</p>
+                )}
+                {touched.shiftId && errors.shiftId && (
+                  <p className="text-[11px] text-destructive font-medium ml-1">{errors.shiftId}</p>
+                )}
+              </div>
 
               {/* Weekly Holidays */}
               <div className="col-span-1 md:col-span-2 space-y-4 pt-4 border-t border-border/40">
@@ -1118,7 +1165,7 @@ function AddEmployeePage() {
       <QuickAddShiftDialog
         open={quickAddOpen === "shift"}
         onOpenChange={(o) => setQuickAddOpen(o ? "shift" : null)}
-        onCreated={(id) => setForm(prev => ({ ...prev, shiftId: id }))}
+        onCreated={(id) => setForm(prev => prev.shiftIds.includes(id) ? prev : { ...prev, shiftIds: [...prev.shiftIds, id] })}
       />
     </div>
   );

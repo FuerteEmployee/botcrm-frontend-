@@ -2,7 +2,6 @@ import { Outlet, createRootRoute, HeadContent, Scripts } from "@tanstack/react-r
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { SplashScreen } from "@/components/shared/splash-screen";
 import { useAuth } from "@/hooks/use-auth";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
@@ -142,7 +141,6 @@ function RootComponent() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider delayDuration={150}>
-        <SplashScreen />
         <Outlet />
         <Toaster richColors position="top-right" />
       </TooltipProvider>

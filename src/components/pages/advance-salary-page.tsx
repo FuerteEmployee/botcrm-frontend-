@@ -100,8 +100,8 @@ export function AdvanceSalaryPage() {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(
         (req) =>
-          req.employeeId.name.toLowerCase().includes(query) ||
-          req.employeeId.phone.includes(query)
+          req.employeeId?.name?.toLowerCase().includes(query) ||
+          req.employeeId?.phone?.includes(query)
       );
     }
 
@@ -353,17 +353,17 @@ export function AdvanceSalaryPage() {
                     {/* Left: Employee Info */}
                     <div className="flex gap-4 items-start">
                       <Avatar className="w-12 h-12">
-                        <AvatarImage src={request.employeeId.profileImage} />
-                        <AvatarFallback>{request.employeeId.name.charAt(0)}</AvatarFallback>
+                        <AvatarImage src={request.employeeId?.profileImage} />
+                        <AvatarFallback>{request.employeeId?.name?.charAt(0) || "?"}</AvatarFallback>
                       </Avatar>
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1">
-                          <h3 className="font-bold text-base text-slate-900 dark:text-white">{request.employeeId.name}</h3>
+                          <h3 className="font-bold text-base text-slate-900 dark:text-white">{request.employeeId?.name || "Unknown Employee"}</h3>
                           <Badge variant="outline" className="text-xs font-semibold rounded-md">
                             {request.type === 'advance-salary' ? 'Advance Salary' : 'Loan'}
                           </Badge>
                         </div>
-                        <p className="text-sm text-muted-foreground">{request.employeeId.phone}</p>
+                        <p className="text-sm text-muted-foreground">{request.employeeId?.phone || "—"}</p>
                         <p className="text-xs text-muted-foreground mt-1">
                           {new Date(request.createdAt).toLocaleDateString()}
                         </p>
@@ -473,7 +473,7 @@ export function AdvanceSalaryPage() {
             <DialogTitle>Approve Request</DialogTitle>
             <DialogDescription>
               {approveTarget
-                ? `${approveTarget.employeeId.name} requested ${RUPEE_FORMATTER.format(approveTarget.amount)}. Approve the full amount or enter a lower amount.`
+                ? `${approveTarget.employeeId?.name || "This employee"} requested ${RUPEE_FORMATTER.format(approveTarget.amount)}. Approve the full amount or enter a lower amount.`
                 : ''}
             </DialogDescription>
           </DialogHeader>

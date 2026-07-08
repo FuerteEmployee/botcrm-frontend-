@@ -88,6 +88,24 @@ export function useSalaryService(month?: number, year?: number) {
     }
   });
 
+  // Recompute a single employee's salary for a month, optionally recovering one
+  // or more of their approved advance-salary/loan requests in this run.
+  const generateSalaryForEmployee = useMutation({
+    mutationFn: async (payload: { employeeId: string; month: number; year: number; advanceRequestIds?: string[]; expenseIds?: string[] }) => {
+      const { data } = await apiClient.post("/salary/generate-one", payload);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["salaries"] });
+      queryClient.invalidateQueries({ queryKey: ["advance-salary-requests"] });
+      queryClient.invalidateQueries({ queryKey: ["expenses"] });
+      toast.success("Salary recalculated");
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || "Failed to recalculate salary");
+    }
+  });
+
   return {
     salaryRecords,
     isLoading,
@@ -95,9 +113,11 @@ export function useSalaryService(month?: number, year?: number) {
     updateSalary: updateSalary.mutateAsync,
     addSalary: addSalary.mutateAsync,
     generateSalaries: generateSalaries.mutateAsync,
+    generateSalaryForEmployee: generateSalaryForEmployee.mutateAsync,
     isUpdating: updateSalary.isPending,
     isAdding: addSalary.isPending,
-    isGenerating: generateSalaries.isPending
+    isGenerating: generateSalaries.isPending,
+    isGeneratingOne: generateSalaryForEmployee.isPending
   };
 }
 

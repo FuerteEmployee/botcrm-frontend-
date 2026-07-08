@@ -50,6 +50,7 @@ import { cn } from "@/lib/utils";
 import { useEmployeeService } from "@/services/employee-service";
 import { useDepartmentService } from "@/services/department-service";
 import { useBranchService } from "@/services/branch-service";
+import { useShiftService } from "@/services/shift-service";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 
 export const Route = createFileRoute("/_app/employees/$employeeId")({
@@ -62,6 +63,7 @@ function EmployeeDetailsPage() {
   const { employees, isLoading: empLoading } = useEmployeeService();
   const { departments, isLoading: deptLoading } = useDepartmentService();
   const { branches, isLoading: branchLoading } = useBranchService();
+  const { shifts } = useShiftService();
 
   const { records: allAttendance, isLoading: attLoading } = useAttendanceService(
     undefined, 
@@ -90,6 +92,20 @@ function EmployeeDetailsPage() {
         return (typeof b === 'object' && b?.branchName)
           ? b.branchName
           : branches.find((x: any) => x._id === id)?.branchName;
+      })
+      .filter(Boolean);
+    return names.length ? names.join(", ") : "N/A";
+  };
+
+  const getShiftNames = () => {
+    const e = employee as any;
+    const raw = (e?.shiftIds?.length ? e.shiftIds : (e?.shiftId ? [e.shiftId] : [])) as any[];
+    const names = raw
+      .map((s) => {
+        const id = typeof s === 'object' ? s?._id : s;
+        return (typeof s === 'object' && s?.name)
+          ? s.name
+          : shifts.find((x: any) => x._id === id)?.name;
       })
       .filter(Boolean);
     return names.length ? names.join(", ") : "N/A";
@@ -428,6 +444,7 @@ function EmployeeDetailsPage() {
                           { label: "Phone Number", value: employee.phone, icon: Phone },
                           { label: "Local Address", value: employee.address, icon: MapPin },
                           { label: "Branch(es)", value: getBranchNames(), icon: MapPin },
+                          { label: "Shift(s)", value: getShiftNames(), icon: Clock },
                           { label: "Date of Birth", value: employee.dob, icon: Calendar },
                           { label: "Date of Joining", value: employee.joiningDate, icon: Clock },
                         ].map((item, i) => (

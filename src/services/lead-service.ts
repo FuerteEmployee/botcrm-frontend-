@@ -9,9 +9,19 @@ export interface Lead {
   phone: string;
   company: string;
   source: string;
-  status: "new" | "contacted" | "qualified" | "lost" | "won";
+  status: string;
   assignedTo: string;
   createdAt: string;
+  salesCalls?: number;
+  botStatus?: string;
+  value?: number;
+  followUpDate?: string;
+  notes?: string;
+  address?: string;
+  businessType?: string;
+  requirement?: string;
+  imageUrls?: string[];
+  [key: string]: any;
 }
 
 export function useLeadService() {
@@ -26,8 +36,11 @@ export function useLeadService() {
   });
 
   const createMutation = useMutation({
-    mutationFn: async (newLead: Omit<Lead, "_id" | "createdAt">) => {
-      const { data } = await apiClient.post("/leads", newLead);
+    mutationFn: async (newLead: Omit<Lead, "_id" | "createdAt"> | FormData) => {
+      const isFormData = newLead instanceof FormData;
+      const { data } = await apiClient.post("/leads", newLead, isFormData ? {
+        headers: { "Content-Type": "multipart/form-data" },
+      } : undefined);
       return data;
     },
     onSuccess: () => {
@@ -63,5 +76,6 @@ export function useLeadService() {
     createLead: createMutation.mutateAsync,
     updateLead: updateMutation.mutateAsync,
     deleteLead: deleteMutation.mutateAsync,
+    isCreating: createMutation.isPending,
   };
 }

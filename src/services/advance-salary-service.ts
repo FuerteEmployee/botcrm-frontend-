@@ -10,7 +10,7 @@ export interface AdvanceSalaryRequest {
     phone: string;
     email?: string;
     profileImage?: string;
-  };
+  } | null;
   branchId: {
     _id: string;
     name: string;
@@ -37,6 +37,15 @@ export interface AdvanceSalarySummary {
   approved: number;
   rejected: number;
   repaid: number;
+}
+
+// On-demand fetch (not a hook) — used by the payroll advance-deduction picker
+// to look up a single employee's approved, not-yet-recovered requests.
+export async function fetchApprovedAdvancesForEmployee(employeeId: string): Promise<AdvanceSalaryRequest[]> {
+  const { data } = await apiClient.get("/advance-salary", {
+    params: { employeeId, status: "approved" },
+  });
+  return data.data || [];
 }
 
 export function useAdvanceSalaryService() {

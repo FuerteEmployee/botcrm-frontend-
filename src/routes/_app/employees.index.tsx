@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState, useEffect } from "react";
 import { z } from "zod";
-import { Plus, Search, Pencil, Trash2, Eye, Filter, LayoutGrid, List, MoreVertical, MoreHorizontal, Phone, Mail, MapPin, Building2, UserCircle2, Calendar, Check } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, Eye, Filter, LayoutGrid, List, MoreVertical, MoreHorizontal, Phone, Mail, MapPin, Building2, UserCircle2, Calendar, Check, Clock } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/shared/page-header";
 import { ActionButton } from "@/components/shared/action-button";
@@ -21,6 +21,7 @@ import {
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -32,6 +33,7 @@ import { toast } from "sonner";
 import { Employee, useEmployeeService, type Employee as BackendEmployee } from "@/services/employee-service";
 import { useDepartmentService } from "@/services/department-service";
 import { useBranchService } from "@/services/branch-service";
+import { useShiftService } from "@/services/shift-service";
 import { cn } from "@/lib/utils";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { useLayoutSettings } from "@/hooks/use-layout-settings";
@@ -54,6 +56,7 @@ function EmployeesPage() {
   const [hasMounted, setHasMounted] = useState(false);
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState<string>(departmentId || "all");
+  const [shiftFilter, setShiftFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
 
   useEffect(() => {
@@ -63,6 +66,9 @@ function EmployeesPage() {
   }, [departmentId]);
   const [page, setPage] = useState(1);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deactivateTarget, setDeactivateTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deactivateReason, setDeactivateReason] = useState("");
+  const [isDeactivating, setIsDeactivating] = useState(false);
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
   const [view, setView] = useState<"grid" | "list">(defaultLayout);
   const { can } = usePermission();
@@ -87,11 +93,13 @@ function EmployeesPage() {
     limit: PAGE_SIZE,
     search,
     departmentId: deptFilter,
+    shiftId: shiftFilter,
     status: statusFilter
   });
 
   const { departments } = useDepartmentService();
   const { branches } = useBranchService();
+  const { shifts } = useShiftService();
 
   useEffect(() => {
     setHasMounted(true);
@@ -110,13 +118,31 @@ function EmployeesPage() {
     } catch (error) { }
   };
 
-  const toggleStatus = async (id: string, currentStatus: string) => {
+  const toggleStatus = async (id: string, currentStatus: string, name?: string) => {
+    if (currentStatus === "active") {
+      // Deactivating — collect an optional reason to show the employee at login
+      setDeactivateTarget({ id, name: name || "this employee" });
+      setDeactivateReason("");
+      return;
+    }
+    try {
+      await updateEmployee({ id, data: { status: "active" } });
+    } catch (error) { }
+  };
+
+  const confirmDeactivate = async () => {
+    if (!deactivateTarget) return;
+    setIsDeactivating(true);
     try {
       await updateEmployee({
-        id,
-        data: { status: currentStatus === "active" ? "inactive" : "active" }
+        id: deactivateTarget.id,
+        data: { status: "inactive", inactiveReason: deactivateReason.trim() }
       });
-    } catch (error) { }
+      setDeactivateTarget(null);
+    } catch (error) {
+    } finally {
+      setIsDeactivating(false);
+    }
   };
 
   return (
@@ -153,6 +179,19 @@ function EmployeesPage() {
                 <SelectItem value="all">All Departments</SelectItem>
                 {departments.map((d: any) => (
                   <SelectItem key={d._id} value={d._id}>{d.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={shiftFilter} onValueChange={(v) => { setShiftFilter(v); setPage(1); }}>
+              <SelectTrigger className="w-full md:w-[160px] h-10 border border-warning/20 bg-warning/5 text-warning-foreground hover:bg-warning/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
+                <Clock className="h-3.5 w-3.5" />
+                <SelectValue placeholder="Shift" />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-border/60">
+                <SelectItem value="all">All Shifts</SelectItem>
+                {shifts.map((s) => (
+                  <SelectItem key={s._id} value={s._id}>{s.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -210,7 +249,7 @@ function EmployeesPage() {
                   statusNode={
                     <Switch
                       checked={e.status === "active"}
-                      onCheckedChange={() => toggleStatus(e._id, e.status)}
+                      onCheckedChange={() => toggleStatus(e._id, e.status, e.name)}
                       disabled={!canEdit}
                       className="data-[state=checked]:bg-success scale-75 shadow-sm"
                     />
@@ -223,7 +262,14 @@ function EmployeesPage() {
                     icon: Calendar,
                     label: `Joined: ${new Date(e.createdAt || Date.now()).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')}`
                   }}
-                />
+                >
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Clock className="h-3 w-3 text-muted-foreground/50 shrink-0" />
+                    <span className="text-[11px] text-muted-foreground truncate">
+                      {(e.shiftId as any)?.name || "No shift assigned"}
+                    </span>
+                  </div>
+                </GridCard>
               ))}
             </div>
 
@@ -244,7 +290,7 @@ function EmployeesPage() {
             <DataTable
               headers={[
                 <div key="emp" className="w-[200px]">Employee Details</div>,
-                "Mobile", "Department", "Branch / Location", "Status", <div key="act" className="text-right">Actions</div>
+                "Mobile", "Department", "Shift", "Branch / Location", "Status", <div key="act" className="text-right">Actions</div>
               ]}
               isEmpty={pageData.length === 0}
               emptyMessage={
@@ -298,6 +344,22 @@ function EmployeesPage() {
                       {(e.departmentId as any)?.name || "Unassigned"}
                     </Badge>
                   </DataTableCell>
+                  <DataTableCell>
+                    {(e.shiftId as any)?.name ? (
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="outline" className="text-[10px] font-black bg-warning/5 border-warning/20 px-2 py-0.5 text-warning-foreground uppercase tracking-wider">
+                          {(e.shiftId as any).name}
+                        </Badge>
+                        {((e as any).shiftIds?.length || 0) > 1 && (
+                          <Badge variant="secondary" className="text-[10px] font-bold px-1.5 py-0">
+                            +{(e as any).shiftIds.length - 1}
+                          </Badge>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-[12px] text-muted-foreground/60">Unassigned</span>
+                    )}
+                  </DataTableCell>
                   <DataTableCell className="text-[13px] font-medium text-muted-foreground">
                     <div className="flex items-center gap-2">
                       <MapPin className="h-4 w-4 text-muted-foreground/40" />
@@ -313,7 +375,7 @@ function EmployeesPage() {
                     <div className="flex items-center gap-3">
                       <Switch
                         checked={e.status === "active"}
-                        onCheckedChange={() => toggleStatus(e._id, e.status)}
+                        onCheckedChange={() => toggleStatus(e._id, e.status, e.name)}
                         disabled={!canEdit}
                         className="data-[state=checked]:bg-success scale-90"
                       />
@@ -368,6 +430,50 @@ function EmployeesPage() {
         description="This will permanently remove the employee from the system and archive their records. This action cannot be reversed."
         cancelText="Keep Employee"
       />
+
+      <Dialog open={!!deactivateTarget} onOpenChange={(o) => !o && setDeactivateTarget(null)}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-[18px] font-black tracking-tight">
+              Deactivate {deactivateTarget?.name}?
+            </DialogTitle>
+            <DialogDescription className="text-[14px] text-muted-foreground">
+              They won't be able to log in while inactive. Optionally add a reason —
+              it will be shown to them on the login screen.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="deactivate-reason" className="text-xs font-bold text-muted-foreground/80">
+              Reason (optional)
+            </Label>
+            <Textarea
+              id="deactivate-reason"
+              placeholder="e.g. Your account has been deactivated due to policy violation. Contact HR for details."
+              value={deactivateReason}
+              onChange={(e) => setDeactivateReason(e.target.value)}
+              rows={3}
+              className="rounded-xl"
+            />
+          </div>
+          <DialogFooter className="gap-2 mt-2">
+            <Button
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => setDeactivateTarget(null)}
+              disabled={isDeactivating}
+            >
+              Cancel
+            </Button>
+            <ActionButton
+              variant="destructive"
+              showLabel
+              label="Deactivate"
+              onClick={confirmDeactivate}
+              disabled={isDeactivating}
+            />
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

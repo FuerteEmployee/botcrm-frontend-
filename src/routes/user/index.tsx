@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Clock, MapPin, Camera, Coffee, CheckCircle,
   AlertTriangle, Calendar, Award, Fingerprint, ChevronLeft, ChevronRight,
-  Home, RefreshCw, Sparkles, Settings
+  Home, RefreshCw, Sparkles, Settings, Filter, Info
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -38,8 +38,13 @@ interface AttendanceLog {
   isWFH?: boolean;
   status: "present" | "absent" | "half-day" | "late" | "weekly-off" | "festival";
   remarks?: string;
+  address?: string;
   punchInPhoto?: string;
   punchOutPhoto?: string;
+  punchInLocation?: string;
+  punchOutLocation?: string;
+  lunchInLocation?: string;
+  lunchOutLocation?: string;
 }
 
 interface UserProfile {
@@ -233,8 +238,14 @@ function UserDashboard() {
     return saved ? new Date(saved) : new Date();
   });
 
+  // Calendar / Chronological list view state (merged in from the old History page)
+  const [activeTab, setActiveTab] = useState<"calendar" | "list">("calendar");
+  const [selectedDayLog, setSelectedDayLog] = useState<AttendanceLog | null>(null);
+  const [statusFilter, setStatusFilter] = useState<string>("all");
+
   useEffect(() => {
     localStorage.setItem("employee-portal-selected-date", selectedDate.toISOString());
+    setSelectedDayLog(null);
   }, [selectedDate]);
 
   // 1. Fetch User Profile
@@ -255,6 +266,17 @@ function UserDashboard() {
           month: selectedDate.getMonth() + 1,
           year: selectedDate.getFullYear()
         }
+      });
+      return data;
+    }
+  });
+
+  // 1.6 Fetch full day-by-day attendance history for the calendar grid + chronological list
+  const { data: historyData, isLoading: isHistoryLoading, isRefetching: isHistoryRefetching } = useQuery<{ history: AttendanceLog[] }>({
+    queryKey: ["user-history", selectedDate.getMonth() + 1, selectedDate.getFullYear()],
+    queryFn: async () => {
+      const { data } = await apiClient.get("/attendance/my-history", {
+        params: { month: selectedDate.getMonth() + 1, year: selectedDate.getFullYear() }
       });
       return data;
     }
@@ -756,6 +778,41 @@ function UserDashboard() {
     return `${h.toString().padStart(2, '0')}h ${m.toString().padStart(2, '0')}m`;
   };
 
+  // Duration for a calendar/list day record — ticks live off `time` for an
+  // in-progress shift, otherwise uses the stored punch-out timestamp.
+  const formatDuration = (record: AttendanceLog) => {
+    if (!record.punchIn) return "00h 00m";
+    const endTime = record.punchOut ? new Date(record.punchOut) : time;
+    const diff = endTime.getTime() - new Date(record.punchIn).getTime();
+    if (diff <= 0) return "00h 00m";
+    const hrs = Math.floor(diff / (1000 * 60 * 60));
+    const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    return `${hrs.toString().padStart(2, '0')}h ${mins.toString().padStart(2, '0')}m`;
+  };
+
+  // Days-of-month grid helper for the Interactive Calendar Map
+  const getDaysInMonth = (d: Date) => {
+    const year = d.getFullYear();
+    const month = d.getMonth();
+    const date = new Date(year, month, 1);
+    const days: (Date | null)[] = [];
+    const firstDayIndex = date.getDay();
+    for (let i = 0; i < firstDayIndex; i++) {
+      days.push(null);
+    }
+    while (date.getMonth() === month) {
+      days.push(new Date(date));
+      date.setDate(date.getDate() + 1);
+    }
+    return days;
+  };
+
+  const getDayRecord = (day: Date | null) => {
+    if (!day || !historyData?.history) return null;
+    const dateString = day.toDateString();
+    return historyData.history.find(log => new Date(log.date).toDateString() === dateString);
+  };
+
   const getShiftPercent = () => {
     let totalShiftSecs = 9 * 3600; // Fallback 9 hours
     if (profile?.shiftId?.startTime && profile?.shiftId?.endTime) {
@@ -806,6 +863,18 @@ function UserDashboard() {
   const isCurrentMonth = selectedDate.getFullYear() === todayVal.getFullYear() && selectedDate.getMonth() === todayVal.getMonth();
 
   const initials = (profile?.name ?? "User").split(" ").map((s) => s[0]).slice(0, 2).join("");
+
+  const calendarDays = getDaysInMonth(selectedDate);
+  const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  const filteredLogs = historyData?.history?.filter(log => {
+    if (statusFilter === "all") return true;
+    if (statusFilter === "present") return log.status === "present";
+    if (statusFilter === "late") return log.status === "late";
+    if (statusFilter === "absent") return log.status === "absent";
+    if (statusFilter === "wfh") return log.isWFH === true;
+    return true;
+  }) || [];
 
   return (
     <div className="w-full space-y-6">
@@ -1400,6 +1469,403 @@ function UserDashboard() {
 
         </div>
 
+      </div>
+
+      {/* ATTENDANCE CALENDAR & CHRONOLOGICAL HISTORY (merged in from the old History page) */}
+      <div className="space-y-5">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="text-left">
+            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Attendance Calendar & History</h3>
+            <p className="text-slate-500 text-xs mt-1">
+              Review detailed timeline summaries, compliance metrics, and interactive maps for {selectedDate.toLocaleDateString("en-US", { month: "long", year: "numeric" })}.
+            </p>
+          </div>
+
+          {/* Tab switch buttons */}
+          <div className="p-1 rounded-xl bg-slate-100/80 dark:bg-slate-900/60 border border-slate-200/50 dark:border-white/5 backdrop-blur-md flex items-center self-start shrink-0">
+            <button
+              onClick={() => setActiveTab("calendar")}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === "calendar"
+                  ? "bg-white dark:bg-slate-800 text-primary shadow-sm"
+                  : "text-slate-505 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+                }`}
+            >
+              <Calendar className="h-3.5 w-3.5 text-primary/80" />
+              <span>Interactive Calendar Map</span>
+            </button>
+            <button
+              onClick={() => setActiveTab("list")}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === "list"
+                  ? "bg-white dark:bg-slate-800 text-primary shadow-sm"
+                  : "text-slate-505 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
+                }`}
+            >
+              <Clock className="h-3.5 w-3.5 text-primary/80" />
+              <span>Chronological List</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+
+          {/* LEFT: Legend (calendar tab only) */}
+          {activeTab === "calendar" && (
+            <div className="col-span-1 lg:col-span-4 space-y-6 order-2 lg:order-1">
+              <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-2xl p-5">
+                <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-3.5">
+                  Calendar Status Legend
+                </h4>
+                <div className="grid grid-cols-2 gap-x-2 gap-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full bg-emerald-500/10 border border-emerald-500 shrink-0" />
+                    <span className="text-[10px] text-slate-600 dark:text-slate-300 font-bold">On-Time Present</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full bg-amber-500/10 border border-amber-500 shrink-0" />
+                    <span className="text-[10px] text-slate-600 dark:text-slate-300 font-bold">Late Arrival</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full bg-blue-500/10 border border-blue-500 shrink-0" />
+                    <span className="text-[10px] text-slate-600 dark:text-slate-300 font-bold">Half-Day Log</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full bg-rose-500/10 border border-rose-500 shrink-0" />
+                    <span className="text-[10px] text-slate-600 dark:text-slate-300 font-bold">Absent / LOP</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full bg-indigo-500/10 border border-indigo-500 shrink-0" />
+                    <span className="text-[10px] text-slate-600 dark:text-slate-300 font-bold">Work From Home</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shrink-0" />
+                    <span className="text-[10px] text-slate-600 dark:text-slate-300 font-bold">Off Day / Future</span>
+                  </div>
+                </div>
+              </Card>
+
+              {/* CALENDAR CLICK DETAIL PANEL */}
+              <AnimatePresence mode="wait">
+                {selectedDayLog && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 15 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 15 }}
+                    transition={{ duration: 0.3 }}
+                  >
+                    <Card className="border border-white/10 shadow-[0_20px_50px_rgba(80,21,55,0.15)] dark:shadow-[0_20px_50px_rgba(0,0,0,0.4)] bg-gradient-to-br from-[#2D061A] via-[#501537] to-[#8C2059] text-white rounded-[24px] overflow-hidden relative">
+                      <div className="absolute inset-0 bg-radial-at-t from-white/10 to-transparent pointer-events-none" />
+                      <CardContent className="p-6 space-y-4 relative z-10">
+                        <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                          <div className="space-y-0.5">
+                            <span className="text-[9px] font-black text-white/50 uppercase tracking-widest leading-none">Session Breakdown</span>
+                            <h4 className="text-[14px] font-black text-white">
+                              {new Date(selectedDayLog.date).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+                            </h4>
+                          </div>
+                          <Badge className={`border-none text-[8.5px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full shadow-xs ${selectedDayLog.status === "present"
+                              ? "bg-emerald-500 text-white"
+                              : selectedDayLog.status === "late"
+                                ? "bg-amber-500 text-slate-900"
+                                : selectedDayLog.status === "absent"
+                                  ? "bg-rose-500 text-white"
+                                  : "bg-white/10 text-white/70"
+                            }`}>
+                            {selectedDayLog.isWFH ? "WFH SESSION" : selectedDayLog.status}
+                          </Badge>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4 pt-2">
+                          <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+                            <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-1">PUNCH IN</span>
+                            <span className="text-[13px] font-black text-white">{formatTimeStr(selectedDayLog.punchIn)}</span>
+                          </div>
+                          <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+                            <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-1">PUNCH OUT</span>
+                            <span className="text-[13px] font-black text-white">{formatTimeStr(selectedDayLog.punchOut)}</span>
+                          </div>
+                          <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+                            <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-1">TOTAL WORKED</span>
+                            <span className="text-[13px] font-black text-amber-300 font-mono">{formatDuration(selectedDayLog)}</span>
+                          </div>
+                          <div className="p-3 bg-white/5 rounded-xl border border-white/10">
+                            <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-1">LUNCH BREAK</span>
+                            <span className="text-[13px] font-black text-white font-mono">
+                              {selectedDayLog.lunchInTime ? "Break Taken" : "No Break Log"}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-3.5 pt-2 text-[11px] border-t border-white/5">
+                          {selectedDayLog.punchInLocation && (
+                            <div className="flex items-start gap-2.5">
+                              <MapPin className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
+                              <div className="leading-tight text-left">
+                                <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-0.5">Punch-In Location</span>
+                                <span className="text-white/80 font-bold">{selectedDayLog.punchInLocation}</span>
+                              </div>
+                            </div>
+                          )}
+                          {selectedDayLog.punchOutLocation && (
+                            <div className="flex items-start gap-2.5">
+                              <MapPin className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
+                              <div className="leading-tight text-left">
+                                <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-0.5">Punch-Out Location</span>
+                                <span className="text-white/80 font-bold">{selectedDayLog.punchOutLocation}</span>
+                              </div>
+                            </div>
+                          )}
+                          {selectedDayLog.remarks && (
+                            <div className="flex items-start gap-2.5 pt-1.5 border-t border-white/5">
+                              <Info className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
+                              <div className="leading-tight text-left">
+                                <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-0.5">Remarks</span>
+                                <span className="text-white/80 font-medium italic">"{selectedDayLog.remarks}"</span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
+          {/* RIGHT: Calendar grid OR Chronological list */}
+          <div className={`col-span-1 ${activeTab === "calendar" ? "lg:col-span-8 order-1 lg:order-2" : "lg:col-span-12"} space-y-6`}>
+
+            {activeTab === "calendar" ? (
+              <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-[28px] overflow-hidden p-6">
+                <div className="grid grid-cols-7 gap-2.5 text-center mb-3">
+                  {weekdays.map(d => (
+                    <span key={d} className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block py-1">
+                      {d}
+                    </span>
+                  ))}
+                </div>
+
+                {isHistoryLoading || isHistoryRefetching ? (
+                  <div className="grid grid-cols-7 gap-2.5 animate-pulse">
+                    {Array.from({ length: 31 }).map((_, idx) => (
+                      <div key={idx} className="aspect-square bg-slate-200 dark:bg-slate-800/80 rounded-xl sm:rounded-2xl" />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-7 gap-2.5">
+                    {calendarDays.map((day, idx) => {
+                      if (!day) {
+                        return <div key={`empty-${idx}`} className="aspect-square bg-slate-50/20 dark:bg-slate-950/5 rounded-xl border border-slate-100/10" />;
+                      }
+
+                      const record = getDayRecord(day);
+                      const dayNum = day.getDate();
+                      const isToday = day.toDateString() === new Date().toDateString();
+
+                      const todayMidnight = new Date();
+                      todayMidnight.setHours(0, 0, 0, 0);
+                      const isFuture = day.getTime() > todayMidnight.getTime() && day.toDateString() !== todayMidnight.toDateString();
+
+                      let circleClass = "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-100 dark:bg-slate-950/40 dark:hover:bg-slate-950/80 dark:text-slate-300 dark:border-slate-800/40";
+
+                      if (isFuture) {
+                        circleClass = "bg-slate-100/30 text-slate-400/40 border-slate-200/10 dark:bg-slate-950/10 dark:text-slate-650 dark:border-slate-900/15 cursor-not-allowed opacity-50";
+                      } else if (record) {
+                        if (record.isWFH) {
+                          circleClass = "bg-indigo-500/10 text-indigo-600 border-indigo-500/30 hover:bg-indigo-500/20 dark:text-indigo-400 dark:border-indigo-500/20";
+                        } else if (record.status === "present") {
+                          circleClass = "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500/20";
+                        } else if (record.status === "late") {
+                          circleClass = "bg-amber-500/10 text-amber-600 border-amber-500/30 hover:bg-amber-500/20 dark:text-amber-400 dark:border-amber-500/20";
+                        } else if (record.status === "half-day") {
+                          circleClass = "bg-blue-500/10 text-blue-600 border-blue-500/30 hover:bg-blue-500/20 dark:text-blue-400 dark:border-blue-500/20";
+                        } else if (record.status === "absent") {
+                          circleClass = "bg-rose-500/10 text-rose-600 border-rose-500/30 hover:bg-rose-500/20 dark:text-rose-400 dark:border-rose-500/20";
+                        }
+                      }
+
+                      const isSelected = selectedDayLog && new Date(selectedDayLog.date).toDateString() === day.toDateString();
+
+                      return (
+                        <button
+                          key={day.toISOString()}
+                          onClick={() => {
+                            if (isFuture) return;
+                            if (record) setSelectedDayLog(record);
+                            else setSelectedDayLog({
+                              _id: `mock-${day.toISOString()}`,
+                              date: day.toISOString(),
+                              status: "weekly-off",
+                              remarks: "No duty session logged / Off Day"
+                            });
+                          }}
+                          disabled={isFuture}
+                          className={`aspect-square rounded-xl sm:rounded-2xl border flex flex-col items-center justify-between p-1.5 sm:p-2.5 transition-all duration-300 relative group ${isFuture ? "cursor-not-allowed" : "cursor-pointer hover:scale-[1.03]"} ${circleClass} ${isSelected
+                              ? "ring-2 ring-primary ring-offset-2 dark:ring-offset-slate-900 border-transparent shadow-md"
+                              : ""
+                            }`}
+                        >
+                          <div className="flex items-center justify-between w-full">
+                            <span className={`text-[10px] sm:text-xs font-black ${isToday ? "h-4.5 w-4.5 sm:h-5 sm:w-5 bg-[#501537] text-white flex items-center justify-center rounded-full text-[9px] sm:text-[10px]" : ""}`}>
+                              {dayNum}
+                            </span>
+                            {record && (
+                              <span className="h-1 w-1 sm:h-1.5 sm:w-1.5 rounded-full bg-current shrink-0" />
+                            )}
+                          </div>
+                          <span className="text-[7.5px] font-black uppercase tracking-widest opacity-60 leading-none truncate w-full text-center hidden sm:block">
+                            {isFuture ? "Upcoming" : record ? (record.isWFH ? "WFH" : record.status) : ""}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
+            ) : (
+              <div className="space-y-4">
+                {/* Quick Filter Badges */}
+                <div className="flex flex-wrap items-center gap-2 bg-white dark:bg-slate-900 px-5 py-3 rounded-2xl shadow-xs border border-slate-100/50 dark:border-slate-800/20">
+                  <span className="text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 mr-2 flex items-center gap-1.5">
+                    <Filter className="h-3.5 w-3.5" /> Filter Status:
+                  </span>
+                  {[
+                    { value: "all", label: "All Logs" },
+                    { value: "present", label: "On-Time" },
+                    { value: "late", label: "Late Marks" },
+                    { value: "wfh", label: "WFH Logs" },
+                    { value: "absent", label: "Absents" },
+                  ].map(f => (
+                    <button
+                      key={f.value}
+                      onClick={() => setStatusFilter(f.value)}
+                      className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${statusFilter === f.value
+                          ? "bg-[#501537] text-white"
+                          : "bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-400"
+                        }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                {isHistoryLoading || isHistoryRefetching ? (
+                  <div className="space-y-3.5 animate-pulse">
+                    {Array.from({ length: 3 }).map((_, idx) => (
+                      <div key={idx} className="p-5 bg-slate-200 dark:bg-slate-800/40 rounded-[24px] h-[130px]" />
+                    ))}
+                  </div>
+                ) : filteredLogs.length > 0 ? (
+                  <div className="space-y-3.5">
+                    {filteredLogs.map((record) => {
+                      const dateObj = new Date(record.date);
+                      const dayStr = dateObj.toLocaleDateString("en-US", { day: "numeric", month: "short" });
+                      const weekdayStr = dateObj.toLocaleDateString("en-US", { weekday: "short" });
+
+                      const isLate = record.status === "late";
+                      const isHalfDay = record.status === "half-day";
+                      const isAbsent = record.status === "absent";
+                      const isWFHRecord = record.isWFH;
+
+                      return (
+                        <motion.div
+                          key={record.date}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="p-5 bg-white dark:bg-slate-900 rounded-[24px] shadow-xs flex flex-col gap-4 border border-slate-100/50 dark:border-slate-800/30 hover:border-slate-250 dark:hover:border-slate-800 transition-all duration-300 hover:shadow-soft"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-black text-slate-850 dark:text-slate-100">
+                                {dayStr}, {weekdayStr}
+                              </span>
+                              {isWFHRecord ? (
+                                <Badge className="border-none bg-indigo-500/10 text-indigo-500 text-[8.5px] font-black uppercase tracking-wider px-2 py-0">Remote WFH</Badge>
+                              ) : isAbsent ? (
+                                <Badge className="border-none bg-rose-500/10 text-rose-500 text-[8.5px] font-black uppercase tracking-wider px-2 py-0">LOP Absent</Badge>
+                              ) : isLate ? (
+                                <Badge className="border-none bg-amber-500/10 text-amber-600 dark:text-amber-500 text-[8.5px] font-black uppercase tracking-wider px-2 py-0">Late Arrival</Badge>
+                              ) : isHalfDay ? (
+                                <Badge className="border-none bg-blue-500/10 text-blue-500 text-[8.5px] font-black uppercase tracking-wider px-2 py-0">Half Day</Badge>
+                              ) : (
+                                <Badge className="border-none bg-emerald-500/10 text-emerald-500 text-[8.5px] font-black uppercase tracking-wider px-2 py-0">Present On-Time</Badge>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 text-slate-400 dark:text-slate-500 shrink-0">
+                              <Clock className="h-3.5 w-3.5 text-slate-400" />
+                              <span className="text-xs font-black text-slate-700 dark:text-slate-300 font-mono">
+                                {formatDuration(record)}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-[11px] font-bold text-slate-400 border-t border-slate-50 dark:border-slate-800/40 pt-3">
+                            <div>
+                              Punch-In: <span className="text-slate-800 dark:text-slate-200 font-black">{formatTimeStr(record.punchIn)}</span>
+                            </div>
+                            <div>
+                              Punch-Out: <span className="text-slate-800 dark:text-slate-200 font-black">{formatTimeStr(record.punchOut)}</span>
+                            </div>
+                            {record.remarks && (
+                              <div className="col-span-2 text-[10px] text-slate-400 dark:text-slate-500 italic mt-1 leading-relaxed">
+                                Remarks: "{record.remarks}"
+                              </div>
+                            )}
+                            {record.punchInLocation && (
+                              <div className="col-span-2 text-[9.5px] text-slate-400/85 font-medium flex items-center gap-1.5 truncate mt-0.5">
+                                <MapPin className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                <span className="truncate">In: {record.punchInLocation}</span>
+                              </div>
+                            )}
+                            {record.punchOutLocation && (
+                              <div className="col-span-2 text-[9.5px] text-slate-400/85 font-medium flex items-center gap-1.5 truncate">
+                                <MapPin className="h-3.5 w-3.5 text-rose-500 shrink-0" />
+                                <span className="truncate">Out: {record.punchOutLocation}</span>
+                              </div>
+                            )}
+                            {(record.punchInPhoto || record.punchOutPhoto) && (
+                              <div className="col-span-2 flex items-center gap-3 mt-2 pt-2.5 border-t border-slate-50 dark:border-slate-800/20">
+                                {record.punchInPhoto && (
+                                  <div className="flex flex-col gap-1">
+                                    <span className="text-[7.5px] font-bold text-slate-400 uppercase tracking-widest">In Selfie</span>
+                                    <div className="h-10 w-16 rounded-lg overflow-hidden border border-slate-100 dark:border-slate-800 relative group/listphoto cursor-zoom-in">
+                                      <img
+                                        src={record.punchInPhoto.startsWith('http') ? record.punchInPhoto : `${IMAGE_BASE_URL}${record.punchInPhoto}`}
+                                        alt="Punch In"
+                                        className="w-full h-full object-cover group-hover/listphoto:scale-110 transition-transform duration-300"
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                                {record.punchOutPhoto && (
+                                  <div className="flex flex-col gap-1">
+                                    <span className="text-[7.5px] font-bold text-slate-400 uppercase tracking-widest">Out Selfie</span>
+                                    <div className="h-10 w-16 rounded-lg overflow-hidden border border-slate-100 dark:border-slate-800 relative group/listphoto cursor-zoom-in">
+                                      <img
+                                        src={record.punchOutPhoto.startsWith('http') ? record.punchOutPhoto : `${IMAGE_BASE_URL}${record.punchOutPhoto}`}
+                                        alt="Punch Out"
+                                        className="w-full h-full object-cover group-hover/listphoto:scale-110 transition-transform duration-300"
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-400 text-center py-12 bg-white dark:bg-slate-900 rounded-2xl shadow-xs border border-slate-100/50 dark:border-slate-800/20">
+                    No chronological logs matched the filter.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
+        </div>
       </div>
 
       {/* Location Verification Modal */}

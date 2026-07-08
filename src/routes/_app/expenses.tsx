@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useMemo, useEffect } from "react";
 import {
   Plus, Receipt, Search, MoreVertical, Trash2, Pencil, IndianRupee, Tag, Info,
-  Coffee, Utensils, Plane, Sparkles, Box, Wallet, Calendar, Clock, User, List,
+  Wallet, Calendar, Clock, User, List,
   UserCheck, MoreHorizontal, CheckCircle2
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -25,6 +25,7 @@ import { useEmployeeService } from "@/services/employee-service";
 import { useLayoutSettings } from "@/hooks/use-layout-settings";
 import { usePermission } from "@/hooks/use-permission";
 import { cn } from "@/lib/utils";
+import { EXPENSE_CATEGORIES as CATEGORIES } from "@/lib/expense-categories";
 
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
@@ -44,17 +45,8 @@ export const Route = createFileRoute("/_app/expenses")({
 
 type ViewMode = "list" | "employee";
 
-const CATEGORIES = [
-  { label: "Tea/Coffee", value: "Tea/Coffee", icon: Coffee },
-  { label: "Party", value: "Party", icon: Sparkles },
-  { label: "Snacks", value: "Snacks", icon: Utensils },
-  { label: "Cleaning & Maintenance", value: "Cleaning & Maintenance", icon: Box },
-  { label: "Travel", value: "Travel", icon: Plane },
-  { label: "Other Expenses", value: "Other Expenses", icon: Tag },
-];
-
 function ExpensesPage() {
-  const { expenses: list, isLoading: isExpensesLoading, createExpense, updateExpense, deleteExpense, isCreating, isUpdating } = useExpenseService();
+  const { expenses: list, isLoading: isExpensesLoading, createExpense, updateExpense, deleteExpense, approveExpense, rejectExpense, isCreating, isUpdating } = useExpenseService();
   const { employees, isLoading: isEmployeesLoading } = useEmployeeService();
   
   const isLoading = isExpensesLoading || isEmployeesLoading;
@@ -288,6 +280,7 @@ function ExpensesPage() {
                           "capitalize text-[9px] font-bold px-1.5 py-0 rounded",
                           exp.status === "approved" ? "bg-success/10 text-success border-success/20" :
                           exp.status === "pending" ? "bg-warning/10 text-warning-foreground border-warning/20" :
+                          exp.status === "reimbursed" ? "bg-info/10 text-info border-info/20" :
                           "bg-destructive/10 text-destructive border-destructive/20"
                         )}
                       >
@@ -296,6 +289,20 @@ function ExpensesPage() {
                     </DataTableCell>
                     <DataTableCell isLast>
                       <div className="flex justify-end gap-1">
+                        {exp.status === "pending" && canEdit && (
+                          <>
+                            <ActionButton
+                              variant="approve"
+                              tooltip="Approve"
+                              onClick={() => approveExpense(exp._id)}
+                            />
+                            <ActionButton
+                              variant="reject"
+                              tooltip="Reject"
+                              onClick={() => rejectExpense(exp._id)}
+                            />
+                          </>
+                        )}
                         {canEdit && (
                           <ActionButton
                             variant="edit"
@@ -387,6 +394,7 @@ function ExpensesPage() {
                 { label: "Pending", value: "pending" },
                 { label: "Approved", value: "approved" },
                 { label: "Rejected", value: "rejected" },
+                { label: "Reimbursed", value: "reimbursed" },
               ]}
             />
 

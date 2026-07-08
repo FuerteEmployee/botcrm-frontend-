@@ -18,8 +18,10 @@ import { Route as UserIndexRouteImport } from './routes/user/index'
 import { Route as UserTicketsRouteImport } from './routes/user/tickets'
 import { Route as UserProfileRouteImport } from './routes/user/profile'
 import { Route as UserLeavesRouteImport } from './routes/user/leaves'
-import { Route as UserHistoryRouteImport } from './routes/user/history'
+import { Route as UserHolidaysRouteImport } from './routes/user/holidays'
+import { Route as UserExpensesRouteImport } from './routes/user/expenses'
 import { Route as UserAdvanceSalaryRouteImport } from './routes/user/advance-salary'
+import { Route as UserAccountRouteImport } from './routes/user/account'
 import { Route as SuperTenantsRouteImport } from './routes/super/tenants'
 import { Route as SuperPlansRouteImport } from './routes/super/plans'
 import { Route as SuperOverviewRouteImport } from './routes/super/overview'
@@ -96,14 +98,24 @@ const UserLeavesRoute = UserLeavesRouteImport.update({
   path: '/leaves',
   getParentRoute: () => UserRoute,
 } as any)
-const UserHistoryRoute = UserHistoryRouteImport.update({
-  id: '/history',
-  path: '/history',
+const UserHolidaysRoute = UserHolidaysRouteImport.update({
+  id: '/holidays',
+  path: '/holidays',
+  getParentRoute: () => UserRoute,
+} as any)
+const UserExpensesRoute = UserExpensesRouteImport.update({
+  id: '/expenses',
+  path: '/expenses',
   getParentRoute: () => UserRoute,
 } as any)
 const UserAdvanceSalaryRoute = UserAdvanceSalaryRouteImport.update({
   id: '/advance-salary',
   path: '/advance-salary',
+  getParentRoute: () => UserRoute,
+} as any)
+const UserAccountRoute = UserAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
   getParentRoute: () => UserRoute,
 } as any)
 const SuperTenantsRoute = SuperTenantsRouteImport.update({
@@ -293,8 +305,10 @@ export interface FileRoutesByFullPath {
   '/super/overview': typeof SuperOverviewRoute
   '/super/plans': typeof SuperPlansRoute
   '/super/tenants': typeof SuperTenantsRoute
+  '/user/account': typeof UserAccountRoute
   '/user/advance-salary': typeof UserAdvanceSalaryRoute
-  '/user/history': typeof UserHistoryRoute
+  '/user/expenses': typeof UserExpensesRoute
+  '/user/holidays': typeof UserHolidaysRoute
   '/user/leaves': typeof UserLeavesRoute
   '/user/profile': typeof UserProfileRoute
   '/user/tickets': typeof UserTicketsRoute
@@ -333,8 +347,10 @@ export interface FileRoutesByTo {
   '/super/overview': typeof SuperOverviewRoute
   '/super/plans': typeof SuperPlansRoute
   '/super/tenants': typeof SuperTenantsRoute
+  '/user/account': typeof UserAccountRoute
   '/user/advance-salary': typeof UserAdvanceSalaryRoute
-  '/user/history': typeof UserHistoryRoute
+  '/user/expenses': typeof UserExpensesRoute
+  '/user/holidays': typeof UserHolidaysRoute
   '/user/leaves': typeof UserLeavesRoute
   '/user/profile': typeof UserProfileRoute
   '/user/tickets': typeof UserTicketsRoute
@@ -378,8 +394,10 @@ export interface FileRoutesById {
   '/super/overview': typeof SuperOverviewRoute
   '/super/plans': typeof SuperPlansRoute
   '/super/tenants': typeof SuperTenantsRoute
+  '/user/account': typeof UserAccountRoute
   '/user/advance-salary': typeof UserAdvanceSalaryRoute
-  '/user/history': typeof UserHistoryRoute
+  '/user/expenses': typeof UserExpensesRoute
+  '/user/holidays': typeof UserHolidaysRoute
   '/user/leaves': typeof UserLeavesRoute
   '/user/profile': typeof UserProfileRoute
   '/user/tickets': typeof UserTicketsRoute
@@ -423,8 +441,10 @@ export interface FileRouteTypes {
     | '/super/overview'
     | '/super/plans'
     | '/super/tenants'
+    | '/user/account'
     | '/user/advance-salary'
-    | '/user/history'
+    | '/user/expenses'
+    | '/user/holidays'
     | '/user/leaves'
     | '/user/profile'
     | '/user/tickets'
@@ -463,8 +483,10 @@ export interface FileRouteTypes {
     | '/super/overview'
     | '/super/plans'
     | '/super/tenants'
+    | '/user/account'
     | '/user/advance-salary'
-    | '/user/history'
+    | '/user/expenses'
+    | '/user/holidays'
     | '/user/leaves'
     | '/user/profile'
     | '/user/tickets'
@@ -507,8 +529,10 @@ export interface FileRouteTypes {
     | '/super/overview'
     | '/super/plans'
     | '/super/tenants'
+    | '/user/account'
     | '/user/advance-salary'
-    | '/user/history'
+    | '/user/expenses'
+    | '/user/holidays'
     | '/user/leaves'
     | '/user/profile'
     | '/user/tickets'
@@ -593,11 +617,18 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UserLeavesRouteImport
       parentRoute: typeof UserRoute
     }
-    '/user/history': {
-      id: '/user/history'
-      path: '/history'
-      fullPath: '/user/history'
-      preLoaderRoute: typeof UserHistoryRouteImport
+    '/user/holidays': {
+      id: '/user/holidays'
+      path: '/holidays'
+      fullPath: '/user/holidays'
+      preLoaderRoute: typeof UserHolidaysRouteImport
+      parentRoute: typeof UserRoute
+    }
+    '/user/expenses': {
+      id: '/user/expenses'
+      path: '/expenses'
+      fullPath: '/user/expenses'
+      preLoaderRoute: typeof UserExpensesRouteImport
       parentRoute: typeof UserRoute
     }
     '/user/advance-salary': {
@@ -605,6 +636,13 @@ declare module '@tanstack/react-router' {
       path: '/advance-salary'
       fullPath: '/user/advance-salary'
       preLoaderRoute: typeof UserAdvanceSalaryRouteImport
+      parentRoute: typeof UserRoute
+    }
+    '/user/account': {
+      id: '/user/account'
+      path: '/account'
+      fullPath: '/user/account'
+      preLoaderRoute: typeof UserAccountRouteImport
       parentRoute: typeof UserRoute
     }
     '/super/tenants': {
@@ -926,8 +964,10 @@ const SuperRouteChildren: SuperRouteChildren = {
 const SuperRouteWithChildren = SuperRoute._addFileChildren(SuperRouteChildren)
 
 interface UserRouteChildren {
+  UserAccountRoute: typeof UserAccountRoute
   UserAdvanceSalaryRoute: typeof UserAdvanceSalaryRoute
-  UserHistoryRoute: typeof UserHistoryRoute
+  UserExpensesRoute: typeof UserExpensesRoute
+  UserHolidaysRoute: typeof UserHolidaysRoute
   UserLeavesRoute: typeof UserLeavesRoute
   UserProfileRoute: typeof UserProfileRoute
   UserTicketsRoute: typeof UserTicketsRoute
@@ -935,8 +975,10 @@ interface UserRouteChildren {
 }
 
 const UserRouteChildren: UserRouteChildren = {
+  UserAccountRoute: UserAccountRoute,
   UserAdvanceSalaryRoute: UserAdvanceSalaryRoute,
-  UserHistoryRoute: UserHistoryRoute,
+  UserExpensesRoute: UserExpensesRoute,
+  UserHolidaysRoute: UserHolidaysRoute,
   UserLeavesRoute: UserLeavesRoute,
   UserProfileRoute: UserProfileRoute,
   UserTicketsRoute: UserTicketsRoute,

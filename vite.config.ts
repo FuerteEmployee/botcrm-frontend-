@@ -80,4 +80,7 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  optimizeDeps: {
+    exclude: ["@vitejs/plugin-react", "@tailwindcss/oxide"],
+  },
 });
