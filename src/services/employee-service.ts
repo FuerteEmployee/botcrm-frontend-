@@ -129,7 +129,10 @@ export function useEmployeeService(params: EmployeeParams = {}) {
             e.name?.toLowerCase().includes(search.toLowerCase()) ||
             e.phone?.includes(search);
           const matchesDept = departmentId === "all" || e.departmentId === departmentId || (e.departmentId as any)?._id === departmentId;
-          const matchesShift = shiftId === "all" || e.shiftId === shiftId || (e.shiftId as any)?._id === shiftId;
+          const matchesShift = shiftId === "all" ||
+            e.shiftId === shiftId ||
+            (e.shiftId as any)?._id === shiftId ||
+            (e.shiftIds || []).some((s: any) => (s?._id || s) === shiftId);
           const matchesStatus = status === "all" || e.status === status;
           return matchesSearch && matchesDept && matchesShift && matchesStatus;
         });
