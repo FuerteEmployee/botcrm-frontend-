@@ -128,7 +128,7 @@ function ShiftsPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<BackendShift | null>(null);
   const [globalWorkDays, setGlobalWorkDays] = useState<string[]>(["M", "T", "W", "Th", "F", "Sa"]);
-  const [form, setForm] = useState({ name: "", startTime: "09:00", endTime: "18:00", workDays: ["M", "T", "W", "Th", "F", "Sa"], is24Hours: false });
+  const [form, setForm] = useState({ name: "", startTime: "09:00", endTime: "18:00", workDays: ["M", "T", "W", "Th", "F", "Sa"], is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0 });
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
@@ -219,14 +219,14 @@ function ShiftsPage() {
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ name: "", startTime: "09:00", endTime: "18:00", workDays: globalWorkDays, is24Hours: false });
+    setForm({ name: "", startTime: "09:00", endTime: "18:00", workDays: globalWorkDays, is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0 });
     setOpen(true);
   };
 
   const openEdit = (s: BackendShift) => {
     setEditing(s);
     const is24 = s.startTime === "00:00" && s.endTime === "23:59";
-    setForm({ name: s.name, startTime: s.startTime, endTime: s.endTime, workDays: s.workDays || globalWorkDays, is24Hours: is24 });
+    setForm({ name: s.name, startTime: s.startTime, endTime: s.endTime, workDays: s.workDays || globalWorkDays, is24Hours: is24, halfDayLatePunchInMin: s.halfDayLatePunchInMin || 0, halfDayEarlyPunchOutMin: s.halfDayEarlyPunchOutMin || 0 });
     setOpen(true);
   };
 
@@ -397,8 +397,8 @@ function ShiftsPage() {
                         {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
                       </div>
 
-                      {/* Duration badge */}
-                      <div className="mt-3 flex items-center gap-2">
+                      {/* Duration & Half Day Badges */}
+                      <div className="mt-3 flex flex-wrap items-center gap-1.5">
                         <Badge variant="outline" className="text-[10px] font-medium px-2 py-0.5 border-border/40 bg-muted/20">
                           {(() => {
                             const [sh, sm] = s.startTime.split(":").map(Number);
@@ -408,6 +408,16 @@ function ShiftsPage() {
                             return `${Math.floor(diff / 60)}h ${diff % 60}m`;
                           })()}
                         </Badge>
+                        {s.halfDayLatePunchInMin ? (
+                          <Badge variant="secondary" className="text-[10px] font-medium px-2 py-0.5 bg-amber-500/10 text-amber-700 border-none">
+                            HD Late: {s.halfDayLatePunchInMin}m
+                          </Badge>
+                        ) : null}
+                        {s.halfDayEarlyPunchOutMin ? (
+                          <Badge variant="secondary" className="text-[10px] font-medium px-2 py-0.5 bg-orange-500/10 text-orange-700 border-none">
+                            HD Early: {s.halfDayEarlyPunchOutMin}m
+                          </Badge>
+                        ) : null}
                       </div>
                     </div>
 
@@ -435,9 +445,19 @@ function ShiftsPage() {
                     <span className="text-[14px] font-medium">{s.name}</span>
                   </DataTableCell>
                   <DataTableCell>
-                    <div className="flex items-center gap-2 text-[13px] text-muted-foreground font-mono">
-                      <Clock className="h-3.5 w-3.5 text-primary/50" />
-                      {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
+                    <div className="flex flex-col gap-0.5">
+                      <div className="flex items-center gap-2 text-[13px] text-muted-foreground font-mono">
+                        <Clock className="h-3.5 w-3.5 text-primary/50" />
+                        {formatTime12h(s.startTime)} – {formatTime12h(s.endTime)}
+                      </div>
+                      {(s.halfDayLatePunchInMin || s.halfDayEarlyPunchOutMin) ? (
+                        <div className="text-[10px] text-muted-foreground/60 pl-5">
+                          HD: {[
+                            s.halfDayLatePunchInMin ? `Late > ${s.halfDayLatePunchInMin}m` : null,
+                            s.halfDayEarlyPunchOutMin ? `Early > ${s.halfDayEarlyPunchOutMin}m` : null
+                          ].filter(Boolean).join(" / ")}
+                        </div>
+                      ) : null}
                     </div>
                   </DataTableCell>
                   <DataTableCell>
@@ -612,6 +632,36 @@ function ShiftsPage() {
               </div>
               <p className="text-[10px] text-muted-foreground">
                 Highlighted = work day. Non-highlighted = holiday. Pre-filled from global settings.
+              </p>
+            </div>
+
+            {/* Half Day Settings */}
+            <div className="space-y-2.5 border-t border-border/40 pt-3">
+              <label className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider block">Half Day Rules</label>
+              <div className="grid grid-cols-2 gap-3">
+                <FormInput
+                  label="Late Punch In (mins)"
+                  type="number"
+                  placeholder="e.g. 120"
+                  value={form.halfDayLatePunchInMin || ""}
+                  onChange={(e) => setForm({ ...form, halfDayLatePunchInMin: e.target.value ? Number(e.target.value) : 0 })}
+                  className="h-10"
+                  containerClassName="space-y-1"
+                  min={0}
+                />
+                <FormInput
+                  label="Early Punch Out (mins)"
+                  type="number"
+                  placeholder="e.g. 120"
+                  value={form.halfDayEarlyPunchOutMin || ""}
+                  onChange={(e) => setForm({ ...form, halfDayEarlyPunchOutMin: e.target.value ? Number(e.target.value) : 0 })}
+                  className="h-10"
+                  containerClassName="space-y-1"
+                  min={0}
+                />
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Set limit in minutes. Punching in after or punching out before this duration will automatically mark attendance as "Half Day".
               </p>
             </div>
 

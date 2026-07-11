@@ -38,6 +38,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useTicketService, type Ticket } from "@/services/ticket-service";
 import { useEmployeeService } from "@/services/employee-service";
 import { useLeaveTypeService } from "@/services/leave-type-service";
+import { parseTicketReason } from "@/lib/leave-ticket-parser";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { FormInput } from "@/components/shared/form-input";
@@ -117,37 +118,6 @@ interface LeaveRequest {
   lowBalance?: boolean;
   isHalfDay?: boolean;
   halfDayType?: "morning" | "afternoon";
-}
-
-function parseTicketReason(reason: string): {
-  type: LeaveType;
-  startDate: string;
-  endDate: string;
-  note: string;
-  isHalfDay: boolean;
-  onBehalfName?: string;
-  onBehalfId?: string;
-} {
-  // Format: "Leave: annual | 2025-05-10 to 2025-05-15 | Note: Family vacation | Duration: full | OnBehalfName: Name | OnBehalfId: ID"
-  const parts = reason.split(" | ");
-  const type = parts[0]?.replace("Leave: ", "").trim() || "Casual Leave";
-  const datePart = parts[1] || "";
-  const [startDate = "", endDate = ""] = datePart.split(" to ").map((d) => d.trim());
-  const note = parts[2]?.replace("Note: ", "").trim() || reason;
-  const duration = parts[3]?.replace("Duration: ", "").trim() || "full";
-  
-  const onBehalfName = parts[4]?.replace("OnBehalfName: ", "").trim();
-  const onBehalfId = parts[5]?.replace("OnBehalfId: ", "").trim();
-
-  return { 
-    type, 
-    startDate, 
-    endDate, 
-    note, 
-    isHalfDay: duration === "half",
-    onBehalfName,
-    onBehalfId
-  };
 }
 
 function calcDays(startDate: string, endDate: string): number {

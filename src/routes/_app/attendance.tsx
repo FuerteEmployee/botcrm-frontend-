@@ -1,8 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState, useEffect } from "react";
 import { z } from "zod";
+import { useQuery } from "@tanstack/react-query";
 import { GridCard } from "@/components/shared/grid-card";
-import { Check, X, Clock as ClockIcon, MessageSquare, Pencil, CalendarDays, Ticket, Search, MapPin, MoreVertical, Download, Plus, ChevronLeft, ChevronRight, Users, UserCheck } from "lucide-react";
+import { Check, X, Clock as ClockIcon, MessageSquare, Pencil, CalendarDays, Search, MapPin, MoreVertical, Download, Plus, ChevronLeft, ChevronRight, Users, UserCheck, UserX, Phone, ClipboardList, ShieldAlert, Layers } from "lucide-react";
 import { ActionButton } from "@/components/shared/action-button";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/shared/page-header";
@@ -21,9 +22,18 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription,
+} from "@/components/ui/sheet";
+import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { useAttendanceService, type AttendanceRecord } from "@/services/attendance-service";
+import { useAttendanceService, useAttendanceStats, useAbsentToday, type AttendanceRecord } from "@/services/attendance-service";
+import { useRegularizationService } from "@/services/regularization-service";
+import { useShiftService } from "@/services/shift-service";
+import { useEmployeeService } from "@/services/employee-service";
+import { useTicketService } from "@/services/ticket-service";
+import { parseTicketReason } from "@/lib/leave-ticket-parser";
+import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -236,9 +246,10 @@ const PAGE_SIZE = 10;
 const CARD_PAGE_SIZE = 12;
 
 function AttendancePage() {
-  const { records: list, isLoading, updateAttendance } = useAttendanceService();
+  const { records: list, isLoading, updateAttendance, markAbsent } = useAttendanceService();
   const { status } = Route.useSearch();
   const [tab, setTab] = useState<string>(status || "all");
+  const [shiftFilter, setShiftFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [remarkOpenId, setRemarkOpenId] = useState<string | null>(null);
   const [remarkText, setRemarkText] = useState("");
@@ -246,6 +257,20 @@ function AttendancePage() {
   const [view, setView] = useState<"grid" | "list">(defaultLayout);
   const { can } = usePermission();
   const canEdit = can("attendance", "edit");
+  const canCreate = can("attendance", "create");
+
+  const { stats } = useAttendanceStats();
+  const { absentees } = useAbsentToday();
+  const { regularizations, submitRegularization, approveRegularization, rejectRegularization, isSubmitting } = useRegularizationService();
+  const { shifts } = useShiftService();
+  const { employees } = useEmployeeService({ limit: 200, status: "active" });
+  const { tickets } = useTicketService();
+
+  const { data: appSettings } = useQuery({
+    queryKey: ["settings"],
+    queryFn: async () => (await apiClient.get("/settings")).data,
+  });
+  const maxLunchMinutes = appSettings?.attendance?.maxLunch ?? 90;
 
   // Pagination states
   const [tablePage, setTablePage] = useState(1);
@@ -286,6 +311,22 @@ function AttendancePage() {
     absent: todayList.filter((t) => t.status === "absent").length,
   };
 
+  // On Leave — approved Leave tickets (the real leave-request source of truth;
+  // see leaves.tsx) whose date range covers today.
+  const onLeaveCount = useMemo(() => {
+    return tickets.filter((t) => {
+      if (t.type !== "Leave" || t.status !== "approved") return false;
+      const parsed = parseTicketReason(t.reason);
+      if (!parsed.startDate || !parsed.endDate) return false;
+      return parsed.startDate <= todayStr && todayStr <= parsed.endDate;
+    }).length;
+  }, [tickets, todayStr]);
+
+  const pendingRegularizations = useMemo(
+    () => regularizations.filter((r) => r.status === "pending"),
+    [regularizations]
+  );
+
   // All-days filtered records
   const filtered = useMemo(() => {
     return list.filter((t) => {
@@ -294,9 +335,10 @@ function AttendancePage() {
       const matchesTab = tab === "all" || displayStatus === tab || t.status === tab;
       const matchesSearch = !search || name.toLowerCase().includes(search.toLowerCase());
       const matchesDate = !dateFilter || t.date?.slice(0, 10) === dateFilter;
-      return matchesTab && matchesSearch && matchesDate;
+      const matchesShift = shiftFilter === "all" || t.employeeId?.shiftId?._id === shiftFilter;
+      return matchesTab && matchesSearch && matchesDate && matchesShift;
     });
-  }, [list, tab, search, dateFilter]);
+  }, [list, tab, search, dateFilter, shiftFilter]);
 
   // Reset pages when filters change
   useEffect(() => { setTablePage(1); setCardPage(1); }, [filtered]);
@@ -318,11 +360,56 @@ function AttendancePage() {
 
   const isShowingToday = dateFilter === todayStr;
 
+  // Absent Today / Pending Regularizations / Attendance Detail / Request Correction
+  const [absentSheetOpen, setAbsentSheetOpen] = useState(false);
+  const [regSheetOpen, setRegSheetOpen] = useState(false);
+  const [detailRecord, setDetailRecord] = useState<AttendanceRecord | null>(null);
+  const [correctionOpen, setCorrectionOpen] = useState(false);
+  const [correctionForm, setCorrectionForm] = useState({
+    employeeId: "",
+    date: todayStr,
+    requestedPunchIn: "",
+    requestedPunchOut: "",
+    requestedLunchInTime: "",
+    requestedLunchOutTime: "",
+    reason: "",
+  });
+
+  const handleMarkAbsent = async (employeeId: string, date: string) => {
+    try {
+      await markAbsent({ employeeId, date: date.slice(0, 10) });
+    } catch { }
+  };
+
+  const handleSubmitCorrection = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!correctionForm.employeeId || !correctionForm.date || !correctionForm.reason) {
+      toast.error("Please select an employee, date, and reason.");
+      return;
+    }
+    try {
+      await submitRegularization({
+        employeeId: correctionForm.employeeId,
+        date: correctionForm.date,
+        requestedPunchIn: correctionForm.requestedPunchIn || undefined,
+        requestedPunchOut: correctionForm.requestedPunchOut || undefined,
+        requestedLunchInTime: correctionForm.requestedLunchInTime || undefined,
+        requestedLunchOutTime: correctionForm.requestedLunchOutTime || undefined,
+        reason: correctionForm.reason,
+      });
+      setCorrectionOpen(false);
+      setCorrectionForm({
+        employeeId: "", date: todayStr, requestedPunchIn: "", requestedPunchOut: "",
+        requestedLunchInTime: "", requestedLunchOutTime: "", reason: "",
+      });
+    } catch { }
+  };
+
   if (isLoading) {
     return (
       <div className="space-y-6">
         <PageHeader title="Attendance Reports" description="Monitor daily punch logs and modify login times." />
-        <SkeletonLoader type="stats" count={3} />
+        <SkeletonLoader type="stats" count={5} />
         <SkeletonLoader type="table" count={10} />
       </div>
     );
@@ -340,6 +427,15 @@ function AttendancePage() {
               showLabel
               label="Export Logs"
             />
+            {canCreate && (
+              <ActionButton
+                variant="add"
+                showLabel
+                label="Request Correction"
+                icon={ClipboardList}
+                onClick={() => setCorrectionOpen(true)}
+              />
+            )}
             {canEdit && (
               <ActionButton
                 variant="edit"
@@ -352,10 +448,20 @@ function AttendancePage() {
         }
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard label="Present Today" value={counts.present} icon={Check} accent="success" delay={0} />
-        <StatCard label="Late Arrivals" value={counts.late} icon={ClockIcon} accent="warning" delay={0.05} />
-        <StatCard label="Total Records" value={counts.all} icon={Ticket} accent="primary" delay={0.1} />
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard label="Present Today" value={stats?.presentToday ?? counts.present} icon={Check} accent="success" delay={0} />
+        <StatCard label="Late Arrivals" value={stats?.lateArrivals ?? counts.late} icon={ClockIcon} accent="warning" delay={0.05} />
+        <StatCard label="On Leave" value={onLeaveCount} icon={CalendarDays} accent="info" delay={0.1} />
+        <StatCard label="Missing Punch" value={stats?.missingPunch ?? 0} icon={UserCheck} accent="destructive" delay={0.15} />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div onClick={() => setAbsentSheetOpen(true)} className="cursor-pointer">
+          <StatCard label="Absent Today" value={stats?.absentToday ?? counts.absent} icon={UserX} accent="destructive" delay={0.25} />
+        </div>
+        <div onClick={() => setRegSheetOpen(true)} className="cursor-pointer">
+          <StatCard label="Pending Regularizations" value={pendingRegularizations.length} icon={ClipboardList} accent="warning" delay={0.3} />
+        </div>
       </div>
 
       {/* ── Filters Bar ──────────────────────────────────────────────────────── */}
@@ -375,6 +481,19 @@ function AttendancePage() {
               <SelectItem value="late">Late</SelectItem>
               <SelectItem value="absent">Absent</SelectItem>
               <SelectItem value="half-day">Half Day</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select value={shiftFilter} onValueChange={(v) => { setShiftFilter(v); setTablePage(1); setCardPage(1); }}>
+            <SelectTrigger className="w-full md:w-[150px] h-10 border border-info/20 bg-info/5 text-info hover:bg-info/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
+              <Layers className="h-3.5 w-3.5" />
+              <SelectValue placeholder="Shift" />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl border-border/60">
+              <SelectItem value="all">All Shifts</SelectItem>
+              {shifts.map((s) => (
+                <SelectItem key={s._id} value={s._id}>{s.name}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
 
@@ -476,6 +595,7 @@ function AttendancePage() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => setDetailRecord(t)}>View Details</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => {
                         setModifyForm({
                           id: t._id,
@@ -488,6 +608,9 @@ function AttendancePage() {
                         setModifyOpen(true);
                       }}>Edit Punch</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => { setRemarkOpenId(t._id); setRemarkText(t.remarks || ""); }}>Add Remark</DropdownMenuItem>
+                      {t.status !== "absent" && (
+                        <DropdownMenuItem className="text-destructive" onClick={() => handleMarkAbsent(t.employeeId._id, t.date)}>Mark Absent</DropdownMenuItem>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                   ) : undefined
@@ -616,6 +739,11 @@ function AttendancePage() {
                   </DataTableCell>
                   <DataTableCell isLast>
                     <div className="flex justify-end items-center gap-1">
+                      <ActionButton
+                        variant="view"
+                        tooltip="View Details"
+                        onClick={() => setDetailRecord(t)}
+                      />
                       {canEdit && (
                       <ActionButton
                         variant="edit"
@@ -639,6 +767,14 @@ function AttendancePage() {
                         tooltip="Add Remark"
                         icon={MessageSquare}
                         onClick={() => { setRemarkOpenId(t._id); setRemarkText(t.remarks || ""); }}
+                      />
+                      )}
+                      {canEdit && t.status !== "absent" && (
+                      <ActionButton
+                        variant="reject"
+                        tooltip="Mark Absent"
+                        icon={UserX}
+                        onClick={() => handleMarkAbsent(t.employeeId._id, t.date)}
                       />
                       )}
                     </div>
@@ -759,6 +895,333 @@ function AttendancePage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Absent Today Sheet */}
+      <Sheet open={absentSheetOpen} onOpenChange={setAbsentSheetOpen}>
+        <SheetContent className="sm:max-w-md w-full p-0 border-l border-border/40">
+          <div className="h-full flex flex-col">
+            <SheetHeader className="p-6 pb-4 border-b border-border/40">
+              <SheetTitle className="text-xl font-black tracking-tight flex items-center gap-2">
+                <UserX className="h-5 w-5 text-destructive" /> Absent Today
+              </SheetTitle>
+              <SheetDescription className="text-sm font-medium">
+                Active employees with no punch record for {new Date(todayStr).toLocaleDateString()}.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="flex-1 overflow-y-auto p-6 space-y-3">
+              {absentees.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-14 text-center">
+                  <UserCheck className="h-8 w-8 text-muted-foreground/30 mb-2" />
+                  <p className="text-[13px] text-muted-foreground">Everyone has punched in today.</p>
+                </div>
+              ) : (
+                absentees.map((e) => (
+                  <div key={e._id} className="flex items-center justify-between p-3 rounded-xl border border-border/40 bg-muted/10">
+                    <div className="flex items-center gap-3">
+                      <Avatar className="h-9 w-9 ring-2 ring-destructive/10">
+                        <AvatarFallback className="bg-destructive/10 text-destructive text-[12px] font-bold">
+                          {e.name?.split(" ").map((n) => n[0]).join("")}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="text-[13px] font-bold text-foreground leading-tight">{e.name}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {e.shiftId?.name || "No Shift"}{e.branchId?.branchName ? ` • ${e.branchId.branchName}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                    {e.phone && (
+                      <a
+                        href={`tel:${e.phone}`}
+                        className="h-9 w-9 rounded-xl bg-primary/5 text-primary flex items-center justify-center hover:bg-primary/10 transition-colors shrink-0"
+                      >
+                        <Phone className="h-4 w-4" />
+                      </a>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Pending Regularizations Sheet */}
+      <Sheet open={regSheetOpen} onOpenChange={setRegSheetOpen}>
+        <SheetContent className="sm:max-w-lg w-full p-0 border-l border-border/40">
+          <div className="h-full flex flex-col">
+            <SheetHeader className="p-6 pb-4 border-b border-border/40">
+              <SheetTitle className="text-xl font-black tracking-tight flex items-center gap-2">
+                <ClipboardList className="h-5 w-5 text-warning-foreground" /> Pending Regularizations
+              </SheetTitle>
+              <SheetDescription className="text-sm font-medium">
+                Attendance correction requests awaiting your review.
+              </SheetDescription>
+            </SheetHeader>
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              {pendingRegularizations.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-14 text-center">
+                  <Check className="h-8 w-8 text-muted-foreground/30 mb-2" />
+                  <p className="text-[13px] text-muted-foreground">No pending correction requests.</p>
+                </div>
+              ) : (
+                pendingRegularizations.map((r) => (
+                  <Card key={r._id} className="p-4 bg-muted/10 border-border/40 rounded-2xl shadow-none space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Avatar className="h-8 w-8 ring-2 ring-primary/10">
+                        <AvatarFallback className="bg-primary/10 text-primary text-[11px] font-bold">
+                          {r.employeeId?.name?.split(" ").map((n) => n[0]).join("")}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="text-[13px] font-bold text-foreground leading-tight">{r.employeeId?.name}</p>
+                        <p className="text-[11px] text-muted-foreground">{new Date(r.date).toLocaleDateString()}</p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      {r.requestedPunchIn && (
+                        <div className="p-2 rounded-lg bg-white border border-border/30">
+                          <span className="text-muted-foreground">Punch In: </span>
+                          <span className="font-mono font-bold">{new Date(r.requestedPunchIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                        </div>
+                      )}
+                      {r.requestedPunchOut && (
+                        <div className="p-2 rounded-lg bg-white border border-border/30">
+                          <span className="text-muted-foreground">Punch Out: </span>
+                          <span className="font-mono font-bold">{new Date(r.requestedPunchOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-[12px] text-muted-foreground italic">"{r.reason}"</p>
+                    {canEdit && (
+                      <div className="flex gap-2 pt-1">
+                        <ActionButton variant="approve" showLabel label="Approve" className="flex-1 h-9" onClick={() => approveRegularization({ id: r._id })} />
+                        <ActionButton variant="reject" showLabel label="Reject" className="flex-1 h-9" onClick={() => rejectRegularization({ id: r._id })} />
+                      </div>
+                    )}
+                  </Card>
+                ))
+              )}
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Request Correction Dialog */}
+      <Dialog open={correctionOpen} onOpenChange={setCorrectionOpen}>
+        <DialogContent className="max-w-md rounded-2xl border-none shadow-2xl p-0 overflow-hidden">
+          <div className="h-2 w-full bg-primary" />
+          <div className="p-6">
+            <DialogHeader className="mb-6">
+              <div className="h-12 w-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-4">
+                <ClipboardList className="h-6 w-6" />
+              </div>
+              <DialogTitle className="text-xl font-black">Request Correction</DialogTitle>
+              <DialogDescription className="font-medium text-xs">
+                Submit an attendance correction for admin approval.
+              </DialogDescription>
+            </DialogHeader>
+            <form className="space-y-4" onSubmit={handleSubmitCorrection}>
+              <div className="space-y-2">
+                <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Employee</label>
+                <Select value={correctionForm.employeeId} onValueChange={(v) => setCorrectionForm({ ...correctionForm, employeeId: v })}>
+                  <SelectTrigger className="h-11 rounded-xl">
+                    <SelectValue placeholder="Select employee..." />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl">
+                    {employees.map((e) => (
+                      <SelectItem key={e._id} value={e._id}>{e.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <FormInput
+                label="Date"
+                type="date"
+                value={correctionForm.date}
+                onChange={(e) => setCorrectionForm({ ...correctionForm, date: e.target.value })}
+                className="h-11"
+                containerClassName="space-y-1"
+              />
+              <div className="grid grid-cols-2 gap-3">
+                <FormInput
+                  label="Punch In"
+                  type="datetime-local"
+                  value={correctionForm.requestedPunchIn}
+                  onChange={(e) => setCorrectionForm({ ...correctionForm, requestedPunchIn: e.target.value })}
+                  className="h-11"
+                  containerClassName="space-y-1"
+                />
+                <FormInput
+                  label="Punch Out"
+                  type="datetime-local"
+                  value={correctionForm.requestedPunchOut}
+                  onChange={(e) => setCorrectionForm({ ...correctionForm, requestedPunchOut: e.target.value })}
+                  className="h-11"
+                  containerClassName="space-y-1"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <FormInput
+                  label="Lunch In"
+                  type="datetime-local"
+                  value={correctionForm.requestedLunchInTime}
+                  onChange={(e) => setCorrectionForm({ ...correctionForm, requestedLunchInTime: e.target.value })}
+                  className="h-11"
+                  containerClassName="space-y-1"
+                />
+                <FormInput
+                  label="Lunch Out"
+                  type="datetime-local"
+                  value={correctionForm.requestedLunchOutTime}
+                  onChange={(e) => setCorrectionForm({ ...correctionForm, requestedLunchOutTime: e.target.value })}
+                  className="h-11"
+                  containerClassName="space-y-1"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Reason</label>
+                <Textarea
+                  value={correctionForm.reason}
+                  onChange={(e) => setCorrectionForm({ ...correctionForm, reason: e.target.value })}
+                  placeholder="e.g. Forgot to punch out, GPS was off..."
+                  rows={3}
+                  className="text-[13px]"
+                />
+              </div>
+              <DialogFooter className="pt-2 gap-3">
+                <Button type="button" variant="ghost" onClick={() => setCorrectionOpen(false)} className="rounded-xl h-11 flex-1 font-bold">Cancel</Button>
+                <ActionButton
+                  variant="add"
+                  type="submit"
+                  showLabel
+                  label="Submit Request"
+                  icon={Check}
+                  disabled={isSubmitting}
+                  className="flex-1 h-11"
+                />
+              </DialogFooter>
+            </form>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Attendance Detail Sheet */}
+      <Sheet open={!!detailRecord} onOpenChange={(o) => !o && setDetailRecord(null)}>
+        <SheetContent className="sm:max-w-lg w-full p-0 border-l border-border/40">
+          {detailRecord && (
+            <div className="h-full flex flex-col">
+              <SheetHeader className="p-6 pb-4 border-b border-border/40">
+                <div className="flex items-center justify-between mb-2">
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "capitalize text-[10px] font-black px-3 py-1 rounded-full border-transparent",
+                      getDisplayStatus(detailRecord) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
+                        detailRecord.status === "present" ? "bg-success/10 text-success" :
+                          detailRecord.status === "late" ? "bg-warning/15 text-warning-foreground" :
+                            "bg-destructive/10 text-destructive"
+                    )}
+                  >
+                    {getDisplayStatus(detailRecord) === "on-duty" ? "On Duty" : detailRecord.status}
+                  </Badge>
+                  <span className="text-[11px] text-muted-foreground font-medium">{new Date(detailRecord.date).toLocaleDateString()}</span>
+                </div>
+                <SheetTitle className="text-xl font-black tracking-tight">{detailRecord.employeeId?.name}</SheetTitle>
+                <SheetDescription className="text-sm font-medium">{detailRecord.employeeId?.phone}</SheetDescription>
+              </SheetHeader>
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Punch In</p>
+                    <div className="h-28 rounded-xl overflow-hidden bg-muted/30 border border-border/40 flex items-center justify-center">
+                      {detailRecord.punchInPhoto ? (
+                        <img src={detailRecord.punchInPhoto} alt="Punch in selfie" className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground">No photo</span>
+                      )}
+                    </div>
+                    <p className="text-[13px] font-mono font-bold text-foreground">
+                      {detailRecord.punchIn ? new Date(detailRecord.punchIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <MapPin className="h-3 w-3 shrink-0" />
+                      <span className="truncate">
+                        {typeof detailRecord.punchInLocation === "object"
+                          ? `${(detailRecord.punchInLocation as any).lat?.toFixed(4)}, ${(detailRecord.punchInLocation as any).lng?.toFixed(4)}`
+                          : (detailRecord.punchInLocation || "No location data")}
+                      </span>
+                    </p>
+                    {detailRecord.punchInDistance != null && detailRecord.punchInDistance > 150 && (
+                      <Badge variant="outline" className="bg-amber-500/10 text-amber-700 border-amber-200 text-[9px] gap-1 py-0 px-1.5 font-bold">
+                        <ShieldAlert className="h-3 w-3" /> Geo Violation ({detailRecord.punchInDistance}m)
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Punch Out</p>
+                    <div className="h-28 rounded-xl overflow-hidden bg-muted/30 border border-border/40 flex items-center justify-center">
+                      {detailRecord.punchOutPhoto ? (
+                        <img src={detailRecord.punchOutPhoto} alt="Punch out selfie" className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground">No photo</span>
+                      )}
+                    </div>
+                    <p className="text-[13px] font-mono font-bold text-foreground">
+                      {detailRecord.punchOut ? new Date(detailRecord.punchOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                      <MapPin className="h-3 w-3 shrink-0" />
+                      <span className="truncate">
+                        {typeof detailRecord.punchOutLocation === "object"
+                          ? `${(detailRecord.punchOutLocation as any).lat?.toFixed(4)}, ${(detailRecord.punchOutLocation as any).lng?.toFixed(4)}`
+                          : (detailRecord.punchOutLocation || "No location data")}
+                      </span>
+                    </p>
+                    {detailRecord.punchOutDistance != null && detailRecord.punchOutDistance > 150 && (
+                      <Badge variant="outline" className="bg-amber-500/10 text-amber-700 border-amber-200 text-[9px] gap-1 py-0 px-1.5 font-bold">
+                        <ShieldAlert className="h-3 w-3" /> Geo Violation ({detailRecord.punchOutDistance}m)
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+
+                <Card className="p-4 bg-muted/20 border-border/40 rounded-2xl shadow-none space-y-2">
+                  <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Lunch Break</p>
+                  <div className="flex items-center justify-between text-[13px] font-mono font-bold text-foreground">
+                    <span>{detailRecord.lunchInTime ? new Date(detailRecord.lunchInTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
+                    <span className="text-muted-foreground font-sans font-normal text-[11px]">to</span>
+                    <span>{detailRecord.lunchOutTime ? new Date(detailRecord.lunchOutTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
+                  </div>
+                  {detailRecord.lunchInTime && detailRecord.lunchOutTime && (() => {
+                    const mins = Math.round((new Date(detailRecord.lunchOutTime).getTime() - new Date(detailRecord.lunchInTime).getTime()) / 60000);
+                    return mins > maxLunchMinutes ? (
+                      <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/20 text-[9px] gap-1 py-0 px-1.5 font-bold">
+                        <ShieldAlert className="h-3 w-3" /> Lunch overrun ({mins}m over {maxLunchMinutes}m limit)
+                      </Badge>
+                    ) : null;
+                  })()}
+                </Card>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Total Hours</span>
+                    <div className="font-bold text-primary text-[13px]">
+                      {detailRecord.punchIn && detailRecord.punchOut
+                        ? `${((new Date(detailRecord.punchOut).getTime() - new Date(detailRecord.punchIn).getTime()) / 3600000).toFixed(2)}h`
+                        : "—"}
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Remarks</span>
+                    <div className="font-medium text-foreground/80 text-[13px]">{detailRecord.remarks || "—"}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

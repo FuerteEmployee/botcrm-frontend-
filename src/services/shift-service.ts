@@ -10,6 +10,8 @@ export interface Shift {
   workDays?: string[];
   assigned?: number;
   createdAt: string;
+  halfDayLatePunchInMin?: number;
+  halfDayEarlyPunchOutMin?: number;
 }
 
 export function useShiftService() {

@@ -8,6 +8,8 @@ export interface AttendanceRecord {
     _id: string;
     name: string;
     phone: string;
+    shiftId?: { _id: string; name: string; startTime: string; endTime: string };
+    branchId?: { _id: string; branchName: string; city: string };
   };
   date: string;
   punchIn?: string;
@@ -20,10 +22,31 @@ export interface AttendanceRecord {
   lunchOutLocation?: string | { lat: number; lng: number };
   punchInPhoto?: string;
   punchOutPhoto?: string;
+  punchInDistance?: number | null;
+  punchOutDistance?: number | null;
+  lunchInDistance?: number | null;
+  lunchOutDistance?: number | null;
   status: 'present' | 'absent' | 'half-day' | 'late' | 'wfh';
   isWFH?: boolean;
   wasLate?: boolean;
   remarks?: string;
+}
+
+export interface AttendanceStats {
+  date: string;
+  presentToday: number;
+  lateArrivals: number;
+  missingPunch: number;
+  absentToday: number;
+  pendingRegularizations: number;
+}
+
+export interface AbsentEmployee {
+  _id: string;
+  name: string;
+  phone: string;
+  shiftId?: { _id: string; name: string };
+  branchId?: { _id: string; branchName: string };
 }
 
 export function useAttendanceService(startDate?: string, endDate?: string, employeeId?: string) {
@@ -72,6 +95,22 @@ export function useAttendanceService(startDate?: string, endDate?: string, emplo
     }
   });
 
+  const markAbsent = useMutation({
+    mutationFn: async (data: { employeeId: string; date: string }) => {
+      const { data: response } = await apiClient.put("/attendance/mark-absent", data);
+      return response;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["attendance"] });
+      queryClient.invalidateQueries({ queryKey: ["attendance-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["absent-today"] });
+      toast.success("Marked absent");
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || "Failed to mark absent");
+    }
+  });
+
   return {
     records,
     isLoading,
@@ -79,5 +118,30 @@ export function useAttendanceService(startDate?: string, endDate?: string, emplo
     isUpdating: updateAttendance.isPending,
     lunchIn: lunchIn.mutateAsync,
     lunchOut: lunchOut.mutateAsync,
+    markAbsent: markAbsent.mutateAsync,
   };
+}
+
+export function useAttendanceStats(date?: string) {
+  const { data: stats, isLoading } = useQuery<AttendanceStats>({
+    queryKey: ["attendance-stats", date],
+    queryFn: async () => {
+      const { data } = await apiClient.get("/attendance/stats", { params: { date } });
+      return data;
+    },
+  });
+
+  return { stats, isLoading };
+}
+
+export function useAbsentToday() {
+  const { data: absentees = [], isLoading } = useQuery<AbsentEmployee[]>({
+    queryKey: ["absent-today"],
+    queryFn: async () => {
+      const { data } = await apiClient.get("/attendance/absent-today");
+      return data;
+    },
+  });
+
+  return { absentees, isLoading };
 }
