@@ -41,8 +41,13 @@ export function useMySubscription() {
       const { data } = await apiClient.get("/users/subscription");
       return data;
     },
-    // Keep it reasonably fresh, but don't hammer the API.
-    staleTime: 5 * 60 * 1000,
+    // This gates access and drives the renewal banner, so a tenant whose
+    // plan/status was just changed by the super admin should see it reflected
+    // within a minute of it happening — not only on their next window focus,
+    // which could otherwise leave a stale banner/block on screen for up to
+    // the old 5-minute staleTime.
+    staleTime: 60 * 1000,
+    refetchInterval: 60 * 1000,
     refetchOnWindowFocus: true,
   });
 }
