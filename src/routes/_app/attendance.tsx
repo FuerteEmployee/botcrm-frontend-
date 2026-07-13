@@ -1110,7 +1110,7 @@ function AttendancePage() {
         <SheetContent className="sm:max-w-lg w-full p-0 border-l border-border/40">
           {detailRecord && (
             <div className="h-full flex flex-col">
-              <SheetHeader className="p-6 pb-4 border-b border-border/40">
+              <SheetHeader className="p-6 pb-4 pr-12 border-b border-border/40">
                 <div className="flex items-center justify-between mb-2">
                   <Badge
                     variant="outline"

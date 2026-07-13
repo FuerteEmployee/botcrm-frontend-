@@ -473,10 +473,13 @@ function UserDashboard() {
   const captureScannerPhoto = async () => {
     if (videoRef.current) {
       const canvas = document.createElement("canvas");
-      canvas.width = 320;
-      canvas.height = 240;
+      canvas.width = videoRef.current.videoWidth || 320;
+      canvas.height = videoRef.current.videoHeight || 240;
       const ctx = canvas.getContext("2d");
       if (ctx) {
+        // Mirror horizontally to match the on-screen preview (video is shown with scale-x-[-1]).
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
         ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
         const dataUrl = canvas.toDataURL("image/jpeg");
         setCapturedSelfie(dataUrl);
