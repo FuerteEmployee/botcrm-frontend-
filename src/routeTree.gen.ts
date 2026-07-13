@@ -28,11 +28,17 @@ import { Route as SuperOverviewRouteImport } from './routes/super/overview'
 import { Route as SuperBillingRouteImport } from './routes/super/billing'
 import { Route as SuperAlertsRouteImport } from './routes/super/alerts'
 import { Route as AppUsersRouteImport } from './routes/_app/users'
+import { Route as AppTrainingRouteImport } from './routes/_app/training'
 import { Route as AppTrackingRouteImport } from './routes/_app/tracking'
 import { Route as AppTicketsRouteImport } from './routes/_app/tickets'
 import { Route as AppShiftsRouteImport } from './routes/_app/shifts'
 import { Route as AppSettingsRouteImport } from './routes/_app/settings'
 import { Route as AppSalaryRouteImport } from './routes/_app/salary'
+import { Route as AppRecruitmentRouteImport } from './routes/_app/recruitment'
+import { Route as AppProjectsRouteImport } from './routes/_app/projects'
+import { Route as AppPoliciesRouteImport } from './routes/_app/policies'
+import { Route as AppPerformanceRouteImport } from './routes/_app/performance'
+import { Route as AppPayslipsRouteImport } from './routes/_app/payslips'
 import { Route as AppLeavesRouteImport } from './routes/_app/leaves'
 import { Route as AppLeaveTypesRouteImport } from './routes/_app/leave-types'
 import { Route as AppLeadsRouteImport } from './routes/_app/leads'
@@ -148,6 +154,11 @@ const AppUsersRoute = AppUsersRouteImport.update({
   path: '/users',
   getParentRoute: () => AppRoute,
 } as any)
+const AppTrainingRoute = AppTrainingRouteImport.update({
+  id: '/training',
+  path: '/training',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppTrackingRoute = AppTrackingRouteImport.update({
   id: '/tracking',
   path: '/tracking',
@@ -171,6 +182,31 @@ const AppSettingsRoute = AppSettingsRouteImport.update({
 const AppSalaryRoute = AppSalaryRouteImport.update({
   id: '/salary',
   path: '/salary',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppRecruitmentRoute = AppRecruitmentRouteImport.update({
+  id: '/recruitment',
+  path: '/recruitment',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProjectsRoute = AppProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPoliciesRoute = AppPoliciesRouteImport.update({
+  id: '/policies',
+  path: '/policies',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPerformanceRoute = AppPerformanceRouteImport.update({
+  id: '/performance',
+  path: '/performance',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPayslipsRoute = AppPayslipsRouteImport.update({
+  id: '/payslips',
+  path: '/payslips',
   getParentRoute: () => AppRoute,
 } as any)
 const AppLeavesRoute = AppLeavesRouteImport.update({
@@ -294,11 +330,17 @@ export interface FileRoutesByFullPath {
   '/leads': typeof AppLeadsRoute
   '/leave-types': typeof AppLeaveTypesRoute
   '/leaves': typeof AppLeavesRoute
+  '/payslips': typeof AppPayslipsRoute
+  '/performance': typeof AppPerformanceRoute
+  '/policies': typeof AppPoliciesRoute
+  '/projects': typeof AppProjectsRoute
+  '/recruitment': typeof AppRecruitmentRoute
   '/salary': typeof AppSalaryRoute
   '/settings': typeof AppSettingsRoute
   '/shifts': typeof AppShiftsRoute
   '/tickets': typeof AppTicketsRoute
   '/tracking': typeof AppTrackingRoute
+  '/training': typeof AppTrainingRoute
   '/users': typeof AppUsersRoute
   '/super/alerts': typeof SuperAlertsRoute
   '/super/billing': typeof SuperBillingRoute
@@ -336,11 +378,17 @@ export interface FileRoutesByTo {
   '/leads': typeof AppLeadsRoute
   '/leave-types': typeof AppLeaveTypesRoute
   '/leaves': typeof AppLeavesRoute
+  '/payslips': typeof AppPayslipsRoute
+  '/performance': typeof AppPerformanceRoute
+  '/policies': typeof AppPoliciesRoute
+  '/projects': typeof AppProjectsRoute
+  '/recruitment': typeof AppRecruitmentRoute
   '/salary': typeof AppSalaryRoute
   '/settings': typeof AppSettingsRoute
   '/shifts': typeof AppShiftsRoute
   '/tickets': typeof AppTicketsRoute
   '/tracking': typeof AppTrackingRoute
+  '/training': typeof AppTrainingRoute
   '/users': typeof AppUsersRoute
   '/super/alerts': typeof SuperAlertsRoute
   '/super/billing': typeof SuperBillingRoute
@@ -383,11 +431,17 @@ export interface FileRoutesById {
   '/_app/leads': typeof AppLeadsRoute
   '/_app/leave-types': typeof AppLeaveTypesRoute
   '/_app/leaves': typeof AppLeavesRoute
+  '/_app/payslips': typeof AppPayslipsRoute
+  '/_app/performance': typeof AppPerformanceRoute
+  '/_app/policies': typeof AppPoliciesRoute
+  '/_app/projects': typeof AppProjectsRoute
+  '/_app/recruitment': typeof AppRecruitmentRoute
   '/_app/salary': typeof AppSalaryRoute
   '/_app/settings': typeof AppSettingsRoute
   '/_app/shifts': typeof AppShiftsRoute
   '/_app/tickets': typeof AppTicketsRoute
   '/_app/tracking': typeof AppTrackingRoute
+  '/_app/training': typeof AppTrainingRoute
   '/_app/users': typeof AppUsersRoute
   '/super/alerts': typeof SuperAlertsRoute
   '/super/billing': typeof SuperBillingRoute
@@ -430,11 +484,17 @@ export interface FileRouteTypes {
     | '/leads'
     | '/leave-types'
     | '/leaves'
+    | '/payslips'
+    | '/performance'
+    | '/policies'
+    | '/projects'
+    | '/recruitment'
     | '/salary'
     | '/settings'
     | '/shifts'
     | '/tickets'
     | '/tracking'
+    | '/training'
     | '/users'
     | '/super/alerts'
     | '/super/billing'
@@ -472,11 +532,17 @@ export interface FileRouteTypes {
     | '/leads'
     | '/leave-types'
     | '/leaves'
+    | '/payslips'
+    | '/performance'
+    | '/policies'
+    | '/projects'
+    | '/recruitment'
     | '/salary'
     | '/settings'
     | '/shifts'
     | '/tickets'
     | '/tracking'
+    | '/training'
     | '/users'
     | '/super/alerts'
     | '/super/billing'
@@ -518,11 +584,17 @@ export interface FileRouteTypes {
     | '/_app/leads'
     | '/_app/leave-types'
     | '/_app/leaves'
+    | '/_app/payslips'
+    | '/_app/performance'
+    | '/_app/policies'
+    | '/_app/projects'
+    | '/_app/recruitment'
     | '/_app/salary'
     | '/_app/settings'
     | '/_app/shifts'
     | '/_app/tickets'
     | '/_app/tracking'
+    | '/_app/training'
     | '/_app/users'
     | '/super/alerts'
     | '/super/billing'
@@ -687,6 +759,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppUsersRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/training': {
+      id: '/_app/training'
+      path: '/training'
+      fullPath: '/training'
+      preLoaderRoute: typeof AppTrainingRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/tracking': {
       id: '/_app/tracking'
       path: '/tracking'
@@ -720,6 +799,41 @@ declare module '@tanstack/react-router' {
       path: '/salary'
       fullPath: '/salary'
       preLoaderRoute: typeof AppSalaryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/recruitment': {
+      id: '/_app/recruitment'
+      path: '/recruitment'
+      fullPath: '/recruitment'
+      preLoaderRoute: typeof AppRecruitmentRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/projects': {
+      id: '/_app/projects'
+      path: '/projects'
+      fullPath: '/projects'
+      preLoaderRoute: typeof AppProjectsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/policies': {
+      id: '/_app/policies'
+      path: '/policies'
+      fullPath: '/policies'
+      preLoaderRoute: typeof AppPoliciesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/performance': {
+      id: '/_app/performance'
+      path: '/performance'
+      fullPath: '/performance'
+      preLoaderRoute: typeof AppPerformanceRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/payslips': {
+      id: '/_app/payslips'
+      path: '/payslips'
+      fullPath: '/payslips'
+      preLoaderRoute: typeof AppPayslipsRouteImport
       parentRoute: typeof AppRoute
     }
     '/_app/leaves': {
@@ -911,11 +1025,17 @@ interface AppRouteChildren {
   AppLeadsRoute: typeof AppLeadsRoute
   AppLeaveTypesRoute: typeof AppLeaveTypesRoute
   AppLeavesRoute: typeof AppLeavesRoute
+  AppPayslipsRoute: typeof AppPayslipsRoute
+  AppPerformanceRoute: typeof AppPerformanceRoute
+  AppPoliciesRoute: typeof AppPoliciesRoute
+  AppProjectsRoute: typeof AppProjectsRoute
+  AppRecruitmentRoute: typeof AppRecruitmentRoute
   AppSalaryRoute: typeof AppSalaryRoute
   AppSettingsRoute: typeof AppSettingsRoute
   AppShiftsRoute: typeof AppShiftsRoute
   AppTicketsRoute: typeof AppTicketsRoute
   AppTrackingRoute: typeof AppTrackingRoute
+  AppTrainingRoute: typeof AppTrainingRoute
   AppUsersRoute: typeof AppUsersRoute
 }
 
@@ -935,11 +1055,17 @@ const AppRouteChildren: AppRouteChildren = {
   AppLeadsRoute: AppLeadsRoute,
   AppLeaveTypesRoute: AppLeaveTypesRoute,
   AppLeavesRoute: AppLeavesRoute,
+  AppPayslipsRoute: AppPayslipsRoute,
+  AppPerformanceRoute: AppPerformanceRoute,
+  AppPoliciesRoute: AppPoliciesRoute,
+  AppProjectsRoute: AppProjectsRoute,
+  AppRecruitmentRoute: AppRecruitmentRoute,
   AppSalaryRoute: AppSalaryRoute,
   AppSettingsRoute: AppSettingsRoute,
   AppShiftsRoute: AppShiftsRoute,
   AppTicketsRoute: AppTicketsRoute,
   AppTrackingRoute: AppTrackingRoute,
+  AppTrainingRoute: AppTrainingRoute,
   AppUsersRoute: AppUsersRoute,
 }
 

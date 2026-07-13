@@ -448,11 +448,10 @@ function AttendancePage() {
         }
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard label="Present Today" value={stats?.presentToday ?? counts.present} icon={Check} accent="success" delay={0} />
         <StatCard label="Late Arrivals" value={stats?.lateArrivals ?? counts.late} icon={ClockIcon} accent="warning" delay={0.05} />
         <StatCard label="On Leave" value={onLeaveCount} icon={CalendarDays} accent="info" delay={0.1} />
-        <StatCard label="Missing Punch" value={stats?.missingPunch ?? 0} icon={UserCheck} accent="destructive" delay={0.15} />
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -653,8 +652,8 @@ function AttendancePage() {
 
                 <div className="text-[11px] text-muted-foreground mb-1 line-clamp-1 italic px-1 flex items-center gap-1.5">
                   <MapPin className="h-3 w-3 text-primary/40" />
-                  {typeof t.punchInLocation === 'object'
-                    ? `${t.punchInLocation.lat.toFixed(4)}, ${t.punchInLocation.lng.toFixed(4)}`
+                  {t.punchInLocation && typeof t.punchInLocation === 'object'
+                    ? `${t.punchInLocation.lat?.toFixed(4)}, ${t.punchInLocation.lng?.toFixed(4)}`
                     : (t.punchInLocation || "No location data")}
                 </div>
               </GridCard>
@@ -721,8 +720,8 @@ function AttendancePage() {
                     {t.punchOut ? new Date(t.punchOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
                   </DataTableCell>
                   <DataTableCell className="text-[12px] text-muted-foreground max-w-[150px] truncate italic">
-                    {typeof t.punchInLocation === 'object'
-                      ? `${t.punchInLocation.lat.toFixed(2)}, ${t.punchInLocation.lng.toFixed(2)}`
+                    {t.punchInLocation && typeof t.punchInLocation === 'object'
+                      ? `${t.punchInLocation.lat?.toFixed(2)}, ${t.punchInLocation.lng?.toFixed(2)}`
                       : (t.punchInLocation || "N/A")}
                   </DataTableCell>
                   <DataTableCell>
@@ -1147,7 +1146,7 @@ function AttendancePage() {
                     <p className="text-[11px] text-muted-foreground flex items-center gap-1">
                       <MapPin className="h-3 w-3 shrink-0" />
                       <span className="truncate">
-                        {typeof detailRecord.punchInLocation === "object"
+                        {detailRecord.punchInLocation && typeof detailRecord.punchInLocation === "object"
                           ? `${(detailRecord.punchInLocation as any).lat?.toFixed(4)}, ${(detailRecord.punchInLocation as any).lng?.toFixed(4)}`
                           : (detailRecord.punchInLocation || "No location data")}
                       </span>
@@ -1173,7 +1172,7 @@ function AttendancePage() {
                     <p className="text-[11px] text-muted-foreground flex items-center gap-1">
                       <MapPin className="h-3 w-3 shrink-0" />
                       <span className="truncate">
-                        {typeof detailRecord.punchOutLocation === "object"
+                        {detailRecord.punchOutLocation && typeof detailRecord.punchOutLocation === "object"
                           ? `${(detailRecord.punchOutLocation as any).lat?.toFixed(4)}, ${(detailRecord.punchOutLocation as any).lng?.toFixed(4)}`
                           : (detailRecord.punchOutLocation || "No location data")}
                       </span>
