@@ -31,7 +31,9 @@ import {
   FileText,
   Play,
   Square,
-  ArrowLeft
+  ArrowLeft,
+  ChevronDown,
+  ListChecks
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { ActionButton } from "@/components/shared/action-button";
@@ -114,6 +116,7 @@ function EmployeeDetailsPage() {
   const [activeTab, setActiveTab] = useState<"profile" | "attendance">("profile");
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedLog, setSelectedLog] = useState<AttendanceRecord | null>(null);
+  const [showAllSessions, setShowAllSessions] = useState(false);
 
   useEffect(() => {
     setHasMounted(true);
@@ -706,7 +709,7 @@ function EmployeeDetailsPage() {
                             return (
                               <tr
                                 key={log._id}
-                                onClick={() => setSelectedLog(log)}
+                                onClick={() => { setSelectedLog(log); setShowAllSessions(false); }}
                                 className="hover:bg-primary/3 transition-colors group cursor-pointer"
                               >
                                 <td className="px-6 py-4 font-medium text-foreground/80">{new Date(log.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
@@ -806,20 +809,33 @@ function EmployeeDetailsPage() {
 
       {/* Detailed Log Dialog */}
       <Dialog open={!!selectedLog} onOpenChange={(o) => !o && setSelectedLog(null)}>
-        <DialogContent className="max-w-2xl p-0 overflow-hidden border-none shadow-2xl rounded-3xl">
+        <DialogContent className="max-w-2xl p-0 overflow-hidden border-none shadow-2xl rounded-3xl max-h-[85vh]">
           {selectedLog && (
-            <div className="flex flex-col bg-slate-50 min-h-[500px]">
+            <div className="flex flex-col bg-slate-50 min-h-[500px] max-h-[85vh]">
               <DialogHeader className="bg-primary p-6 text-white shrink-0">
                 <div className="flex items-center justify-between">
                   <DialogTitle className="text-xl font-bold">Attendance Detail</DialogTitle>
-                  <Badge className="bg-white/20 text-white border-white/30 uppercase tracking-widest">{new Date(selectedLog.date).toLocaleDateString()}</Badge>
+                  <div className="flex items-center gap-2">
+                    {(selectedLog.shifts?.length ?? 0) > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAllSessions((v) => !v)}
+                        className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-white/80 hover:text-white bg-white/10 hover:bg-white/20 border border-white/20 rounded-full px-2.5 py-1 transition-colors"
+                      >
+                        <ListChecks className="h-3 w-3" />
+                        Lens Info
+                        <ChevronDown className={`h-3 w-3 transition-transform ${showAllSessions ? "rotate-180" : ""}`} />
+                      </button>
+                    )}
+                    <Badge className="bg-white/20 text-white border-white/30 uppercase tracking-widest">{new Date(selectedLog.date).toLocaleDateString()}</Badge>
+                  </div>
                 </div>
                 <DialogDescription className="text-white/70 text-xs font-medium">
                   Viewing detailed punch-in and punch-out logs for this day.
                 </DialogDescription>
               </DialogHeader>
 
-              <div className="p-8 space-y-8 overflow-y-auto">
+              <div className="p-8 space-y-8 overflow-y-auto flex-1 min-h-0">
                 {/* Login Timeline Item */}
                 <div className="relative pl-8 border-l-2 border-dashed border-primary/30">
                   <div className="absolute -left-[9px] top-0 h-4 w-4 rounded-full bg-primary ring-4 ring-primary/10" />
@@ -858,6 +874,44 @@ function EmployeeDetailsPage() {
                     </div>
                   </div>
                 </div>
+
+                {/* All Sessions (every BOTLens/camera-detected punch in/out for the day) */}
+                <AnimatePresence>
+                  {showAllSessions && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.25 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="bg-white p-4 rounded-2xl shadow-sm border border-border/40">
+                        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-2">
+                          All Sessions Today ({selectedLog.shifts?.length ?? 0})
+                        </span>
+                        <div className="max-h-56 overflow-y-auto pr-1 space-y-2">
+                          {(selectedLog.shifts ?? []).map((shift, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center justify-between p-2.5 bg-slate-50 rounded-lg border border-border/40 text-xs"
+                            >
+                              <span className="text-muted-foreground font-semibold w-10">#{i + 1}</span>
+                              <div className="flex items-center gap-1.5 font-semibold">
+                                <span className="text-emerald-600">
+                                  {shift.punchIn ? new Date(shift.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }) : "--"}
+                                </span>
+                                <span className="text-muted-foreground/50">→</span>
+                                <span className="text-rose-500">
+                                  {shift.punchOut ? new Date(shift.punchOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }) : "Still In"}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 {/* Lunch In Timeline Item */}
                 {selectedLog.lunchInTime && (
@@ -945,7 +999,7 @@ function EmployeeDetailsPage() {
                 </div>
               </div>
 
-              <div className="mt-auto bg-white p-6 border-t border-border/40 flex justify-end">
+              <div className="mt-auto shrink-0 bg-white p-6 border-t border-border/40 flex justify-end">
                 <ActionButton
                   variant="view"
                   showLabel
