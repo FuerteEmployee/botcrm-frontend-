@@ -29,6 +29,7 @@ import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { motion, AnimatePresence } from "framer-motion";
 import { useDepartmentService } from "@/services/department-service";
 import { useBranchService } from "@/services/branch-service";
+import { DeleteDialog } from "@/components/shared/delete-dialog";
 
 export const Route = createFileRoute("/_app/salary")({
   component: SalaryPage,
@@ -65,9 +66,11 @@ function SalaryPage() {
   const [selectedExpenseIds, setSelectedExpenseIds] = useState<Set<string>>(new Set());
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
   const [view, setView] = useState<"grid" | "list">(defaultLayout);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
   const { can } = usePermission();
   const canCreate = can("salary", "create");
   const canEdit = can("salary", "edit");
+  const canDelete = can("salary", "delete");
 
   const { departments } = useDepartmentService();
   const { branches } = useBranchService();
@@ -78,7 +81,7 @@ function SalaryPage() {
 
   const [m, y] = selectedMonth.split("-").map(Number);
   const {
-    salaryRecords: list, isLoading, updateSalary, generateSalaries, isGenerating,
+    salaryRecords: list, isLoading, updateSalary, deleteSalary, isDeleting, generateSalaries, isGenerating,
     generateSalaryForEmployee, isGeneratingOne,
   } = useSalaryService(m, y);
 
@@ -99,6 +102,14 @@ function SalaryPage() {
   const handlePay = async (id: string) => {
     try {
       await updateSalary({ id, status: "paid" });
+    } catch (err) { }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteId) return;
+    try {
+      await deleteSalary(deleteId);
+      setDeleteId(null);
     } catch (err) { }
   };
 
@@ -365,6 +376,14 @@ function SalaryPage() {
                         className="flex-1 h-9 bg-emerald-500 text-white"
                       />
                     )}
+                    {canDelete && (
+                      <ActionButton
+                        variant="delete"
+                        tooltip="Delete Salary Record"
+                        onClick={() => setDeleteId(r._id)}
+                        className="h-9 w-9"
+                      />
+                    )}
                   </div>
                 </div>
               </GridCard>
@@ -430,6 +449,9 @@ function SalaryPage() {
                       )}
                       {r.status === "paid" && (
                         <ActionButton variant="history" tooltip="View Slip" onClick={() => setDetailsRecord(r)} />
+                      )}
+                      {canDelete && (
+                        <ActionButton variant="delete" tooltip="Delete Record" onClick={() => setDeleteId(r._id)} />
                       )}
                     </div>
                   </DataTableCell>
@@ -658,6 +680,15 @@ function SalaryPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <DeleteDialog
+        open={!!deleteId}
+        onOpenChange={(o) => !o && setDeleteId(null)}
+        onConfirm={handleDelete}
+        title="Delete Salary Record?"
+        description="Are you sure you want to delete this salary record? This action cannot be undone."
+        isLoading={isDeleting}
+      />
     </div>
   );
 }

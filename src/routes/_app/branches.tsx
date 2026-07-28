@@ -107,16 +107,17 @@ function BranchesPage() {
       (pos) => {
         setForm(prev => ({
           ...prev,
-          latitude: parseFloat(pos.coords.latitude.toFixed(2)),
-          longitude: parseFloat(pos.coords.longitude.toFixed(2))
+          latitude: parseFloat(pos.coords.latitude.toFixed(6)),
+          longitude: parseFloat(pos.coords.longitude.toFixed(6))
         }));
         setFetchingLoc(false);
-        toast.success("Location fetched and simplified");
+        toast.success("High-precision location fetched");
       },
       (err) => {
         setFetchingLoc(false);
         toast.error("Failed to fetch location: " + err.message);
-      }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   };
 
@@ -315,7 +316,7 @@ function BranchesPage() {
                   </DataTableCell>
                   <DataTableCell className="text-[14px] text-muted-foreground max-w-[200px] truncate">{b.branchLocation}</DataTableCell>
                   <DataTableCell className="text-[13px] text-muted-foreground">
-                    {b.latitude.toFixed(2)}, {b.longitude.toFixed(2)}
+                    {b.latitude.toFixed(4)}, {b.longitude.toFixed(4)}
                   </DataTableCell>
                   <DataTableCell>
                     <Badge variant="outline" className="text-[11px] font-medium bg-primary/5 text-primary border-primary/20">

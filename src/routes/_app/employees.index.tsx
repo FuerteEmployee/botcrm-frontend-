@@ -145,6 +145,23 @@ function EmployeesPage() {
     }
   };
 
+  const getEmployeeBranchName = (emp: any) => {
+    if (emp.branchId && typeof emp.branchId === 'object' && emp.branchId.branchName) {
+      return emp.branchId.branchName;
+    }
+    const bId = typeof emp.branchId === 'object' ? emp.branchId?._id : emp.branchId;
+    if (bId) {
+      const found = branches.find((b: any) => b._id === bId);
+      if (found) return found.branchName;
+    }
+    if (emp.branchIds && emp.branchIds.length > 0) {
+      const first = typeof emp.branchIds[0] === 'object' ? emp.branchIds[0]?._id : emp.branchIds[0];
+      const found = branches.find((b: any) => b._id === first);
+      if (found) return found.branchName;
+    }
+    return "Unassigned";
+  };
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -363,7 +380,7 @@ function EmployeesPage() {
                   <DataTableCell className="text-[13px] font-medium text-muted-foreground">
                     <div className="flex items-center gap-2">
                       <MapPin className="h-4 w-4 text-muted-foreground/40" />
-                      {(e.branchId as any)?.branchName || "Gurugram"}
+                      {getEmployeeBranchName(e)}
                       {((e as any).branchIds?.length || 0) > 1 && (
                         <Badge variant="secondary" className="text-[10px] font-bold px-1.5 py-0">
                           +{(e as any).branchIds.length - 1}

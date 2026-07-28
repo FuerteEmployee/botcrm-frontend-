@@ -266,6 +266,8 @@ function EmployeeDetailsPage() {
               <span className="text-primary font-semibold">Employee</span>
               <span className="h-1 w-1 rounded-full bg-border" />
               <span>{getDeptName(employee.departmentId)}</span>
+              <span className="h-1 w-1 rounded-full bg-border" />
+              <span>{getBranchNames()}</span>
             </p>
           </div>
         </div>

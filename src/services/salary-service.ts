@@ -106,16 +106,32 @@ export function useSalaryService(month?: number, year?: number) {
     }
   });
 
+  const deleteSalary = useMutation({
+    mutationFn: async (id: string) => {
+      const { data } = await apiClient.delete(`/salary/${id}`);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["salaries"] });
+      toast.success("Salary record deleted successfully");
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || "Failed to delete salary record");
+    }
+  });
+
   return {
     salaryRecords,
     isLoading,
     error,
     updateSalary: updateSalary.mutateAsync,
     addSalary: addSalary.mutateAsync,
+    deleteSalary: deleteSalary.mutateAsync,
     generateSalaries: generateSalaries.mutateAsync,
     generateSalaryForEmployee: generateSalaryForEmployee.mutateAsync,
     isUpdating: updateSalary.isPending,
     isAdding: addSalary.isPending,
+    isDeleting: deleteSalary.isPending,
     isGenerating: generateSalaries.isPending,
     isGeneratingOne: generateSalaryForEmployee.isPending
   };
