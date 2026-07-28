@@ -55,6 +55,8 @@ export async function updateTenant(
     trialEndDate?: string;
     bannerThresholdDays?: number;
     note?: string;
+    email?: string;
+    password?: string;
   }
 ) {
   const { data } = await apiClient.put(`${BASE}/tenants/${id}`, payload);

@@ -16,8 +16,6 @@ export const Route = createFileRoute("/login")({
   component: LoginPage,
 });
 
-const OTP_KEY = (phone: string) => `bot_pending_otp_${phone}`;
-
 function maskPhone(phone: string) {
   const cleaned = phone.replace(/\D/g, "");
   if (cleaned.length < 4) return cleaned;
@@ -99,14 +97,6 @@ function LoginPage() {
     return () => clearInterval(t);
   }, [step]);
 
-  // ─── Generate and store a fresh OTP ───────────────────────────────────────
-  const issueOtp = (cleaned: string) => {
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    window.localStorage.setItem(OTP_KEY(cleaned), code);
-    setGeneratedOtp(code);
-    return code;
-  };
-
   // ─── Send OTP ──────────────────────────────────────────────────────────────
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,8 +108,8 @@ function LoginPage() {
     setLoading(true);
     setLogoutReason(null);
     try {
-      await apiClient.post("/users/login-request", { phone: cleaned });
-      issueOtp(cleaned);
+      const { data } = await apiClient.post("/users/login-request", { phone: cleaned });
+      setGeneratedOtp(data.otp || "");
       setStep("otp");
       setResendIn(30);
       setOtp(["", "", "", "", "", ""]);
@@ -148,8 +138,8 @@ function LoginPage() {
     setOtpStatus("idle");
     setTimeout(() => inputsRef.current[0]?.focus(), 50);
     try {
-      await apiClient.post("/users/login-request", { phone: cleaned });
-      issueOtp(cleaned);
+      const { data } = await apiClient.post("/users/login-request", { phone: cleaned });
+      setGeneratedOtp(data.otp || "");
       setLiveMessage("New OTP sent.");
       toast.success("OTP resent successfully");
     } catch (error: any) {
@@ -201,17 +191,7 @@ function LoginPage() {
       return;
     }
 
-    // Verify against the locally-generated OTP
     const cleaned = phone.replace(/\D/g, "");
-    const stored = window.localStorage.getItem(OTP_KEY(cleaned));
-    if (code !== stored) {
-      setOtpStatus("error");
-      setOtp(["", "", "", "", "", ""]);
-      setTimeout(() => inputsRef.current[0]?.focus(), 50);
-      setLiveMessage("Incorrect OTP. Please try again.");
-      toast.error("Invalid OTP");
-      return;
-    }
 
     setLoading(true);
     try {
@@ -222,14 +202,10 @@ function LoginPage() {
         // IP fetch is best-effort
       }
 
-      // Backend still expects its own OTP — send the hardcoded value
       const { data } = await apiClient.post("/users/verify-otp", {
         phone: cleaned,
-        otp: "123456",
+        otp: code,
       });
-
-      // Discard the used OTP
-      window.localStorage.removeItem(OTP_KEY(cleaned));
 
       setSession({
         phone: `+91 ${data.phone}`,

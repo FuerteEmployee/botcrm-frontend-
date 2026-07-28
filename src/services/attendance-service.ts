@@ -30,6 +30,7 @@ export interface AttendanceRecord {
   isWFH?: boolean;
   wasLate?: boolean;
   remarks?: string;
+  shifts?: { punchIn?: string; punchOut?: string }[];
 }
 
 export interface AttendanceStats {

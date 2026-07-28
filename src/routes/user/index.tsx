@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Clock, MapPin, Camera, Coffee, CheckCircle,
   AlertTriangle, Calendar, Award, Fingerprint, ChevronLeft, ChevronRight,
-  Home, RefreshCw, Sparkles, Settings, Filter, Info
+  Home, RefreshCw, Sparkles, Settings, Filter, ChevronDown, ListChecks
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -45,6 +45,7 @@ interface AttendanceLog {
   punchOutLocation?: string;
   lunchInLocation?: string;
   lunchOutLocation?: string;
+  shifts?: { punchIn?: string; punchOut?: string }[];
 }
 
 interface UserProfile {
@@ -242,10 +243,12 @@ function UserDashboard() {
   const [activeTab, setActiveTab] = useState<"calendar" | "list">("calendar");
   const [selectedDayLog, setSelectedDayLog] = useState<AttendanceLog | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [showSessionDetails, setShowSessionDetails] = useState(false);
 
   useEffect(() => {
     localStorage.setItem("employee-portal-selected-date", selectedDate.toISOString());
     setSelectedDayLog(null);
+    setShowSessionDetails(false);
   }, [selectedDate]);
 
   // 1. Fetch User Profile
@@ -1565,16 +1568,29 @@ function UserDashboard() {
                               {new Date(selectedDayLog.date).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
                             </h4>
                           </div>
-                          <Badge className={`border-none text-[8.5px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full shadow-xs ${selectedDayLog.status === "present"
-                              ? "bg-emerald-500 text-white"
-                              : selectedDayLog.status === "late"
-                                ? "bg-amber-500 text-slate-900"
-                                : selectedDayLog.status === "absent"
-                                  ? "bg-rose-500 text-white"
-                                  : "bg-white/10 text-white/70"
-                            }`}>
-                            {selectedDayLog.isWFH ? "WFH SESSION" : selectedDayLog.status}
-                          </Badge>
+                          <div className="flex items-center gap-2">
+                            {(selectedDayLog.shifts?.length ?? 0) > 0 && (
+                              <button
+                                type="button"
+                                onClick={() => setShowSessionDetails((v) => !v)}
+                                className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest text-white/70 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-full px-2.5 py-1 transition-colors"
+                              >
+                                <ListChecks className="h-3 w-3" />
+                                Lens Info
+                                <ChevronDown className={`h-3 w-3 transition-transform ${showSessionDetails ? "rotate-180" : ""}`} />
+                              </button>
+                            )}
+                            <Badge className={`border-none text-[8.5px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full shadow-xs ${selectedDayLog.status === "present"
+                                ? "bg-emerald-500 text-white"
+                                : selectedDayLog.status === "late"
+                                  ? "bg-amber-500 text-slate-900"
+                                  : selectedDayLog.status === "absent"
+                                    ? "bg-rose-500 text-white"
+                                    : "bg-white/10 text-white/70"
+                              }`}>
+                              {selectedDayLog.isWFH ? "WFH SESSION" : selectedDayLog.status}
+                            </Badge>
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-4 pt-2">
@@ -1598,6 +1614,39 @@ function UserDashboard() {
                           </div>
                         </div>
 
+                        <AnimatePresence>
+                          {showSessionDetails && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: "auto" }}
+                              exit={{ opacity: 0, height: 0 }}
+                              transition={{ duration: 0.25 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="pt-1 pb-1">
+                                <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-2">
+                                  All Sessions Today ({selectedDayLog.shifts?.length ?? 0})
+                                </span>
+                                <div className="max-h-48 overflow-y-auto pr-1 space-y-2 rounded-xl">
+                                  {(selectedDayLog.shifts ?? []).map((shift, i) => (
+                                    <div
+                                      key={i}
+                                      className="flex items-center justify-between p-2.5 bg-white/5 rounded-lg border border-white/10 text-[11px]"
+                                    >
+                                      <span className="text-white/40 font-bold w-14">#{i + 1}</span>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-emerald-300 font-black">{formatTimeStr(shift.punchIn)}</span>
+                                        <span className="text-white/30">→</span>
+                                        <span className="text-rose-300 font-black">{shift.punchOut ? formatTimeStr(shift.punchOut) : "Still In"}</span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
                         <div className="space-y-3.5 pt-2 text-[11px] border-t border-white/5">
                           {selectedDayLog.punchInLocation && (
                             <div className="flex items-start gap-2.5">
@@ -1614,15 +1663,6 @@ function UserDashboard() {
                               <div className="leading-tight text-left">
                                 <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-0.5">Punch-Out Location</span>
                                 <span className="text-white/80 font-bold">{selectedDayLog.punchOutLocation}</span>
-                              </div>
-                            </div>
-                          )}
-                          {selectedDayLog.remarks && (
-                            <div className="flex items-start gap-2.5 pt-1.5 border-t border-white/5">
-                              <Info className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
-                              <div className="leading-tight text-left">
-                                <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-0.5">Remarks</span>
-                                <span className="text-white/80 font-medium italic">"{selectedDayLog.remarks}"</span>
                               </div>
                             </div>
                           )}

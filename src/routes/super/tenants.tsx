@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getTenants, updateTenant, createTenant, deactivateTenant, deleteTenant } from "@/services/superadmin-service";
 import { getPlans } from "@/services/superadmin-service";
 import { useState, useEffect } from "react";
-import { Settings, MoreHorizontal, Search, Plus, Power, Trash2 } from "lucide-react";
+import { Settings, MoreHorizontal, Search, Plus, Power, Trash2, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -373,6 +373,9 @@ function ManageDialog({
   const [bannerThresholdDays, setBannerThresholdDays] = useState<string>(
     String(tenant?.bannerThresholdDays ?? 7),
   );
+  const [botlensEmail, setBotlensEmail] = useState(tenant?.adminId?.botlensEmail || "");
+  const [botlensPassword, setBotlensPassword] = useState(tenant?.adminId?.botlensPassword || "");
+  const [showBotlensPassword, setShowBotlensPassword] = useState(false);
 
   const mutation = useMutation({
     mutationFn: (data: any) => updateTenant(tenantId, data),
@@ -450,6 +453,50 @@ function ManageDialog({
         <p className="mt-2 text-[11px] text-muted-foreground">
           The tenant's trial/renewal countdown banner stays hidden until this many days before expiry.
         </p>
+
+        <div className="mt-4 pt-4 border-t space-y-3">
+          <div>
+            <Label className="text-xs font-semibold">BOTLens admin credentials</Label>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Separate from phone/OTP login — BOTLens asks for these again before the admin can add a new employee,
+              so a borrowed session can't be used to register a fraudulent face.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Email</Label>
+              <Input
+                type="email"
+                className="h-8 text-xs"
+                placeholder="admin@company.com"
+                value={botlensEmail}
+                onChange={(e) => setBotlensEmail(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Password</Label>
+              <div className="relative">
+                <Input
+                  type={showBotlensPassword ? "text" : "password"}
+                  className="h-8 text-xs pr-8"
+                  placeholder="Not set"
+                  value={botlensPassword}
+                  onChange={(e) => setBotlensPassword(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  onClick={() => setShowBotlensPassword((v) => !v)}
+                  tabIndex={-1}
+                  aria-label={showBotlensPassword ? "Hide password" : "Show password"}
+                >
+                  {showBotlensPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div className="flex justify-end gap-2 mt-4">
           <Button variant="outline" size="sm" onClick={onClose}>
             Cancel
@@ -464,6 +511,8 @@ function ManageDialog({
                 status,
                 billingCycle,
                 bannerThresholdDays: Number(bannerThresholdDays),
+                email: botlensEmail,
+                ...(botlensPassword ? { password: botlensPassword } : {}),
               })
             }
           >
