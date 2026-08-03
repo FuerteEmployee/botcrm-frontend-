@@ -22,6 +22,7 @@ import {
   UserCog,
   CreditCard,
   Coins,
+  Fingerprint,
   Search,
 } from "lucide-react";
 import { useState, useCallback, useRef } from "react";
@@ -58,6 +59,7 @@ const NAV: NavItem[] = [
   { to: "/tracking", label: "Tracking", icon: MapPin },
   { to: "/leave-types", label: "Leave Types", icon: Settings2 },
   { to: "/shifts", label: "Shift Management", icon: Clock },
+  { to: "/biometric-devices", label: "Biometric Device", icon: Fingerprint },
   { to: "/assets", label: "Assets Management", icon: Monitor },
   { to: "/expenses", label: "Expense Management", icon: Receipt },
   { to: "/users", label: "Users", icon: UserCog, adminOnly: true },

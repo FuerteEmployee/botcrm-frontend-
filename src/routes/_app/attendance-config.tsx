@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState, useEffect, useMemo } from "react";
 import { 
   Clock, 
@@ -15,7 +15,10 @@ import {
   MapPin,
   Smartphone,
   Mail,
-  MessageSquare
+  MessageSquare,
+  ListOrdered,
+  Fingerprint,
+  ArrowRight
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,6 +41,13 @@ import { cn } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { Badge } from "@/components/ui/badge";
+// Shared with the Biometric Device page, which owns the editor. Imported here so
+// this page can still round-trip and sanity-check the setting on save rather
+// than silently overwriting it with a stale or invalid value.
+import {
+  validateSequence,
+  type PunchStep,
+} from "@/components/pages/punch-sequence-editor";
 
 export const Route = createFileRoute("/_app/attendance-config")({
   component: AttendanceConfigPage,
@@ -57,7 +67,13 @@ interface AttendanceSettings {
   lunchOut: string;
   minLunch: number;
   maxLunch: number;
-  
+
+  punchSequence: {
+    enabled: boolean;
+    steps: PunchStep[];
+    afterLast: 'ignore' | 'toggle';
+  };
+
   workDays: string[];
   reqHours: number;
   reqMins: number;
@@ -116,7 +132,13 @@ const DEFAULT_SETTINGS: AttendanceSettings = {
   lunchOut: '14:00',
   minLunch: 30,
   maxLunch: 90,
-  
+
+  punchSequence: {
+    enabled: false,
+    steps: ['punch-in', 'lunch-in', 'lunch-out', 'punch-out'],
+    afterLast: 'ignore',
+  },
+
   workDays: ['M', 'T', 'W', 'Th', 'F'],
   reqHours: 8,
   reqMins: 0,
@@ -178,6 +200,15 @@ function AttendanceConfigPage() {
             notifications: { ...DEFAULT_SETTINGS.notifications, ...data.attendance.notifications },
             display: { ...DEFAULT_SETTINGS.display, ...data.attendance.display },
             halfDayRules: { ...DEFAULT_SETTINGS.halfDayRules, ...(data.attendance.halfDayRules || {}) },
+            punchSequence: {
+              ...DEFAULT_SETTINGS.punchSequence,
+              ...(data.attendance.punchSequence || {}),
+              // A tenant saved before this feature existed has no steps array;
+              // an empty one would render an editor with nothing in it.
+              steps: data.attendance.punchSequence?.steps?.length
+                ? data.attendance.punchSequence.steps
+                : DEFAULT_SETTINGS.punchSequence.steps,
+            },
           });
         }
       } catch (error) {
@@ -190,14 +221,27 @@ function AttendanceConfigPage() {
     fetchSettings();
   }, []);
 
+  const sequenceError = settings.punchSequence.enabled
+    ? validateSequence(settings.punchSequence.steps)
+    : null;
+
   const saveSettings = async () => {
+    // Caught here as well as on the server, so the admin sees which rule they
+    // broke instead of a generic failure toast.
+    if (sequenceError) {
+      toast.error(sequenceError);
+      setActiveSection('sequence');
+      document.getElementById('sequence')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      return;
+    }
+
     setSaving(true);
     try {
       await apiClient.put("/settings", { attendance: settings });
       toast.success("Configuration saved successfully");
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to save settings", error);
-      toast.error("Failed to save changes");
+      toast.error(error?.response?.data?.message || "Failed to save changes");
     } finally {
       setSaving(false);
     }
@@ -249,6 +293,7 @@ function AttendanceConfigPage() {
 
   const SECTIONS = [
     { id: 'punch', label: 'Punch In / Out', icon: Clock },
+    { id: 'sequence', label: 'Punch Sequence', icon: ListOrdered },
     { id: 'lunch', label: 'Lunch Break', icon: Utensils },
     { id: 'schedule', label: 'Work Schedule', icon: Calendar },
     { id: 'grace', label: 'Grace & Overtime', icon: Zap },
@@ -390,6 +435,45 @@ function AttendanceConfigPage() {
                     hint="Allow employees to punch in and out multiple times in a single day (multiple shifts)"
                     control={<Switch checked={settings.allowMultiplePunches} onCheckedChange={(v) => setSettings({...settings, allowMultiplePunches: v})} />}
                   />
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+
+          {/* PUNCH SEQUENCE — the editor itself lives on the Biometric Device
+              page, so machine rules have a single home and a single save. */}
+          <section id="sequence" className="scroll-mt-24">
+            <Card className="border-none shadow-sm bg-white rounded-2xl overflow-hidden">
+              <CardHeader className="border-b border-border/40 px-6 py-4">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center">
+                    <ListOrdered className="h-4 w-4 text-primary" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base font-bold">Punch Sequence</CardTitle>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      What each tap on a biometric machine means
+                    </p>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="p-6">
+                <div className="flex items-start gap-2.5 rounded-xl bg-muted/40 p-3.5">
+                  <Fingerprint className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                      A fingerprint machine only reports <em>who</em> was recognised, not whether they are
+                      arriving, going for lunch or leaving. You can fix the meaning of each tap in order —
+                      1st punch in, 2nd lunch starts, 3rd back from lunch, 4th punch out.
+                    </p>
+                    <Link
+                      to="/biometric-devices"
+                      className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-bold text-primary hover:underline"
+                    >
+                      Set this up on the Biometric Device page
+                      <ArrowRight className="h-3 w-3" />
+                    </Link>
+                  </div>
                 </div>
               </CardContent>
             </Card>

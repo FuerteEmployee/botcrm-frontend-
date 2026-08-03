@@ -5,6 +5,7 @@ import {
   Package,
   Receipt,
   Bell,
+  Fingerprint,
   LogOut,
 } from "lucide-react";
 import { clearSession, getSession } from "@/lib/auth";
@@ -15,6 +16,7 @@ import logo from "@/assets/bot-logo.png";
 const mainNav = [
   { to: "/super/overview", label: "Dashboard", icon: LayoutDashboard },
   { to: "/super/tenants", label: "Companies", icon: Building2 },
+  { to: "/super/devices", label: "Machines", icon: Fingerprint },
 ];
 
 const subsNav = [

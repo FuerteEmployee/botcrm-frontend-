@@ -23,7 +23,8 @@ import {
   MapPin,
   Banknote,
   Timer,
-  CalendarCheck
+  CalendarCheck,
+  Fingerprint
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { ActionButton } from "@/components/shared/action-button";
@@ -131,6 +132,7 @@ function AddEmployeePage() {
     branchIds: [] as string[],
     employmentType: "monthly",
     shiftIds: [] as string[],
+    deviceUserId: "",
     weeklyHolidays: [] as { day: string; weeks: number[] }[],
     address: "",
     bloodGroup: "",
@@ -305,6 +307,7 @@ function AddEmployeePage() {
             return primary ? [primary] : [];
           })(),
           weeklyHolidays: emp.weeklyHolidays || [],
+          deviceUserId: (emp as any).deviceUserId || "",
           address: (emp as any).address || "",
           bloodGroup: (emp as any).bloodGroup || "",
           contactPersonName: (emp as any).contactPersonName || "",
@@ -592,6 +595,14 @@ function AddEmployeePage() {
                 onBlur={() => handleBlur('joiningDate')}
                 error={touched.joiningDate ? errors.joiningDate : undefined}
                 required
+              />
+
+              <FormInput
+                label="Biometric Device ID"
+                icon={Fingerprint}
+                placeholder="PIN assigned on the fingerprint/face device"
+                value={form.deviceUserId}
+                onChange={e => setForm({ ...form, deviceUserId: e.target.value })}
               />
 
               {allowMultipleBranches ? (

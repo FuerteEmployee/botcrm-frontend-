@@ -128,6 +128,84 @@ export async function toggleAlert(slug: string) {
   return data;
 }
 
+// ─── Biometric machines (eSSL/ZKTeco terminals) ───────────────────────────────
+
+export interface DeviceUnresolved {
+  pin?: string;
+  reason?: "unassigned_device" | "disabled_device" | "unknown_pin" | "duplicate_pin";
+  deviceTime?: string;
+  at?: string;
+}
+
+export interface Device {
+  _id: string;
+  serialNumber: string;
+  adminId?: { _id: string; name: string; phone: string } | null;
+  label?: string;
+  model?: string;
+  status: "unassigned" | "active" | "disabled";
+  autoDiscovered?: boolean;
+  lastSeenAt?: string | null;
+  lastPunchAt?: string | null;
+  punchCount?: number;
+  recentUnresolved?: DeviceUnresolved[];
+  notes?: string;
+  createdAt?: string;
+}
+
+export async function getDevices(params?: {
+  adminId?: string;
+  status?: string;
+  search?: string;
+}) {
+  const { data } = await apiClient.get(`${BASE}/devices`, { params });
+  return data as { devices: Device[]; unassignedCount: number; total: number };
+}
+
+export async function createDevice(payload: {
+  serialNumber: string;
+  adminId?: string | null;
+  label?: string;
+  model?: string;
+  notes?: string;
+}) {
+  const { data } = await apiClient.post(`${BASE}/devices`, payload);
+  return data as Device;
+}
+
+export async function updateDevice(
+  id: string,
+  payload: {
+    adminId?: string | null;
+    label?: string;
+    model?: string;
+    status?: "active" | "disabled";
+    notes?: string;
+  }
+) {
+  const { data } = await apiClient.put(`${BASE}/devices/${id}`, payload);
+  return data as Device;
+}
+
+export async function deleteDevice(id: string) {
+  const { data } = await apiClient.delete(`${BASE}/devices/${id}`);
+  return data;
+}
+
+export async function clearDeviceUnresolved(id: string) {
+  const { data } = await apiClient.post(`${BASE}/devices/${id}/clear-unresolved`);
+  return data as Device;
+}
+
+export async function getDevicePinMap(id: string) {
+  const { data } = await apiClient.get(`${BASE}/devices/${id}/pin-map`);
+  return data as {
+    device: Device;
+    employees: { _id: string; name: string; phone: string; deviceUserId?: string | null; status: string }[];
+    unmapped: number;
+  };
+}
+
 // ─── Plan Features ───────────────────────────────────────────────────────────
 
 export async function getPlanFeatures() {
