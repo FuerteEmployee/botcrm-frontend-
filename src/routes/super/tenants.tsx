@@ -3,7 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getTenants, updateTenant, createTenant, deactivateTenant, deleteTenant } from "@/services/superadmin-service";
 import { getPlans } from "@/services/superadmin-service";
 import { useState, useEffect } from "react";
-import { Settings, MoreHorizontal, Search, Plus, Power, Trash2, Eye, EyeOff } from "lucide-react";
+import { Settings, MoreHorizontal, Search, Plus, Power, Trash2, Eye, EyeOff, Fingerprint } from "lucide-react";
+import { MachinesDialog } from "@/components/pages/machines-manager";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -60,6 +61,7 @@ function TenantsPage() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [managingId, setManagingId] = useState<string | null>(null);
+  const [machinesFor, setMachinesFor] = useState<{ id: string; name: string } | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [deactivating, setDeactivating] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
@@ -251,6 +253,14 @@ function TenantsPage() {
                                 Manage subscription
                               </DropdownMenuItem>
                               <DropdownMenuItem
+                                onClick={() =>
+                                  setMachinesFor({ id: t.adminId?._id, name: t.adminId?.name })
+                                }
+                              >
+                                <Fingerprint className="h-3.5 w-3.5 mr-2" />
+                                Biometric machines
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
                                 className="text-destructive focus:text-destructive"
                                 disabled={t.adminId?.isActive === false}
                                 onClick={() => setDeactivating({ id: t.adminId?._id, name: t.adminId?.name })}
@@ -286,6 +296,15 @@ function TenantsPage() {
           plans={plans || []}
           onClose={() => setManagingId(null)}
           queryClient={queryClient}
+        />
+      )}
+
+      {/* Biometric machines for one customer */}
+      {machinesFor && (
+        <MachinesDialog
+          adminId={machinesFor.id}
+          tenantName={machinesFor.name}
+          onClose={() => setMachinesFor(null)}
         />
       )}
 

@@ -65,6 +65,7 @@ export interface Employee {
   dob?: string;
   joiningDate?: string;
   employmentType?: 'monthly' | 'daily' | 'hourly';
+  deviceUserId?: string; // PIN this employee is enrolled under on a biometric attendance device
   leadDeletionPermission?: boolean;
   trackingEnabled?: boolean;
   address?: string;
