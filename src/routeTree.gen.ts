@@ -9,69 +9,60 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as AppRouteImport } from './routes/_app'
-import { Route as LoginRouteImport } from './routes/login'
-import { Route as SuperRouteImport } from './routes/super'
 import { Route as UserRouteImport } from './routes/user'
-import { Route as AppAdvanceSalaryRouteImport } from './routes/_app/advance-salary'
-import { Route as AppAnnouncementsRouteImport } from './routes/_app/announcements'
-import { Route as AppAssetsRouteImport } from './routes/_app/assets'
-import { Route as AppAttendanceRouteImport } from './routes/_app/attendance'
-import { Route as AppAttendanceConfigRouteImport } from './routes/_app/attendance-config'
-import { Route as AppBillingRouteImport } from './routes/_app/billing'
-import { Route as AppBranchesRouteImport } from './routes/_app/branches'
-import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
-import { Route as AppDepartmentsRouteImport } from './routes/_app/departments'
-import { Route as AppEmployeesRouteImport } from './routes/_app/employees'
-import { Route as AppExpensesRouteImport } from './routes/_app/expenses'
-import { Route as AppFestivalsRouteImport } from './routes/_app/festivals'
-import { Route as AppLeadsRouteImport } from './routes/_app/leads'
-import { Route as AppLeaveTypesRouteImport } from './routes/_app/leave-types'
-import { Route as AppLeavesRouteImport } from './routes/_app/leaves'
-import { Route as AppPayslipsRouteImport } from './routes/_app/payslips'
-import { Route as AppPerformanceRouteImport } from './routes/_app/performance'
-import { Route as AppPoliciesRouteImport } from './routes/_app/policies'
-import { Route as AppProjectsRouteImport } from './routes/_app/projects'
-import { Route as AppRecruitmentRouteImport } from './routes/_app/recruitment'
-import { Route as AppSalaryRouteImport } from './routes/_app/salary'
-import { Route as AppSettingsRouteImport } from './routes/_app/settings'
-import { Route as AppShiftsRouteImport } from './routes/_app/shifts'
-import { Route as AppTicketsRouteImport } from './routes/_app/tickets'
-import { Route as AppTrackingRouteImport } from './routes/_app/tracking'
-import { Route as AppTrainingRouteImport } from './routes/_app/training'
-import { Route as AppUsersRouteImport } from './routes/_app/users'
-import { Route as SuperAlertsRouteImport } from './routes/super/alerts'
-import { Route as SuperBillingRouteImport } from './routes/super/billing'
-import { Route as SuperOverviewRouteImport } from './routes/super/overview'
-import { Route as SuperPlansRouteImport } from './routes/super/plans'
-import { Route as SuperTenantsRouteImport } from './routes/super/tenants'
+import { Route as SuperRouteImport } from './routes/super'
+import { Route as LoginRouteImport } from './routes/login'
+import { Route as AppRouteImport } from './routes/_app'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as UserIndexRouteImport } from './routes/user/index'
-import { Route as UserAccountRouteImport } from './routes/user/account'
-import { Route as UserAdvanceSalaryRouteImport } from './routes/user/advance-salary'
-import { Route as UserExpensesRouteImport } from './routes/user/expenses'
-import { Route as UserHolidaysRouteImport } from './routes/user/holidays'
-import { Route as UserLeavesRouteImport } from './routes/user/leaves'
-import { Route as UserProfileRouteImport } from './routes/user/profile'
 import { Route as UserTicketsRouteImport } from './routes/user/tickets'
-import { Route as AppAssetsIndexRouteImport } from './routes/_app/assets.index'
-import { Route as AppAssetsAllocateRouteImport } from './routes/_app/assets.allocate'
+import { Route as UserProfileRouteImport } from './routes/user/profile'
+import { Route as UserLeavesRouteImport } from './routes/user/leaves'
+import { Route as UserHolidaysRouteImport } from './routes/user/holidays'
+import { Route as UserExpensesRouteImport } from './routes/user/expenses'
+import { Route as UserAdvanceSalaryRouteImport } from './routes/user/advance-salary'
+import { Route as UserAccountRouteImport } from './routes/user/account'
+import { Route as SuperTenantsRouteImport } from './routes/super/tenants'
+import { Route as SuperPlansRouteImport } from './routes/super/plans'
+import { Route as SuperOverviewRouteImport } from './routes/super/overview'
+import { Route as SuperBillingRouteImport } from './routes/super/billing'
+import { Route as SuperAlertsRouteImport } from './routes/super/alerts'
+import { Route as AppUsersRouteImport } from './routes/_app/users'
+import { Route as AppTrainingRouteImport } from './routes/_app/training'
+import { Route as AppTrackingRouteImport } from './routes/_app/tracking'
+import { Route as AppTicketsRouteImport } from './routes/_app/tickets'
+import { Route as AppShiftsRouteImport } from './routes/_app/shifts'
+import { Route as AppSettingsRouteImport } from './routes/_app/settings'
+import { Route as AppSalaryRouteImport } from './routes/_app/salary'
+import { Route as AppRecruitmentRouteImport } from './routes/_app/recruitment'
+import { Route as AppProjectsRouteImport } from './routes/_app/projects'
+import { Route as AppPoliciesRouteImport } from './routes/_app/policies'
+import { Route as AppPerformanceRouteImport } from './routes/_app/performance'
+import { Route as AppPayslipsRouteImport } from './routes/_app/payslips'
+import { Route as AppLeavesRouteImport } from './routes/_app/leaves'
+import { Route as AppLeaveTypesRouteImport } from './routes/_app/leave-types'
+import { Route as AppLeadsRouteImport } from './routes/_app/leads'
+import { Route as AppFestivalsRouteImport } from './routes/_app/festivals'
+import { Route as AppExpensesRouteImport } from './routes/_app/expenses'
+import { Route as AppEmployeesRouteImport } from './routes/_app/employees'
+import { Route as AppDepartmentsRouteImport } from './routes/_app/departments'
+import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
+import { Route as AppBranchesRouteImport } from './routes/_app/branches'
+import { Route as AppBillingRouteImport } from './routes/_app/billing'
+import { Route as AppAttendanceConfigRouteImport } from './routes/_app/attendance-config'
+import { Route as AppAttendanceRouteImport } from './routes/_app/attendance'
+import { Route as AppAssetsRouteImport } from './routes/_app/assets'
+import { Route as AppAnnouncementsRouteImport } from './routes/_app/announcements'
+import { Route as AppAdvanceSalaryRouteImport } from './routes/_app/advance-salary'
 import { Route as AppEmployeesIndexRouteImport } from './routes/_app/employees.index'
-import { Route as AppEmployeesEmployeeIdRouteImport } from './routes/_app/employees.$employeeId'
+import { Route as AppAssetsIndexRouteImport } from './routes/_app/assets.index'
 import { Route as AppEmployeesCreateRouteImport } from './routes/_app/employees.create'
+import { Route as AppEmployeesEmployeeIdRouteImport } from './routes/_app/employees.$employeeId'
+import { Route as AppAssetsAllocateRouteImport } from './routes/_app/assets.allocate'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AppRoute = AppRouteImport.update({
-  id: '/_app',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const LoginRoute = LoginRouteImport.update({
-  id: '/login',
-  path: '/login',
+const UserRoute = UserRouteImport.update({
+  id: '/user',
+  path: '/user',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SuperRoute = SuperRouteImport.update({
@@ -79,204 +70,23 @@ const SuperRoute = SuperRouteImport.update({
   path: '/super',
   getParentRoute: () => rootRouteImport,
 } as any)
-const UserRoute = UserRouteImport.update({
-  id: '/user',
-  path: '/user',
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AppAdvanceSalaryRoute = AppAdvanceSalaryRouteImport.update({
-  id: '/advance-salary',
-  path: '/advance-salary',
-  getParentRoute: () => AppRoute,
+const AppRoute = AppRouteImport.update({
+  id: '/_app',
+  getParentRoute: () => rootRouteImport,
 } as any)
-const AppAnnouncementsRoute = AppAnnouncementsRouteImport.update({
-  id: '/announcements',
-  path: '/announcements',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppAssetsRoute = AppAssetsRouteImport.update({
-  id: '/assets',
-  path: '/assets',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppAttendanceRoute = AppAttendanceRouteImport.update({
-  id: '/attendance',
-  path: '/attendance',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppAttendanceConfigRoute = AppAttendanceConfigRouteImport.update({
-  id: '/attendance-config',
-  path: '/attendance-config',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppBillingRoute = AppBillingRouteImport.update({
-  id: '/billing',
-  path: '/billing',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppBranchesRoute = AppBranchesRouteImport.update({
-  id: '/branches',
-  path: '/branches',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDashboardRoute = AppDashboardRouteImport.update({
-  id: '/dashboard',
-  path: '/dashboard',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppDepartmentsRoute = AppDepartmentsRouteImport.update({
-  id: '/departments',
-  path: '/departments',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppEmployeesRoute = AppEmployeesRouteImport.update({
-  id: '/employees',
-  path: '/employees',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppExpensesRoute = AppExpensesRouteImport.update({
-  id: '/expenses',
-  path: '/expenses',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppFestivalsRoute = AppFestivalsRouteImport.update({
-  id: '/festivals',
-  path: '/festivals',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppLeadsRoute = AppLeadsRouteImport.update({
-  id: '/leads',
-  path: '/leads',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppLeaveTypesRoute = AppLeaveTypesRouteImport.update({
-  id: '/leave-types',
-  path: '/leave-types',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppLeavesRoute = AppLeavesRouteImport.update({
-  id: '/leaves',
-  path: '/leaves',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPayslipsRoute = AppPayslipsRouteImport.update({
-  id: '/payslips',
-  path: '/payslips',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPerformanceRoute = AppPerformanceRouteImport.update({
-  id: '/performance',
-  path: '/performance',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppPoliciesRoute = AppPoliciesRouteImport.update({
-  id: '/policies',
-  path: '/policies',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppProjectsRoute = AppProjectsRouteImport.update({
-  id: '/projects',
-  path: '/projects',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppRecruitmentRoute = AppRecruitmentRouteImport.update({
-  id: '/recruitment',
-  path: '/recruitment',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppSalaryRoute = AppSalaryRouteImport.update({
-  id: '/salary',
-  path: '/salary',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppSettingsRoute = AppSettingsRouteImport.update({
-  id: '/settings',
-  path: '/settings',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppShiftsRoute = AppShiftsRouteImport.update({
-  id: '/shifts',
-  path: '/shifts',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppTicketsRoute = AppTicketsRouteImport.update({
-  id: '/tickets',
-  path: '/tickets',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppTrackingRoute = AppTrackingRouteImport.update({
-  id: '/tracking',
-  path: '/tracking',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppTrainingRoute = AppTrainingRouteImport.update({
-  id: '/training',
-  path: '/training',
-  getParentRoute: () => AppRoute,
-} as any)
-const AppUsersRoute = AppUsersRouteImport.update({
-  id: '/users',
-  path: '/users',
-  getParentRoute: () => AppRoute,
-} as any)
-const SuperAlertsRoute = SuperAlertsRouteImport.update({
-  id: '/alerts',
-  path: '/alerts',
-  getParentRoute: () => SuperRoute,
-} as any)
-const SuperBillingRoute = SuperBillingRouteImport.update({
-  id: '/billing',
-  path: '/billing',
-  getParentRoute: () => SuperRoute,
-} as any)
-const SuperOverviewRoute = SuperOverviewRouteImport.update({
-  id: '/overview',
-  path: '/overview',
-  getParentRoute: () => SuperRoute,
-} as any)
-const SuperPlansRoute = SuperPlansRouteImport.update({
-  id: '/plans',
-  path: '/plans',
-  getParentRoute: () => SuperRoute,
-} as any)
-const SuperTenantsRoute = SuperTenantsRouteImport.update({
-  id: '/tenants',
-  path: '/tenants',
-  getParentRoute: () => SuperRoute,
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const UserIndexRoute = UserIndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => UserRoute,
-} as any)
-const UserAccountRoute = UserAccountRouteImport.update({
-  id: '/account',
-  path: '/account',
-  getParentRoute: () => UserRoute,
-} as any)
-const UserAdvanceSalaryRoute = UserAdvanceSalaryRouteImport.update({
-  id: '/advance-salary',
-  path: '/advance-salary',
-  getParentRoute: () => UserRoute,
-} as any)
-const UserExpensesRoute = UserExpensesRouteImport.update({
-  id: '/expenses',
-  path: '/expenses',
-  getParentRoute: () => UserRoute,
-} as any)
-const UserHolidaysRoute = UserHolidaysRouteImport.update({
-  id: '/holidays',
-  path: '/holidays',
-  getParentRoute: () => UserRoute,
-} as any)
-const UserLeavesRoute = UserLeavesRouteImport.update({
-  id: '/leaves',
-  path: '/leaves',
-  getParentRoute: () => UserRoute,
-} as any)
-const UserProfileRoute = UserProfileRouteImport.update({
-  id: '/profile',
-  path: '/profile',
   getParentRoute: () => UserRoute,
 } as any)
 const UserTicketsRoute = UserTicketsRouteImport.update({
@@ -284,19 +94,209 @@ const UserTicketsRoute = UserTicketsRouteImport.update({
   path: '/tickets',
   getParentRoute: () => UserRoute,
 } as any)
+const UserProfileRoute = UserProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => UserRoute,
+} as any)
+const UserLeavesRoute = UserLeavesRouteImport.update({
+  id: '/leaves',
+  path: '/leaves',
+  getParentRoute: () => UserRoute,
+} as any)
+const UserHolidaysRoute = UserHolidaysRouteImport.update({
+  id: '/holidays',
+  path: '/holidays',
+  getParentRoute: () => UserRoute,
+} as any)
+const UserExpensesRoute = UserExpensesRouteImport.update({
+  id: '/expenses',
+  path: '/expenses',
+  getParentRoute: () => UserRoute,
+} as any)
+const UserAdvanceSalaryRoute = UserAdvanceSalaryRouteImport.update({
+  id: '/advance-salary',
+  path: '/advance-salary',
+  getParentRoute: () => UserRoute,
+} as any)
+const UserAccountRoute = UserAccountRouteImport.update({
+  id: '/account',
+  path: '/account',
+  getParentRoute: () => UserRoute,
+} as any)
+const SuperTenantsRoute = SuperTenantsRouteImport.update({
+  id: '/tenants',
+  path: '/tenants',
+  getParentRoute: () => SuperRoute,
+} as any)
+const SuperPlansRoute = SuperPlansRouteImport.update({
+  id: '/plans',
+  path: '/plans',
+  getParentRoute: () => SuperRoute,
+} as any)
+const SuperOverviewRoute = SuperOverviewRouteImport.update({
+  id: '/overview',
+  path: '/overview',
+  getParentRoute: () => SuperRoute,
+} as any)
+const SuperBillingRoute = SuperBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
+  getParentRoute: () => SuperRoute,
+} as any)
+const SuperAlertsRoute = SuperAlertsRouteImport.update({
+  id: '/alerts',
+  path: '/alerts',
+  getParentRoute: () => SuperRoute,
+} as any)
+const AppUsersRoute = AppUsersRouteImport.update({
+  id: '/users',
+  path: '/users',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTrainingRoute = AppTrainingRouteImport.update({
+  id: '/training',
+  path: '/training',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTrackingRoute = AppTrackingRouteImport.update({
+  id: '/tracking',
+  path: '/tracking',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppTicketsRoute = AppTicketsRouteImport.update({
+  id: '/tickets',
+  path: '/tickets',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppShiftsRoute = AppShiftsRouteImport.update({
+  id: '/shifts',
+  path: '/shifts',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppSalaryRoute = AppSalaryRouteImport.update({
+  id: '/salary',
+  path: '/salary',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppRecruitmentRoute = AppRecruitmentRouteImport.update({
+  id: '/recruitment',
+  path: '/recruitment',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppProjectsRoute = AppProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPoliciesRoute = AppPoliciesRouteImport.update({
+  id: '/policies',
+  path: '/policies',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPerformanceRoute = AppPerformanceRouteImport.update({
+  id: '/performance',
+  path: '/performance',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppPayslipsRoute = AppPayslipsRouteImport.update({
+  id: '/payslips',
+  path: '/payslips',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLeavesRoute = AppLeavesRouteImport.update({
+  id: '/leaves',
+  path: '/leaves',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLeaveTypesRoute = AppLeaveTypesRouteImport.update({
+  id: '/leave-types',
+  path: '/leave-types',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppLeadsRoute = AppLeadsRouteImport.update({
+  id: '/leads',
+  path: '/leads',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppFestivalsRoute = AppFestivalsRouteImport.update({
+  id: '/festivals',
+  path: '/festivals',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppExpensesRoute = AppExpensesRouteImport.update({
+  id: '/expenses',
+  path: '/expenses',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppEmployeesRoute = AppEmployeesRouteImport.update({
+  id: '/employees',
+  path: '/employees',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDepartmentsRoute = AppDepartmentsRouteImport.update({
+  id: '/departments',
+  path: '/departments',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDashboardRoute = AppDashboardRouteImport.update({
+  id: '/dashboard',
+  path: '/dashboard',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBranchesRoute = AppBranchesRouteImport.update({
+  id: '/branches',
+  path: '/branches',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppBillingRoute = AppBillingRouteImport.update({
+  id: '/billing',
+  path: '/billing',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAttendanceConfigRoute = AppAttendanceConfigRouteImport.update({
+  id: '/attendance-config',
+  path: '/attendance-config',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAttendanceRoute = AppAttendanceRouteImport.update({
+  id: '/attendance',
+  path: '/attendance',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAssetsRoute = AppAssetsRouteImport.update({
+  id: '/assets',
+  path: '/assets',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAnnouncementsRoute = AppAnnouncementsRouteImport.update({
+  id: '/announcements',
+  path: '/announcements',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppAdvanceSalaryRoute = AppAdvanceSalaryRouteImport.update({
+  id: '/advance-salary',
+  path: '/advance-salary',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppEmployeesIndexRoute = AppEmployeesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppEmployeesRoute,
+} as any)
 const AppAssetsIndexRoute = AppAssetsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => AppAssetsRoute,
 } as any)
-const AppAssetsAllocateRoute = AppAssetsAllocateRouteImport.update({
-  id: '/allocate',
-  path: '/allocate',
-  getParentRoute: () => AppAssetsRoute,
-} as any)
-const AppEmployeesIndexRoute = AppEmployeesIndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AppEmployeesCreateRoute = AppEmployeesCreateRouteImport.update({
+  id: '/create',
+  path: '/create',
   getParentRoute: () => AppEmployeesRoute,
 } as any)
 const AppEmployeesEmployeeIdRoute = AppEmployeesEmployeeIdRouteImport.update({
@@ -304,10 +304,10 @@ const AppEmployeesEmployeeIdRoute = AppEmployeesEmployeeIdRouteImport.update({
   path: '/$employeeId',
   getParentRoute: () => AppEmployeesRoute,
 } as any)
-const AppEmployeesCreateRoute = AppEmployeesCreateRouteImport.update({
-  id: '/create',
-  path: '/create',
-  getParentRoute: () => AppEmployeesRoute,
+const AppAssetsAllocateRoute = AppAssetsAllocateRouteImport.update({
+  id: '/allocate',
+  path: '/allocate',
+  getParentRoute: () => AppAssetsRoute,
 } as any)
 
 export interface FileRoutesByFullPath {
@@ -626,25 +626,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/_app': {
-      id: '/_app'
-      path: ''
-      fullPath: '/'
-      preLoaderRoute: typeof AppRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/login': {
-      id: '/login'
-      path: '/login'
-      fullPath: '/login'
-      preLoaderRoute: typeof LoginRouteImport
+    '/user': {
+      id: '/user'
+      path: '/user'
+      fullPath: '/user'
+      preLoaderRoute: typeof UserRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/super': {
@@ -654,284 +640,32 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SuperRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/user': {
-      id: '/user'
-      path: '/user'
-      fullPath: '/user'
-      preLoaderRoute: typeof UserRouteImport
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/_app/advance-salary': {
-      id: '/_app/advance-salary'
-      path: '/advance-salary'
-      fullPath: '/advance-salary'
-      preLoaderRoute: typeof AppAdvanceSalaryRouteImport
-      parentRoute: typeof AppRoute
+    '/_app': {
+      id: '/_app'
+      path: ''
+      fullPath: '/'
+      preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
     }
-    '/_app/announcements': {
-      id: '/_app/announcements'
-      path: '/announcements'
-      fullPath: '/announcements'
-      preLoaderRoute: typeof AppAnnouncementsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/assets': {
-      id: '/_app/assets'
-      path: '/assets'
-      fullPath: '/assets'
-      preLoaderRoute: typeof AppAssetsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/attendance': {
-      id: '/_app/attendance'
-      path: '/attendance'
-      fullPath: '/attendance'
-      preLoaderRoute: typeof AppAttendanceRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/attendance-config': {
-      id: '/_app/attendance-config'
-      path: '/attendance-config'
-      fullPath: '/attendance-config'
-      preLoaderRoute: typeof AppAttendanceConfigRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/billing': {
-      id: '/_app/billing'
-      path: '/billing'
-      fullPath: '/billing'
-      preLoaderRoute: typeof AppBillingRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/branches': {
-      id: '/_app/branches'
-      path: '/branches'
-      fullPath: '/branches'
-      preLoaderRoute: typeof AppBranchesRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/dashboard': {
-      id: '/_app/dashboard'
-      path: '/dashboard'
-      fullPath: '/dashboard'
-      preLoaderRoute: typeof AppDashboardRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/departments': {
-      id: '/_app/departments'
-      path: '/departments'
-      fullPath: '/departments'
-      preLoaderRoute: typeof AppDepartmentsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/employees': {
-      id: '/_app/employees'
-      path: '/employees'
-      fullPath: '/employees'
-      preLoaderRoute: typeof AppEmployeesRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/expenses': {
-      id: '/_app/expenses'
-      path: '/expenses'
-      fullPath: '/expenses'
-      preLoaderRoute: typeof AppExpensesRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/festivals': {
-      id: '/_app/festivals'
-      path: '/festivals'
-      fullPath: '/festivals'
-      preLoaderRoute: typeof AppFestivalsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/leads': {
-      id: '/_app/leads'
-      path: '/leads'
-      fullPath: '/leads'
-      preLoaderRoute: typeof AppLeadsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/leave-types': {
-      id: '/_app/leave-types'
-      path: '/leave-types'
-      fullPath: '/leave-types'
-      preLoaderRoute: typeof AppLeaveTypesRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/leaves': {
-      id: '/_app/leaves'
-      path: '/leaves'
-      fullPath: '/leaves'
-      preLoaderRoute: typeof AppLeavesRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/payslips': {
-      id: '/_app/payslips'
-      path: '/payslips'
-      fullPath: '/payslips'
-      preLoaderRoute: typeof AppPayslipsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/performance': {
-      id: '/_app/performance'
-      path: '/performance'
-      fullPath: '/performance'
-      preLoaderRoute: typeof AppPerformanceRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/policies': {
-      id: '/_app/policies'
-      path: '/policies'
-      fullPath: '/policies'
-      preLoaderRoute: typeof AppPoliciesRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/projects': {
-      id: '/_app/projects'
-      path: '/projects'
-      fullPath: '/projects'
-      preLoaderRoute: typeof AppProjectsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/recruitment': {
-      id: '/_app/recruitment'
-      path: '/recruitment'
-      fullPath: '/recruitment'
-      preLoaderRoute: typeof AppRecruitmentRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/salary': {
-      id: '/_app/salary'
-      path: '/salary'
-      fullPath: '/salary'
-      preLoaderRoute: typeof AppSalaryRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/settings': {
-      id: '/_app/settings'
-      path: '/settings'
-      fullPath: '/settings'
-      preLoaderRoute: typeof AppSettingsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/shifts': {
-      id: '/_app/shifts'
-      path: '/shifts'
-      fullPath: '/shifts'
-      preLoaderRoute: typeof AppShiftsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/tickets': {
-      id: '/_app/tickets'
-      path: '/tickets'
-      fullPath: '/tickets'
-      preLoaderRoute: typeof AppTicketsRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/tracking': {
-      id: '/_app/tracking'
-      path: '/tracking'
-      fullPath: '/tracking'
-      preLoaderRoute: typeof AppTrackingRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/training': {
-      id: '/_app/training'
-      path: '/training'
-      fullPath: '/training'
-      preLoaderRoute: typeof AppTrainingRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/_app/users': {
-      id: '/_app/users'
-      path: '/users'
-      fullPath: '/users'
-      preLoaderRoute: typeof AppUsersRouteImport
-      parentRoute: typeof AppRoute
-    }
-    '/super/alerts': {
-      id: '/super/alerts'
-      path: '/alerts'
-      fullPath: '/super/alerts'
-      preLoaderRoute: typeof SuperAlertsRouteImport
-      parentRoute: typeof SuperRoute
-    }
-    '/super/billing': {
-      id: '/super/billing'
-      path: '/billing'
-      fullPath: '/super/billing'
-      preLoaderRoute: typeof SuperBillingRouteImport
-      parentRoute: typeof SuperRoute
-    }
-    '/super/overview': {
-      id: '/super/overview'
-      path: '/overview'
-      fullPath: '/super/overview'
-      preLoaderRoute: typeof SuperOverviewRouteImport
-      parentRoute: typeof SuperRoute
-    }
-    '/super/plans': {
-      id: '/super/plans'
-      path: '/plans'
-      fullPath: '/super/plans'
-      preLoaderRoute: typeof SuperPlansRouteImport
-      parentRoute: typeof SuperRoute
-    }
-    '/super/tenants': {
-      id: '/super/tenants'
-      path: '/tenants'
-      fullPath: '/super/tenants'
-      preLoaderRoute: typeof SuperTenantsRouteImport
-      parentRoute: typeof SuperRoute
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/user/': {
       id: '/user/'
       path: '/'
       fullPath: '/user/'
       preLoaderRoute: typeof UserIndexRouteImport
-      parentRoute: typeof UserRoute
-    }
-    '/user/account': {
-      id: '/user/account'
-      path: '/account'
-      fullPath: '/user/account'
-      preLoaderRoute: typeof UserAccountRouteImport
-      parentRoute: typeof UserRoute
-    }
-    '/user/advance-salary': {
-      id: '/user/advance-salary'
-      path: '/advance-salary'
-      fullPath: '/user/advance-salary'
-      preLoaderRoute: typeof UserAdvanceSalaryRouteImport
-      parentRoute: typeof UserRoute
-    }
-    '/user/expenses': {
-      id: '/user/expenses'
-      path: '/expenses'
-      fullPath: '/user/expenses'
-      preLoaderRoute: typeof UserExpensesRouteImport
-      parentRoute: typeof UserRoute
-    }
-    '/user/holidays': {
-      id: '/user/holidays'
-      path: '/holidays'
-      fullPath: '/user/holidays'
-      preLoaderRoute: typeof UserHolidaysRouteImport
-      parentRoute: typeof UserRoute
-    }
-    '/user/leaves': {
-      id: '/user/leaves'
-      path: '/leaves'
-      fullPath: '/user/leaves'
-      preLoaderRoute: typeof UserLeavesRouteImport
-      parentRoute: typeof UserRoute
-    }
-    '/user/profile': {
-      id: '/user/profile'
-      path: '/profile'
-      fullPath: '/user/profile'
-      preLoaderRoute: typeof UserProfileRouteImport
       parentRoute: typeof UserRoute
     }
     '/user/tickets': {
@@ -941,6 +675,279 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UserTicketsRouteImport
       parentRoute: typeof UserRoute
     }
+    '/user/profile': {
+      id: '/user/profile'
+      path: '/profile'
+      fullPath: '/user/profile'
+      preLoaderRoute: typeof UserProfileRouteImport
+      parentRoute: typeof UserRoute
+    }
+    '/user/leaves': {
+      id: '/user/leaves'
+      path: '/leaves'
+      fullPath: '/user/leaves'
+      preLoaderRoute: typeof UserLeavesRouteImport
+      parentRoute: typeof UserRoute
+    }
+    '/user/holidays': {
+      id: '/user/holidays'
+      path: '/holidays'
+      fullPath: '/user/holidays'
+      preLoaderRoute: typeof UserHolidaysRouteImport
+      parentRoute: typeof UserRoute
+    }
+    '/user/expenses': {
+      id: '/user/expenses'
+      path: '/expenses'
+      fullPath: '/user/expenses'
+      preLoaderRoute: typeof UserExpensesRouteImport
+      parentRoute: typeof UserRoute
+    }
+    '/user/advance-salary': {
+      id: '/user/advance-salary'
+      path: '/advance-salary'
+      fullPath: '/user/advance-salary'
+      preLoaderRoute: typeof UserAdvanceSalaryRouteImport
+      parentRoute: typeof UserRoute
+    }
+    '/user/account': {
+      id: '/user/account'
+      path: '/account'
+      fullPath: '/user/account'
+      preLoaderRoute: typeof UserAccountRouteImport
+      parentRoute: typeof UserRoute
+    }
+    '/super/tenants': {
+      id: '/super/tenants'
+      path: '/tenants'
+      fullPath: '/super/tenants'
+      preLoaderRoute: typeof SuperTenantsRouteImport
+      parentRoute: typeof SuperRoute
+    }
+    '/super/plans': {
+      id: '/super/plans'
+      path: '/plans'
+      fullPath: '/super/plans'
+      preLoaderRoute: typeof SuperPlansRouteImport
+      parentRoute: typeof SuperRoute
+    }
+    '/super/overview': {
+      id: '/super/overview'
+      path: '/overview'
+      fullPath: '/super/overview'
+      preLoaderRoute: typeof SuperOverviewRouteImport
+      parentRoute: typeof SuperRoute
+    }
+    '/super/billing': {
+      id: '/super/billing'
+      path: '/billing'
+      fullPath: '/super/billing'
+      preLoaderRoute: typeof SuperBillingRouteImport
+      parentRoute: typeof SuperRoute
+    }
+    '/super/alerts': {
+      id: '/super/alerts'
+      path: '/alerts'
+      fullPath: '/super/alerts'
+      preLoaderRoute: typeof SuperAlertsRouteImport
+      parentRoute: typeof SuperRoute
+    }
+    '/_app/users': {
+      id: '/_app/users'
+      path: '/users'
+      fullPath: '/users'
+      preLoaderRoute: typeof AppUsersRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/training': {
+      id: '/_app/training'
+      path: '/training'
+      fullPath: '/training'
+      preLoaderRoute: typeof AppTrainingRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/tracking': {
+      id: '/_app/tracking'
+      path: '/tracking'
+      fullPath: '/tracking'
+      preLoaderRoute: typeof AppTrackingRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/tickets': {
+      id: '/_app/tickets'
+      path: '/tickets'
+      fullPath: '/tickets'
+      preLoaderRoute: typeof AppTicketsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/shifts': {
+      id: '/_app/shifts'
+      path: '/shifts'
+      fullPath: '/shifts'
+      preLoaderRoute: typeof AppShiftsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/settings': {
+      id: '/_app/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/salary': {
+      id: '/_app/salary'
+      path: '/salary'
+      fullPath: '/salary'
+      preLoaderRoute: typeof AppSalaryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/recruitment': {
+      id: '/_app/recruitment'
+      path: '/recruitment'
+      fullPath: '/recruitment'
+      preLoaderRoute: typeof AppRecruitmentRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/projects': {
+      id: '/_app/projects'
+      path: '/projects'
+      fullPath: '/projects'
+      preLoaderRoute: typeof AppProjectsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/policies': {
+      id: '/_app/policies'
+      path: '/policies'
+      fullPath: '/policies'
+      preLoaderRoute: typeof AppPoliciesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/performance': {
+      id: '/_app/performance'
+      path: '/performance'
+      fullPath: '/performance'
+      preLoaderRoute: typeof AppPerformanceRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/payslips': {
+      id: '/_app/payslips'
+      path: '/payslips'
+      fullPath: '/payslips'
+      preLoaderRoute: typeof AppPayslipsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/leaves': {
+      id: '/_app/leaves'
+      path: '/leaves'
+      fullPath: '/leaves'
+      preLoaderRoute: typeof AppLeavesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/leave-types': {
+      id: '/_app/leave-types'
+      path: '/leave-types'
+      fullPath: '/leave-types'
+      preLoaderRoute: typeof AppLeaveTypesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/leads': {
+      id: '/_app/leads'
+      path: '/leads'
+      fullPath: '/leads'
+      preLoaderRoute: typeof AppLeadsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/festivals': {
+      id: '/_app/festivals'
+      path: '/festivals'
+      fullPath: '/festivals'
+      preLoaderRoute: typeof AppFestivalsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/expenses': {
+      id: '/_app/expenses'
+      path: '/expenses'
+      fullPath: '/expenses'
+      preLoaderRoute: typeof AppExpensesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/employees': {
+      id: '/_app/employees'
+      path: '/employees'
+      fullPath: '/employees'
+      preLoaderRoute: typeof AppEmployeesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/departments': {
+      id: '/_app/departments'
+      path: '/departments'
+      fullPath: '/departments'
+      preLoaderRoute: typeof AppDepartmentsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/dashboard': {
+      id: '/_app/dashboard'
+      path: '/dashboard'
+      fullPath: '/dashboard'
+      preLoaderRoute: typeof AppDashboardRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/branches': {
+      id: '/_app/branches'
+      path: '/branches'
+      fullPath: '/branches'
+      preLoaderRoute: typeof AppBranchesRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/billing': {
+      id: '/_app/billing'
+      path: '/billing'
+      fullPath: '/billing'
+      preLoaderRoute: typeof AppBillingRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/attendance-config': {
+      id: '/_app/attendance-config'
+      path: '/attendance-config'
+      fullPath: '/attendance-config'
+      preLoaderRoute: typeof AppAttendanceConfigRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/attendance': {
+      id: '/_app/attendance'
+      path: '/attendance'
+      fullPath: '/attendance'
+      preLoaderRoute: typeof AppAttendanceRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/assets': {
+      id: '/_app/assets'
+      path: '/assets'
+      fullPath: '/assets'
+      preLoaderRoute: typeof AppAssetsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/announcements': {
+      id: '/_app/announcements'
+      path: '/announcements'
+      fullPath: '/announcements'
+      preLoaderRoute: typeof AppAnnouncementsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/advance-salary': {
+      id: '/_app/advance-salary'
+      path: '/advance-salary'
+      fullPath: '/advance-salary'
+      preLoaderRoute: typeof AppAdvanceSalaryRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/employees/': {
+      id: '/_app/employees/'
+      path: '/'
+      fullPath: '/employees/'
+      preLoaderRoute: typeof AppEmployeesIndexRouteImport
+      parentRoute: typeof AppEmployeesRoute
+    }
     '/_app/assets/': {
       id: '/_app/assets/'
       path: '/'
@@ -948,18 +955,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAssetsIndexRouteImport
       parentRoute: typeof AppAssetsRoute
     }
-    '/_app/assets/allocate': {
-      id: '/_app/assets/allocate'
-      path: '/allocate'
-      fullPath: '/assets/allocate'
-      preLoaderRoute: typeof AppAssetsAllocateRouteImport
-      parentRoute: typeof AppAssetsRoute
-    }
-    '/_app/employees/': {
-      id: '/_app/employees/'
-      path: '/'
-      fullPath: '/employees/'
-      preLoaderRoute: typeof AppEmployeesIndexRouteImport
+    '/_app/employees/create': {
+      id: '/_app/employees/create'
+      path: '/create'
+      fullPath: '/employees/create'
+      preLoaderRoute: typeof AppEmployeesCreateRouteImport
       parentRoute: typeof AppEmployeesRoute
     }
     '/_app/employees/$employeeId': {
@@ -969,12 +969,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppEmployeesEmployeeIdRouteImport
       parentRoute: typeof AppEmployeesRoute
     }
-    '/_app/employees/create': {
-      id: '/_app/employees/create'
-      path: '/create'
-      fullPath: '/employees/create'
-      preLoaderRoute: typeof AppEmployeesCreateRouteImport
-      parentRoute: typeof AppEmployeesRoute
+    '/_app/assets/allocate': {
+      id: '/_app/assets/allocate'
+      path: '/allocate'
+      fullPath: '/assets/allocate'
+      preLoaderRoute: typeof AppAssetsAllocateRouteImport
+      parentRoute: typeof AppAssetsRoute
     }
   }
 }
