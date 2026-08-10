@@ -3,7 +3,7 @@ import { useMemo, useState, useEffect } from "react";
 import { z } from "zod";
 import { useQuery } from "@tanstack/react-query";
 import { GridCard } from "@/components/shared/grid-card";
-import { Check, X, Clock as ClockIcon, MessageSquare, Pencil, CalendarDays, Search, MapPin, MoreVertical, Download, Plus, ChevronLeft, ChevronRight, Users, UserCheck, UserX, Phone, ClipboardList, ShieldAlert, Layers } from "lucide-react";
+import { Check, X, Clock as ClockIcon, MessageSquare, Pencil, CalendarDays, Search, MapPin, MoreVertical, Download, Plus, ChevronLeft, ChevronRight, Users, UserCheck, UserX, Phone, ClipboardList, ShieldAlert, Layers, ScanFace, Fingerprint, Smartphone, ListChecks, ChevronDown } from "lucide-react";
 import { ActionButton } from "@/components/shared/action-button";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/shared/page-header";
@@ -35,7 +35,7 @@ import { useTicketService } from "@/services/ticket-service";
 import { parseTicketReason } from "@/lib/leave-ticket-parser";
 import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { cn, toISTDateKey } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { StatCard } from "@/components/shared/stat-card";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
@@ -296,6 +296,7 @@ function AttendancePage() {
     status: "present" as any
   });
 
+<<<<<<< Updated upstream
   // Local YYYY-MM-DD key. toISOString() keys days in UTC, which rolls IST
   // midnight timestamps (stored as the previous day's 18:30 UTC) to the wrong
   // day — always use local date components instead, matching how the backend
@@ -310,12 +311,37 @@ function AttendancePage() {
 
   // Default date filter = today
   const todayStr = toLocalDateStr(new Date());
+=======
+  // Default date filter = today (IST — matches how the backend keys each
+  // attendance record's `date`, regardless of the browser's own timezone)
+  const todayStr = toISTDateKey(new Date());
+>>>>>>> Stashed changes
   const [dateFilter, setDateFilter] = useState<string>(todayStr);
 
   // Punched in but not yet punched out — shown as "On Duty"
   const getDisplayStatus = (t: AttendanceRecord) => (t.punchIn && !t.punchOut ? "on-duty" : t.status);
 
+<<<<<<< Updated upstream
   const todayList = list.filter((t) => t.date && toLocalDateStr(t.date) === todayStr);
+=======
+  const isToday = (dateStr?: string) => !!dateStr && toISTDateKey(dateStr) === todayStr;
+
+  // Lens syncs every arrival/departure (including lunch) as a generic
+  // punch-in/punch-out, so today's `punchOut` may just be the most recent
+  // lunch-out, not the real end of day — only trust it once the day is over.
+  // Use "Lens Info" (below) to see every raw event for today regardless.
+  const getDisplayPunchOut = (t: AttendanceRecord) =>
+    t.source === "lens" && isToday(t.date) ? null : t.punchOut;
+
+  const SOURCE_META: Record<string, { icon: typeof ScanFace; label: string }> = {
+    lens: { icon: ScanFace, label: "Lens (camera)" },
+    biometric: { icon: Fingerprint, label: "Biometric device" },
+    app: { icon: Smartphone, label: "Phone app" },
+  };
+  const getSourceMeta = (t: AttendanceRecord) => SOURCE_META[t.source || "app"];
+
+  const todayList = list.filter((t) => isToday(t.date));
+>>>>>>> Stashed changes
   const counts = {
     all: todayList.length,
     present: todayList.filter((t) => ["present", "late", "wfh", "half-day"].includes(t.status)).length,
@@ -346,7 +372,11 @@ function AttendancePage() {
       const displayStatus = getDisplayStatus(t);
       const matchesTab = tab === "all" || displayStatus === tab || t.status === tab;
       const matchesSearch = !search || name.toLowerCase().includes(search.toLowerCase());
+<<<<<<< Updated upstream
       const matchesDate = !dateFilter || (t.date && toLocalDateStr(t.date) === dateFilter);
+=======
+      const matchesDate = !dateFilter || (!!t.date && toISTDateKey(t.date) === dateFilter);
+>>>>>>> Stashed changes
       const matchesShift = shiftFilter === "all" || t.employeeId?.shiftId?._id === shiftFilter;
       return matchesTab && matchesSearch && matchesDate && matchesShift;
     });
@@ -376,6 +406,7 @@ function AttendancePage() {
   const [absentSheetOpen, setAbsentSheetOpen] = useState(false);
   const [regSheetOpen, setRegSheetOpen] = useState(false);
   const [detailRecord, setDetailRecord] = useState<AttendanceRecord | null>(null);
+  const [showAllSessions, setShowAllSessions] = useState(false);
   const [correctionOpen, setCorrectionOpen] = useState(false);
   const [correctionForm, setCorrectionForm] = useState({
     employeeId: "",
@@ -586,16 +617,26 @@ function AttendancePage() {
                   )
                 }
                 statusNode={
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "capitalize text-[10px] font-bold px-2 py-0 border-transparent rounded-full",
-                      getDisplayStatus(t) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
-                        t.status === "present" ? "bg-success/10 text-success" :
-                          t.status === "late" ? "bg-warning/15 text-warning-foreground" :
-                            "bg-destructive/10 text-destructive"
-                    )}
-                  >{getDisplayStatus(t) === "on-duty" ? "On Duty" : t.status}</Badge>
+                  <div className="flex items-center gap-1.5">
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "capitalize text-[10px] font-bold px-2 py-0 border-transparent rounded-full",
+                        getDisplayStatus(t) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
+                          t.status === "present" ? "bg-success/10 text-success" :
+                            t.status === "late" ? "bg-warning/15 text-warning-foreground" :
+                              "bg-destructive/10 text-destructive"
+                      )}
+                    >{getDisplayStatus(t) === "on-duty" ? "On Duty" : t.status}</Badge>
+                    {(() => {
+                      const { icon: SourceIcon, label } = getSourceMeta(t);
+                      return (
+                        <span title={label} className="text-muted-foreground/60">
+                          <SourceIcon className="h-3.5 w-3.5" />
+                        </span>
+                      );
+                    })()}
+                  </div>
                 }
                 actions={
                   canEdit ? (
@@ -606,7 +647,7 @@ function AttendancePage() {
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => setDetailRecord(t)}>View Details</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => { setDetailRecord(t); setShowAllSessions(false); }}>View Details</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => {
                         setModifyForm({
                           id: t._id,
@@ -657,7 +698,7 @@ function AttendancePage() {
                       <ClockIcon className="h-2.5 w-2.5" /> Punch Out
                     </p>
                     <p className="text-[12px] font-mono font-bold text-foreground">
-                      {t.punchOut ? new Date(t.punchOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                      {getDisplayPunchOut(t) ? new Date(getDisplayPunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
                     </p>
                   </div>
                 </div>
@@ -729,7 +770,7 @@ function AttendancePage() {
                     {t.lunchOutTime ? new Date(t.lunchOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
                   </DataTableCell>
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {t.punchOut ? new Date(t.punchOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                    {getDisplayPunchOut(t) ? new Date(getDisplayPunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
                   </DataTableCell>
                   <DataTableCell className="text-[12px] text-muted-foreground max-w-[150px] truncate italic">
                     {t.punchInLocation && typeof t.punchInLocation === 'object'
@@ -737,23 +778,33 @@ function AttendancePage() {
                       : (t.punchInLocation || "N/A")}
                   </DataTableCell>
                   <DataTableCell>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "capitalize text-[10px] font-bold px-2 py-0.5 border-transparent",
-                        getDisplayStatus(t) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
-                          t.status === "present" ? "bg-success/10 text-success" :
-                            t.status === "late" ? "bg-warning/15 text-warning-foreground" :
-                              "bg-destructive/10 text-destructive"
-                      )}
-                    >{getDisplayStatus(t) === "on-duty" ? "On Duty" : t.status}</Badge>
+                    <div className="flex items-center gap-1.5">
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          "capitalize text-[10px] font-bold px-2 py-0.5 border-transparent",
+                          getDisplayStatus(t) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
+                            t.status === "present" ? "bg-success/10 text-success" :
+                              t.status === "late" ? "bg-warning/15 text-warning-foreground" :
+                                "bg-destructive/10 text-destructive"
+                        )}
+                      >{getDisplayStatus(t) === "on-duty" ? "On Duty" : t.status}</Badge>
+                      {(() => {
+                        const { icon: SourceIcon, label } = getSourceMeta(t);
+                        return (
+                          <span title={label} className="text-muted-foreground/60">
+                            <SourceIcon className="h-3.5 w-3.5" />
+                          </span>
+                        );
+                      })()}
+                    </div>
                   </DataTableCell>
                   <DataTableCell isLast>
                     <div className="flex justify-end items-center gap-1">
                       <ActionButton
                         variant="view"
                         tooltip="View Details"
-                        onClick={() => setDetailRecord(t)}
+                        onClick={() => { setDetailRecord(t); setShowAllSessions(false); }}
                       />
                       {canEdit && (
                       <ActionButton
@@ -1124,18 +1175,39 @@ function AttendancePage() {
             <div className="h-full flex flex-col">
               <SheetHeader className="p-6 pb-4 pr-12 border-b border-border/40">
                 <div className="flex items-center justify-between mb-2">
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "capitalize text-[10px] font-black px-3 py-1 rounded-full border-transparent",
-                      getDisplayStatus(detailRecord) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
-                        detailRecord.status === "present" ? "bg-success/10 text-success" :
-                          detailRecord.status === "late" ? "bg-warning/15 text-warning-foreground" :
-                            "bg-destructive/10 text-destructive"
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "capitalize text-[10px] font-black px-3 py-1 rounded-full border-transparent",
+                        getDisplayStatus(detailRecord) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
+                          detailRecord.status === "present" ? "bg-success/10 text-success" :
+                            detailRecord.status === "late" ? "bg-warning/15 text-warning-foreground" :
+                              "bg-destructive/10 text-destructive"
+                      )}
+                    >
+                      {getDisplayStatus(detailRecord) === "on-duty" ? "On Duty" : detailRecord.status}
+                    </Badge>
+                    {(() => {
+                      const { icon: SourceIcon, label } = getSourceMeta(detailRecord);
+                      return (
+                        <span title={label} className="text-muted-foreground/60">
+                          <SourceIcon className="h-4 w-4" />
+                        </span>
+                      );
+                    })()}
+                    {detailRecord.source === "lens" && (detailRecord.shifts?.length ?? 0) > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAllSessions((v) => !v)}
+                        className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-primary/80 hover:text-primary bg-primary/5 hover:bg-primary/10 border border-primary/20 rounded-full px-2.5 py-1 transition-colors"
+                      >
+                        <ListChecks className="h-3 w-3" />
+                        Lens Info
+                        <ChevronDown className={`h-3 w-3 transition-transform ${showAllSessions ? "rotate-180" : ""}`} />
+                      </button>
                     )}
-                  >
-                    {getDisplayStatus(detailRecord) === "on-duty" ? "On Duty" : detailRecord.status}
-                  </Badge>
+                  </div>
                   <span className="text-[11px] text-muted-foreground font-medium">{new Date(detailRecord.date).toLocaleDateString()}</span>
                 </div>
                 <SheetTitle className="text-xl font-black tracking-tight">{detailRecord.employeeId?.name}</SheetTitle>
@@ -1179,7 +1251,7 @@ function AttendancePage() {
                       )}
                     </div>
                     <p className="text-[13px] font-mono font-bold text-foreground">
-                      {detailRecord.punchOut ? new Date(detailRecord.punchOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}
+                      {getDisplayPunchOut(detailRecord) ? new Date(getDisplayPunchOut(detailRecord)!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}
                     </p>
                     <p className="text-[11px] text-muted-foreground flex items-center gap-1">
                       <MapPin className="h-3 w-3 shrink-0" />
@@ -1213,6 +1285,23 @@ function AttendancePage() {
                     ) : null;
                   })()}
                 </Card>
+
+                {showAllSessions && detailRecord.source === "lens" && (
+                  <Card className="p-4 bg-muted/20 border-border/40 rounded-2xl shadow-none space-y-3">
+                    <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1.5">
+                      <ScanFace className="h-3 w-3" /> Raw Lens Events ({detailRecord.shifts?.length ?? 0})
+                    </p>
+                    <div className="space-y-1.5">
+                      {(detailRecord.shifts ?? []).map((s, i) => (
+                        <div key={i} className="flex items-center justify-between text-[12px] font-mono font-bold text-foreground bg-background/60 rounded-lg px-3 py-1.5 border border-border/40">
+                          <span>{s.punchIn ? new Date(s.punchIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</span>
+                          <span className="text-muted-foreground font-sans font-normal text-[10px]">→</span>
+                          <span>{s.punchOut ? new Date(s.punchOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Still in"}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </Card>
+                )}
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">

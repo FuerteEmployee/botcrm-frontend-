@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useMemo, useRef } from "react";
-import { MapPin, Wifi, WifiOff, Search, Play, Square } from "lucide-react";
+import { MapPin, Wifi, WifiOff, Search, Play, Square, Radio, Route as RouteIcon, Users, ChevronLeft, ChevronRight, RefreshCw, Satellite, Map as MapIcon, Navigation, Ruler } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { ViewToggle } from "@/components/shared/view-toggle";
 import { FormInput } from "@/components/shared/form-input";
@@ -8,11 +8,13 @@ import { DataTable, DataTableCell, DataTableRow } from "@/components/shared/data
 import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { useTrackingService } from "@/services/tracking-service";
+import { StatCard } from "@/components/shared/stat-card";
+import { useTrackingService, useTrackingStats, useTrackingHistory, usePingEmployee } from "@/services/tracking-service";
 import { useEmployeeService } from "@/services/employee-service";
 import { useAttendanceService } from "@/services/attendance-service";
-import { cn } from "@/lib/utils";
+import { cn, toISTDateKey } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
+import { toast } from "sonner";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { useLayoutSettings } from "@/hooks/use-layout-settings";
 import { Button } from "@/components/ui/button";
@@ -25,6 +27,18 @@ export const Route = createFileRoute("/_app/tracking")({
   component: TrackingPage,
 });
 
+const TILE_LAYERS = {
+  street: {
+    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    attribution:
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  },
+  satellite: {
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Tiles &copy; Esri",
+  },
+};
+
 // Imperative Leaflet map — avoids react-leaflet's callback-ref pattern that
 // triggers "Map container is already initialized" under React 19 StrictMode.
 function TrackingMap({
@@ -32,15 +46,21 @@ function TrackingMap({
   employees,
   selectedId,
   onSelect,
+  routePoints,
+  tileMode,
 }: {
   locations: any[];
   employees: any[];
   selectedId: string;
   onSelect: (id: string) => void;
+  routePoints?: { latitude: number; longitude: number; timestamp: string }[];
+  tileMode: "street" | "satellite";
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Map<string, L.Marker>>(new Map());
+  const tileLayerRef = useRef<L.TileLayer | null>(null);
+  const routeLayerRef = useRef<L.LayerGroup | null>(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
 
@@ -60,15 +80,13 @@ function TrackingMap({
       zoomControl: false,
     });
 
-    L.tileLayer(
-      "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-      {
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
-      }
-    ).addTo(map);
+    const initialTiles = TILE_LAYERS.street;
+    tileLayerRef.current = L.tileLayer(initialTiles.url, { attribution: initialTiles.attribution }).addTo(map);
 
     L.control.zoom({ position: "bottomright" }).addTo(map);
+    L.control.scale({ position: "bottomleft", imperial: false }).addTo(map);
+
+    routeLayerRef.current = L.layerGroup().addTo(map);
 
     mapRef.current = map;
 
@@ -77,8 +95,73 @@ function TrackingMap({
       markersRef.current.clear();
       map.remove();
       mapRef.current = null;
+      tileLayerRef.current = null;
+      routeLayerRef.current = null;
     };
   }, []);
+
+  // Swap the base tile layer when the admin toggles Street / Satellite
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (tileLayerRef.current) tileLayerRef.current.remove();
+    const tiles = TILE_LAYERS[tileMode];
+    tileLayerRef.current = L.tileLayer(tiles.url, { attribution: tiles.attribution }).addTo(map);
+    tileLayerRef.current.bringToBack();
+  }, [tileMode]);
+
+  // Draw the selected employee's route as a polyline with Start/End markers
+  useEffect(() => {
+    const map = mapRef.current;
+    const layer = routeLayerRef.current;
+    if (!map || !layer) return;
+    layer.clearLayers();
+    if (!routePoints || routePoints.length === 0) return;
+
+    const latlngs = routePoints.map((p) => [p.latitude, p.longitude] as L.LatLngTuple);
+    L.polyline(latlngs, { color: "#2563eb", weight: 3, opacity: 0.85 }).addTo(layer);
+
+    const pin = (color: string) => L.divIcon({
+      className: "route-endpoint-marker",
+      html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.35);"></div>`,
+      iconSize: [14, 14],
+      iconAnchor: [7, 7],
+    });
+
+    const fmt = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
+
+    L.marker(latlngs[0], { icon: pin("#16a34a") })
+      .bindTooltip(`Start · ${fmt(routePoints[0].timestamp)}`, { permanent: true, direction: "top", offset: [0, -8], className: "route-time-label" })
+      .addTo(layer);
+
+    if (latlngs.length > 1) {
+      L.marker(latlngs[latlngs.length - 1], { icon: pin("#dc2626") })
+        .bindTooltip(`End · ${fmt(routePoints[routePoints.length - 1].timestamp)}`, { permanent: true, direction: "top", offset: [0, -8], className: "route-time-label" })
+        .addTo(layer);
+    }
+
+    // Label a handful of waypoints along the way (roughly every 15 min of
+    // elapsed time) so the whole day's path reads like a timeline, not just
+    // its two ends — without a label crowding every single 15s-interval point.
+    const WAYPOINT_INTERVAL_MS = 15 * 60 * 1000;
+    const dotIcon = L.divIcon({
+      className: "route-waypoint-marker",
+      html: `<div style="width:9px;height:9px;border-radius:50%;background:#2563eb;border:2px solid white;box-shadow:0 1px 3px rgba(0,0,0,0.35);"></div>`,
+      iconSize: [9, 9],
+      iconAnchor: [4, 4],
+    });
+    let lastLabeledAt = new Date(routePoints[0].timestamp).getTime();
+    for (let i = 1; i < routePoints.length - 1; i++) {
+      const t = new Date(routePoints[i].timestamp).getTime();
+      if (t - lastLabeledAt < WAYPOINT_INTERVAL_MS) continue;
+      lastLabeledAt = t;
+      L.marker(latlngs[i], { icon: dotIcon })
+        .bindTooltip(fmt(routePoints[i].timestamp), { permanent: true, direction: "top", offset: [0, -5], className: "route-time-label" })
+        .addTo(layer);
+    }
+
+    map.fitBounds(latlngs, { padding: [60, 60], maxZoom: 16 });
+  }, [routePoints]);
 
   // Sync markers whenever locations, employees, or selectedId change
   useEffect(() => {
@@ -149,12 +232,18 @@ function TrackingMap({
     }
   }, [locations, employees, selectedId]);
 
-  // Pan to selected employee
+  // Pan to selected employee — or back to a neutral view if they have no
+  // location yet, so the map doesn't just sit wherever it last was showing
+  // a completely different (and now-hidden) employee's marker.
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !selectedId) return;
     const target = locations.find((l) => l.employeeId === selectedId);
-    if (target) map.setView([target.latitude, target.longitude], 16, { animate: true });
+    if (target) {
+      map.setView([target.latitude, target.longitude], 16, { animate: true });
+    } else {
+      map.setView([20.5937, 78.9629], 5, { animate: true });
+    }
   }, [selectedId, locations]);
 
   return <div ref={containerRef} style={{ height: "100%", width: "100%" }} />;
@@ -171,8 +260,10 @@ function TrackingPage() {
     updateEmployee({ id: e._id, data: { trackingEnabled: !e.trackingEnabled } }).catch(() => {});
   };
 
-  // Fetch today's attendance in two formats — some backends need date, some need none
-  const today = new Date().toISOString().split("T")[0];
+  // Fetch today's attendance in two formats — some backends need date, some need none.
+  // IST-keyed (not a raw UTC slice) — attendance `date` fields are anchored to IST
+  // midnight server-side regardless of what timezone either server happens to run in.
+  const today = toISTDateKey(new Date());
   const { records: attendanceWithDate } = useAttendanceService(today, today);
   const { records: attendanceAll, lunchIn, lunchOut } = useAttendanceService();
 
@@ -192,6 +283,29 @@ function TrackingPage() {
   useEffect(() => {
     setView(defaultLayout);
   }, [defaultLayout]);
+
+  const { stats } = useTrackingStats();
+  const [tileMode, setTileMode] = useState<"street" | "satellite">("street");
+  const [selectedDate, setSelectedDate] = useState(today);
+  const isToday = selectedDate === today;
+  const { points: routePoints, distanceKm, refetch: refetchHistory } = useTrackingHistory(selectedId || undefined, selectedDate);
+  const { mutateAsync: pingEmployee, isPending: isPinging } = usePingEmployee();
+
+  const shiftDate = (deltaDays: number) => {
+    const d = new Date(selectedDate + "T00:00:00");
+    d.setDate(d.getDate() + deltaDays);
+    setSelectedDate(toISTDateKey(d));
+  };
+
+  const handlePing = async (employeeId: string) => {
+    try {
+      await pingEmployee(employeeId);
+      toast.success("Ping sent — waiting for a fresh location.");
+      setTimeout(() => refetchHistory(), 4000);
+    } catch {
+      toast.error("Could not reach that device.");
+    }
+  };
 
   const attendanceMap = useMemo(() => {
     const map: Record<string, any> = {};
@@ -286,11 +400,17 @@ function TrackingPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [restLocations, attendanceList]);
 
-  // Flat list of locations to pass to the map component
-  const activeLocations = useMemo(
-    () => Object.values(locationMap).filter((l) => l.latitude && l.longitude),
-    [locationMap]
-  );
+  // Flat list of locations to pass to the map component. With nobody selected,
+  // show everyone (fleet overview). Once an employee is selected, show only
+  // theirs — otherwise an unrelated employee's marker (the only one with real
+  // data) stays sitting on screen and reads as "stuck on the wrong person."
+  const activeLocations = useMemo(() => {
+    const all = Object.values(locationMap).filter((l) => l.latitude && l.longitude);
+    if (!selectedId) return all;
+    return all.filter((l) => l.employeeId === selectedId);
+  }, [locationMap, selectedId]);
+
+  const selectedHasNoLocation = !!selectedId && !locationMap[selectedId];
 
   const filtered = useMemo(() => {
     return (employees || []).filter((e) =>
@@ -314,7 +434,45 @@ function TrackingPage() {
       <PageHeader
         title="Employee Tracking"
         description="Real-time location monitoring of your field staff."
+        actions={
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 rounded-xl border border-border/60 bg-white px-1 h-10">
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => shiftDate(-1)}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <button
+                type="button"
+                onClick={() => setSelectedDate(today)}
+                className={cn(
+                  "text-[12px] font-semibold px-2 rounded-lg",
+                  isToday ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                {isToday ? "Today" : selectedDate}
+              </button>
+              <Button variant="ghost" size="icon" className="h-8 w-8" disabled={isToday} onClick={() => shiftDate(1)}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-10 rounded-xl gap-2 font-semibold border-border/60"
+              onClick={() => refetchHistory()}
+            >
+              <RefreshCw className="h-4 w-4 text-muted-foreground" />
+              Refresh
+            </Button>
+          </div>
+        }
       />
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <StatCard label="Live Now" value={stats?.liveNow ?? 0} icon={Radio} accent="success" />
+        <StatCard label="Offline" value={stats?.offline ?? 0} icon={WifiOff} accent="warning" />
+        <StatCard label="Tracking Points" value={stats?.trackingPoints ?? 0} icon={RouteIcon} accent="primary" />
+        <StatCard label="Field Staff" value={stats?.fieldStaff ?? 0} icon={Users} accent="info" />
+      </div>
 
       <div className="flex flex-col md:flex-row items-center justify-between gap-3 py-1">
         <div className="flex items-center gap-3 w-full md:w-auto">
@@ -409,7 +567,45 @@ function TrackingPage() {
                 employees={employees}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
+                routePoints={selectedId ? routePoints : undefined}
+                tileMode={tileMode}
               />
+
+              {/* Street / Satellite toggle */}
+              <div className="absolute top-3 left-3 z-[1000] flex items-center gap-1 rounded-xl bg-white/95 shadow-md border border-border/50 p-1">
+                <button
+                  type="button"
+                  onClick={() => setTileMode("street")}
+                  className={cn(
+                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide transition-colors",
+                    tileMode === "street" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/50"
+                  )}
+                >
+                  <MapIcon className="h-3 w-3" /> Street
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTileMode("satellite")}
+                  className={cn(
+                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide transition-colors",
+                    tileMode === "satellite" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/50"
+                  )}
+                >
+                  <Satellite className="h-3 w-3" /> Satellite
+                </button>
+              </div>
+
+              {/* Clear empty state instead of leaving a stale/unrelated marker on screen */}
+              {selectedHasNoLocation && selected && (
+                <div className="absolute inset-0 z-[999] flex items-center justify-center pointer-events-none">
+                  <div className="glass rounded-xl px-4 py-3 shadow-lg border border-white/20 text-center max-w-xs">
+                    <p className="text-[12px] font-semibold text-foreground/80">No location reported yet for {selected.name}</p>
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Tracking starts once they punch in with location permission granted.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Info card for selected employee */}
               {selected && (
@@ -437,6 +633,15 @@ function TrackingPage() {
                           : "Last seen N/A"}
                       </div>
                     </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 gap-1 text-[10px] font-bold shrink-0"
+                      disabled={isPinging}
+                      onClick={() => handlePing(selected._id)}
+                    >
+                      <Navigation className="h-3 w-3" /> Ping
+                    </Button>
                   </div>
 
                   <div className="mt-2.5 space-y-1">
@@ -451,6 +656,12 @@ function TrackingPage() {
                     {locationMap[selected._id] && (
                       <div className="text-[10px] font-mono text-muted-foreground/70">
                         {locationMap[selected._id].latitude.toFixed(4)}°N · {locationMap[selected._id].longitude.toFixed(4)}°E
+                      </div>
+                    )}
+                    {routePoints.length > 0 && (
+                      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground pt-0.5">
+                        <Ruler className="h-3 w-3 shrink-0" />
+                        {distanceKm} km travelled {isToday ? "today" : `on ${selectedDate}`} · {routePoints.length} point{routePoints.length === 1 ? "" : "s"}
                       </div>
                     )}
                   </div>
