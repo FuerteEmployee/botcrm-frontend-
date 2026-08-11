@@ -27,6 +27,7 @@ export interface AttendanceRecord {
   lunchInDistance?: number | null;
   lunchOutDistance?: number | null;
   status: 'present' | 'absent' | 'half-day' | 'late' | 'wfh';
+  source?: 'app' | 'lens' | 'biometric';
   isWFH?: boolean;
   wasLate?: boolean;
   remarks?: string;

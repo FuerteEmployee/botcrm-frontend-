@@ -2,11 +2,14 @@ import { apiClient } from "@/lib/api-client";
 import { canUseSocket, getSocket } from "@/lib/socket-client";
 
 const SEND_INTERVAL_MS = 15000;
+const PING_CHECK_INTERVAL_MS = 15000;
 
 export class LocationTracker {
   private employeeId: string;
   private watchId: number | null = null;
   private intervalId: ReturnType<typeof setInterval> | null = null;
+  private pingIntervalId: ReturnType<typeof setInterval> | null = null;
+  private lastHandledPingAt: number = 0;
   private isRunning: boolean = false;
   private lastPosition: { lat: number; lng: number; accuracy: number } | null = null;
 
@@ -38,6 +41,10 @@ export class LocationTracker {
       this.intervalId = setInterval(() => {
         if (this.lastPosition) this.sendLocation(this.lastPosition);
       }, SEND_INTERVAL_MS);
+
+      // Poll for an admin-requested "Ping" — take an immediate fix instead
+      // of waiting for the next interval tick if one comes in.
+      this.pingIntervalId = setInterval(() => this.checkPing(), PING_CHECK_INTERVAL_MS);
 
       // Send immediately on the first GPS fix
       navigator.geolocation.getCurrentPosition(
@@ -90,6 +97,31 @@ export class LocationTracker {
     apiClient.post("/tracking/update", payload).catch(() => {});
   }
 
+  private async checkPing() {
+    try {
+      const { data } = await apiClient.get("/tracking/ping-check");
+      const requestedAt = data?.pingRequestedAt ? new Date(data.pingRequestedAt).getTime() : 0;
+      if (requestedAt > this.lastHandledPingAt) {
+        this.lastHandledPingAt = requestedAt;
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const payload = {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: pos.coords.accuracy || 0,
+            };
+            this.lastPosition = payload;
+            this.sendLocation(payload);
+          },
+          () => {},
+          { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+        );
+      }
+    } catch {
+      // Offline or endpoint unavailable — next interval tick tries again.
+    }
+  }
+
   stop() {
     if (this.watchId !== null && typeof window !== "undefined") {
       navigator.geolocation.clearWatch(this.watchId);
@@ -98,6 +130,10 @@ export class LocationTracker {
     if (this.intervalId !== null) {
       clearInterval(this.intervalId);
       this.intervalId = null;
+    }
+    if (this.pingIntervalId !== null) {
+      clearInterval(this.pingIntervalId);
+      this.pingIntervalId = null;
     }
     this.isRunning = false;
     this.lastPosition = null;

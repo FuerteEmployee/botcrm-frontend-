@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState, useEffect } from "react";
-import { Plus, Search, Filter, Mail, Phone, Building2, UserCheck, Trash2, Pencil, MoreVertical, Loader2, LayoutGrid, List, Users, Clock, CheckCircle2, Banknote, Settings as SettingsIcon, X, PlusCircle } from "lucide-react";
+import { useMemo, useState, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { Plus, Search, Filter, Mail, Phone, Building2, UserCheck, Trash2, Pencil, MoreVertical, Loader2, LayoutGrid, List, Users, Clock, CheckCircle2, Banknote, Settings as SettingsIcon, X, PlusCircle, FileSpreadsheet, UploadCloud, AlertCircle, Download } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/shared/page-header";
 import { ActionButton } from "@/components/shared/action-button";
@@ -76,6 +77,36 @@ const STAGE_PROGRESS = {
   won: { count: 5, color: "bg-emerald-500" },
   lost: { count: 5, color: "bg-rose-500" }
 };
+
+// Excel import column map — required columns mirror the Add Lead form's
+// required fields (Full Name, Email, Phone, Company) exactly, so anything
+// that can be created by hand can also be imported.
+const IMPORT_REQUIRED_COLUMNS: { key: string; header: string }[] = [
+  { key: "name", header: "LEAD" },
+  { key: "email", header: "EMAIL" },
+  { key: "phone", header: "PHONE" },
+  { key: "company", header: "COMPANY" },
+];
+const IMPORT_OPTIONAL_COLUMNS: { key: string; header: string }[] = [
+  { key: "source", header: "SOURCE" },
+  { key: "value", header: "VALUE" },
+  { key: "followUpDate", header: "FOLLOW-UP" },
+];
+const normalizeHeader = (h: string) => h.trim().toUpperCase().replace(/\s+/g, " ");
+
+// xlsx is a large library only needed by this one rarely-used dialog, so it's
+// dynamically imported here rather than at module scope — a static import
+// pulled it into the main bundle and pushed it past the PWA plugin's 2MB
+// precache limit, breaking the production build entirely.
+async function downloadImportTemplate() {
+  const XLSX = await import("xlsx");
+  const headers = [...IMPORT_REQUIRED_COLUMNS, ...IMPORT_OPTIONAL_COLUMNS].map(c => c.header);
+  const sample = ["Jane Doe", "jane@example.com", "9876543210", "Acme Corp", "Website", "150000", "2026-08-15"];
+  const ws = XLSX.utils.aoa_to_sheet([headers, sample]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Leads");
+  XLSX.writeFile(wb, "leads-import-template.xlsx");
+}
 
 function formatFollowUpDate(dateStr: string | undefined) {
   if (!dateStr) return { text: "—", className: "text-muted-foreground/50" };
@@ -207,6 +238,106 @@ function LeadsPage() {
 
   // Selection state
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+
+  // Import Leads state
+  const queryClient = useQueryClient();
+  const importFileInputRef = useRef<HTMLInputElement>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importStep, setImportStep] = useState<"select" | "error" | "preview" | "importing" | "done">("select");
+  const [importError, setImportError] = useState("");
+  const [importRows, setImportRows] = useState<Record<string, any>[]>([]);
+  const [importSkipped, setImportSkipped] = useState(0);
+  const [importProgress, setImportProgress] = useState({ done: 0, total: 0, failed: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+
+  const resetImport = () => {
+    setImportStep("select");
+    setImportError("");
+    setImportRows([]);
+    setImportSkipped(0);
+    setImportProgress({ done: 0, total: 0, failed: 0 });
+  };
+
+  const handleImportFile = async (file: File) => {
+    try {
+      const XLSX = await import("xlsx");
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: "array", cellDates: true });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows: Record<string, any>[] = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+
+      if (!rows.length) {
+        setImportError("The file is empty — add at least one lead row below the header.");
+        setImportStep("error");
+        return;
+      }
+
+      const headerMap = new Map(Object.keys(rows[0]).map((h) => [normalizeHeader(h), h]));
+      const missing = IMPORT_REQUIRED_COLUMNS.filter((c) => !headerMap.has(c.header)).map((c) => c.header);
+      if (missing.length > 0) {
+        setImportError(`Excel format is not as required. Missing column(s): ${missing.join(", ")}.`);
+        setImportStep("error");
+        return;
+      }
+
+      const get = (row: Record<string, any>, header: string) => {
+        const actual = headerMap.get(header);
+        return actual ? row[actual] : undefined;
+      };
+
+      const mapped = rows.map((row, i) => {
+        const rawValue = get(row, "VALUE");
+        const rawFollowUp = get(row, "FOLLOW-UP");
+        return {
+          _row: i + 2, // +2: 1-indexed sheet rows, plus the header row
+          name: String(get(row, "LEAD") ?? "").trim(),
+          email: String(get(row, "EMAIL") ?? "").trim(),
+          phone: String(get(row, "PHONE") ?? "").trim(),
+          company: String(get(row, "COMPANY") ?? "").trim(),
+          source: String(get(row, "SOURCE") ?? "").trim() || "Direct",
+          value: rawValue !== undefined && rawValue !== "" ? Number(rawValue) || 0 : 0,
+          followUpDate:
+            rawFollowUp instanceof Date
+              ? rawFollowUp.toISOString().slice(0, 10)
+              : rawFollowUp
+              ? String(rawFollowUp).trim()
+              : "",
+          status: "new",
+        };
+      });
+
+      const valid = mapped.filter((r) => r.name && r.email && r.phone && r.company);
+      if (valid.length === 0) {
+        setImportError("No usable rows found — every row is missing a required value (Lead name, Email, Phone, or Company).");
+        setImportStep("error");
+        return;
+      }
+
+      setImportRows(valid);
+      setImportSkipped(mapped.length - valid.length);
+      setImportStep("preview");
+    } catch (err) {
+      console.error(err);
+      setImportError("Could not read this file. Make sure it's a valid .xlsx, .xls, or .csv file.");
+      setImportStep("error");
+    }
+  };
+
+  const runImport = async () => {
+    setImportStep("importing");
+    let failed = 0;
+    for (let i = 0; i < importRows.length; i++) {
+      const { _row, ...payload } = importRows[i];
+      try {
+        await apiClient.post("/leads", payload);
+      } catch {
+        failed++;
+      }
+      setImportProgress({ done: i + 1, total: importRows.length, failed });
+    }
+    queryClient.invalidateQueries({ queryKey: ["leads"] });
+    setImportStep("done");
+  };
 
   useEffect(() => {
     setView(defaultLayout);
@@ -351,6 +482,16 @@ function LeadsPage() {
               <SettingsIcon className="h-4 w-4 text-muted-foreground" />
               Configure Fields
             </Button>
+            {canCreate ? (
+              <Button
+                size="sm"
+                className="h-10 rounded-xl gap-2 font-semibold bg-[#217346] hover:bg-[#1a5c38] text-white border-none"
+                onClick={() => { resetImport(); setImportOpen(true); }}
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                Import Leads
+              </Button>
+            ) : null}
             {canCreate ? (
               <ActionButton
                 variant="add"
@@ -879,6 +1020,192 @@ function LeadsPage() {
               />
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Import Leads Dialog */}
+      <Dialog open={importOpen} onOpenChange={(o) => { setImportOpen(o); if (!o) resetImport(); }}>
+        <DialogContent className="max-w-lg rounded-2xl max-h-[90vh] flex flex-col overflow-hidden p-0">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/40">
+            <DialogTitle className="text-[16px] font-bold flex items-center gap-2">
+              <FileSpreadsheet className="h-4 w-4 text-primary" /> Import Leads
+            </DialogTitle>
+            <DialogDescription className="text-[12px]">
+              Bulk-create leads from an Excel or CSV file.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+            {importStep === "select" && (
+              <>
+                <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-2">
+                  <p className="text-[12px] font-bold text-foreground/80">Required format</p>
+                  <p className="text-[12px] text-muted-foreground">
+                    The first row must be a header with these column names (any order):
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {IMPORT_REQUIRED_COLUMNS.map((c) => (
+                      <Badge key={c.key} variant="outline" className="text-[10px] font-bold border-primary/30 text-primary bg-primary/5">
+                        {c.header} *
+                      </Badge>
+                    ))}
+                    {IMPORT_OPTIONAL_COLUMNS.map((c) => (
+                      <Badge key={c.key} variant="outline" className="text-[10px] font-bold border-border/60 text-muted-foreground">
+                        {c.header}
+                      </Badge>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    * required — mirrors Full Name, Email, Phone and Company on the Add Lead form. Rows missing any of these are skipped.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={downloadImportTemplate}
+                    className="inline-flex items-center gap-1.5 text-[12px] font-bold text-primary hover:underline"
+                  >
+                    <Download className="h-3.5 w-3.5" /> Download sample template
+                  </button>
+                </div>
+
+                <div
+                  onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragging(false);
+                    const file = e.dataTransfer.files?.[0];
+                    if (file) handleImportFile(file);
+                  }}
+                  className={cn(
+                    "rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-3 py-10 px-6 text-center transition-colors",
+                    isDragging ? "border-primary bg-primary/5" : "border-border/60 bg-muted/10"
+                  )}
+                >
+                  <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
+                    <UploadCloud className="h-6 w-6 text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-[13px] font-bold text-foreground/80">Drag and drop your file here</p>
+                    <p className="text-[11px] text-muted-foreground">.xlsx, .xls or .csv</p>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="rounded-xl font-semibold"
+                    onClick={() => importFileInputRef.current?.click()}
+                  >
+                    Select File
+                  </Button>
+                  <input
+                    ref={importFileInputRef}
+                    type="file"
+                    accept=".xlsx,.xls,.csv"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleImportFile(file);
+                      e.target.value = "";
+                    }}
+                  />
+                </div>
+              </>
+            )}
+
+            {importStep === "error" && (
+              <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-destructive shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-[13px] font-bold text-destructive">Excel format is not as required</p>
+                  <p className="text-[12px] text-destructive/80">{importError}</p>
+                </div>
+              </div>
+            )}
+
+            {importStep === "preview" && (
+              <div className="space-y-3">
+                <div className="rounded-xl border border-success/30 bg-success/5 p-4">
+                  <p className="text-[13px] font-bold text-success">{importRows.length} lead{importRows.length === 1 ? "" : "s"} ready to import</p>
+                  {importSkipped > 0 && (
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      {importSkipped} row{importSkipped === 1 ? "" : "s"} skipped — missing Lead name, Email, Phone, or Company.
+                    </p>
+                  )}
+                </div>
+                <div className="rounded-xl border border-border/40 overflow-hidden">
+                  <table className="w-full text-[11px]">
+                    <thead className="bg-muted/30 text-muted-foreground font-bold uppercase tracking-wide">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Lead</th>
+                        <th className="px-3 py-2 text-left">Company</th>
+                        <th className="px-3 py-2 text-left">Source</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/30">
+                      {importRows.slice(0, 5).map((r, i) => (
+                        <tr key={i}>
+                          <td className="px-3 py-2 font-semibold text-foreground/80">{r.name}</td>
+                          <td className="px-3 py-2 text-muted-foreground">{r.company}</td>
+                          <td className="px-3 py-2 text-muted-foreground">{r.source}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {importRows.length > 5 && (
+                    <p className="text-[11px] text-muted-foreground text-center py-2 bg-muted/10">
+                      + {importRows.length - 5} more
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {importStep === "importing" && (
+              <div className="flex flex-col items-center justify-center gap-3 py-10">
+                <Loader2 className="h-6 w-6 text-primary animate-spin" />
+                <p className="text-[13px] font-semibold text-foreground/80">
+                  Importing {importProgress.done} of {importProgress.total}...
+                </p>
+                <div className="w-full h-2 rounded-full bg-muted/40 overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all"
+                    style={{ width: `${importProgress.total ? (importProgress.done / importProgress.total) * 100 : 0}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {importStep === "done" && (
+              <div className="rounded-xl border border-success/30 bg-success/5 p-4 flex items-start gap-3">
+                <CheckCircle2 className="h-5 w-5 text-success shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-[13px] font-bold text-success">
+                    Imported {importProgress.total - importProgress.failed} of {importProgress.total} leads
+                  </p>
+                  {importProgress.failed > 0 && (
+                    <p className="text-[12px] text-muted-foreground">{importProgress.failed} row(s) failed to save — please check and add them manually.</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="px-6 py-4 border-t border-border/40 gap-2 bg-muted/20">
+            {importStep === "error" && (
+              <Button type="button" variant="outline" className="rounded-xl" onClick={resetImport}>Try Again</Button>
+            )}
+            {importStep === "preview" && (
+              <>
+                <Button type="button" variant="ghost" className="rounded-xl" onClick={resetImport}>Back</Button>
+                <ActionButton variant="add" showLabel label={`Import ${importRows.length} Lead${importRows.length === 1 ? "" : "s"}`} icon={UploadCloud} onClick={runImport} />
+              </>
+            )}
+            {(importStep === "select" || importStep === "done") && (
+              <Button type="button" variant="ghost" className="rounded-xl" onClick={() => setImportOpen(false)}>
+                {importStep === "done" ? "Close" : "Cancel"}
+              </Button>
+            )}
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

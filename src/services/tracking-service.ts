@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { canUseSocket, getSocket } from "@/lib/socket-client";
 
@@ -128,4 +129,49 @@ export function useTrackingService() {
   }, []);
 
   return { locations, isLoading };
+}
+
+export interface TrackingStats {
+  liveNow: number;
+  offline: number;
+  trackingPoints: number;
+  fieldStaff: number;
+}
+
+export function useTrackingStats() {
+  const { data, isLoading, refetch } = useQuery<TrackingStats>({
+    queryKey: ["tracking-stats"],
+    queryFn: async () => {
+      const { data } = await apiClient.get("/tracking/stats");
+      return data;
+    },
+    refetchInterval: 30000,
+  });
+
+  return { stats: data, isLoading, refetch };
+}
+
+// One employee's full route for a given day (YYYY-MM-DD, defaults to today) —
+// powers the map's polyline + Start/End markers + distance readout.
+export function useTrackingHistory(employeeId: string | undefined, date: string) {
+  const { data, isLoading, refetch } = useQuery<{ points: Location[]; distanceKm: number }>({
+    queryKey: ["tracking-history", employeeId, date],
+    queryFn: async () => {
+      const { data } = await apiClient.get("/tracking/history", { params: { employeeId, date } });
+      return data;
+    },
+    enabled: !!employeeId,
+    refetchInterval: 30000,
+  });
+
+  return { points: data?.points ?? [], distanceKm: data?.distanceKm ?? 0, isLoading, refetch };
+}
+
+export function usePingEmployee() {
+  return useMutation({
+    mutationFn: async (employeeId: string) => {
+      const { data } = await apiClient.post(`/tracking/ping/${employeeId}`);
+      return data;
+    },
+  });
 }

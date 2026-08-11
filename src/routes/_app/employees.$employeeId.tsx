@@ -33,7 +33,10 @@ import {
   Square,
   ArrowLeft,
   ChevronDown,
-  ListChecks
+  ListChecks,
+  ScanFace,
+  Fingerprint,
+  Smartphone
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { ActionButton } from "@/components/shared/action-button";
@@ -48,7 +51,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { useAttendanceService, type AttendanceRecord } from "@/services/attendance-service";
-import { cn } from "@/lib/utils";
+import { cn, toISTDateKey } from "@/lib/utils";
 import { useEmployeeService } from "@/services/employee-service";
 import { useDepartmentService } from "@/services/department-service";
 import { useBranchService } from "@/services/branch-service";
@@ -118,6 +121,71 @@ function EmployeeDetailsPage() {
   const [selectedLog, setSelectedLog] = useState<AttendanceRecord | null>(null);
   const [showAllSessions, setShowAllSessions] = useState(false);
 
+  // Attendance records are keyed to IST midnight server-side regardless of
+  // the server's own timezone (see istStartOfDay in the backend). Comparing
+  // via the browser's local Date getters instead of toISTDateKey would
+  // silently disagree with the server for most of the day whenever the
+  // browser isn't itself running in IST.
+  const isRecordToday = (dateStr: string) => toISTDateKey(dateStr) === toISTDateKey(new Date());
+  const isRecordInMonth = (dateStr: string, monthCursor: Date) => {
+    const [y, m] = toISTDateKey(dateStr).split("-").map(Number);
+    return y === monthCursor.getFullYear() && m - 1 === monthCursor.getMonth();
+  };
+  const isSameMonth = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+
+  // Drives the "Start/End Lunch" control in the log header — always about
+  // *today's* punch, independent of whatever month is currently browsed.
+  const todayLog = allAttendance.find((l) => isRecordToday(l.date));
+
+  const monthLogs = useMemo(
+    () =>
+      [...allAttendance]
+        .filter((l) => isRecordInMonth(l.date, currentMonth))
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()),
+    [allAttendance, currentMonth]
+  );
+
+  const monthStats = useMemo(() => ({
+    present: monthLogs.filter((l) => l.status === "present" || l.status === "late").length,
+    absent: monthLogs.filter((l) => l.status === "absent").length,
+    halfDay: monthLogs.filter((l) => l.status === "half-day").length,
+    wfh: monthLogs.filter((l) => l.isWFH).length,
+  }), [monthLogs]);
+
+  const totalWorkingHours = useMemo(() => {
+    const totalMs = monthLogs.reduce((sum, log) => {
+      const sessions = log.shifts?.length ? log.shifts : [{ punchIn: log.punchIn, punchOut: log.punchOut }];
+      return sum + sessions.reduce((s, sess) => {
+        if (sess.punchIn && sess.punchOut) {
+          return s + (new Date(sess.punchOut).getTime() - new Date(sess.punchIn).getTime());
+        }
+        return s;
+      }, 0);
+    }, 0);
+    const hours = Math.floor(totalMs / (1000 * 60 * 60));
+    const minutes = Math.floor((totalMs % (1000 * 60 * 60)) / (1000 * 60));
+    return `${hours} : ${String(minutes).padStart(2, "0")} h`;
+  }, [monthLogs]);
+
+  const isCurrentMonth = isSameMonth(currentMonth, new Date());
+  const monthLabel = currentMonth.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  const goToPrevMonth = () => setCurrentMonth((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1));
+  const goToNextMonth = () => setCurrentMonth((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1));
+
+  // Lens syncs every arrival/departure (including lunch) as a generic
+  // punch-in/punch-out, so today's `punchOut` may just be the most recent
+  // lunch-out, not the real end of day — only trust it once the day is over.
+  // "Lens Info" (below) shows every raw event for today regardless.
+  const getDisplayPunchOut = (l: AttendanceRecord) =>
+    l.source === "lens" && isRecordToday(l.date) ? null : l.punchOut;
+
+  const SOURCE_META: Record<string, { icon: typeof ScanFace; label: string }> = {
+    lens: { icon: ScanFace, label: "Lens (camera)" },
+    biometric: { icon: Fingerprint, label: "Biometric device" },
+    app: { icon: Smartphone, label: "Phone app" },
+  };
+  const getSourceMeta = (l: AttendanceRecord) => SOURCE_META[l.source || "app"];
+
   useEffect(() => {
     setHasMounted(true);
   }, []);
@@ -184,7 +252,6 @@ function EmployeeDetailsPage() {
     
     return parts.length > 0 ? parts.join(" ") : "Joined today";
   })();
-  const logs = allAttendance;
 
   // --- Expected Salary Calculation Logic ---
   const c = (employee?.salaryComponents || {}) as Record<string, any>;
@@ -635,10 +702,10 @@ function EmployeeDetailsPage() {
             {/* Quick Stats */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {[
-                { label: "Present Days", value: "18", icon: CalendarCheck, color: "text-success bg-success/10" },
-                { label: "Absent Days", value: "01", icon: CalendarX, color: "text-red-500 bg-red-50" },
-                { label: "Half Days", value: "02", icon: Clock, color: "text-amber-500 bg-amber-50" },
-                { label: "WFH Sessions", value: "00", icon: MapPin, color: "text-blue-500 bg-blue-50" },
+                { label: "Present Days", value: String(monthStats.present).padStart(2, "0"), icon: CalendarCheck, color: "text-success bg-success/10" },
+                { label: "Absent Days", value: String(monthStats.absent).padStart(2, "0"), icon: CalendarX, color: "text-red-500 bg-red-50" },
+                { label: "Half Days", value: String(monthStats.halfDay).padStart(2, "0"), icon: Clock, color: "text-amber-500 bg-amber-50" },
+                { label: "WFH Sessions", value: String(monthStats.wfh).padStart(2, "0"), icon: MapPin, color: "text-blue-500 bg-blue-50" },
               ].map((stat, i) => (
                 <Card key={i} className="border-none shadow-elegant overflow-hidden group">
                   <CardContent className="p-6 flex items-center justify-between">
@@ -666,9 +733,9 @@ function EmployeeDetailsPage() {
                       <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Track punch-in, breaks, and punch-out history.</p>
                     </div>
                     <div className="flex items-center gap-2">
-                      {logs.length > 0 && logs[0].punchIn && !logs[0].punchOut && (
+                      {todayLog?.punchIn && !todayLog?.punchOut && (
                         <>
-                          {!(logs[0].lunchInTime && !logs[0].lunchOutTime) ? (
+                          {!(todayLog.lunchInTime && !todayLog.lunchOutTime) ? (
                             <ActionButton
                               variant="approve"
                               showLabel
@@ -689,7 +756,7 @@ function EmployeeDetailsPage() {
                           )}
                         </>
                       )}
-                      <Badge variant="outline" className="bg-primary/5 text-primary h-7">April 2025</Badge>
+                      <Badge variant="outline" className="bg-primary/5 text-primary h-7">{monthLabel}</Badge>
                     </div>
                   </CardHeader>
                   <CardContent className="p-0">
@@ -706,7 +773,14 @@ function EmployeeDetailsPage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border/40">
-                          {logs.map((log) => {
+                          {monthLogs.length === 0 && (
+                            <tr>
+                              <td colSpan={6} className="px-6 py-10 text-center text-xs font-medium text-muted-foreground">
+                                No attendance records for {monthLabel}.
+                              </td>
+                            </tr>
+                          )}
+                          {monthLogs.map((log) => {
                             const formatTime = (date?: string) => date ? new Date(date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : "--";
                             return (
                               <tr
@@ -726,21 +800,31 @@ function EmployeeDetailsPage() {
                                     <span className="text-muted-foreground/30">—</span>
                                   )}
                                 </td>
-                                <td className="px-6 py-4 text-center text-muted-foreground font-medium text-xs">{formatTime(log.punchOut)}</td>
+                                <td className="px-6 py-4 text-center text-muted-foreground font-medium text-xs">{formatTime(getDisplayPunchOut(log) ?? undefined)}</td>
                                 <td className="px-6 py-4 text-center">
                                   <Badge variant="secondary" className="font-medium text-[9px] px-1.5 py-0 bg-muted/50 text-muted-foreground border-none">
-                                    {log.punchIn && log.punchOut ? `${Math.round((new Date(log.punchOut).getTime() - new Date(log.punchIn).getTime()) / (1000 * 60 * 60))}h` : "0h"}
+                                    {log.punchIn && getDisplayPunchOut(log) ? `${Math.round((new Date(getDisplayPunchOut(log)!).getTime() - new Date(log.punchIn).getTime()) / (1000 * 60 * 60))}h` : "0h"}
                                   </Badge>
                                 </td>
                                 <td className="px-6 py-4 text-right">
-                                  <span className={cn(
-                                    "inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide",
-                                    log.status === "present" ? "bg-success/10 text-success" :
-                                      log.status === "absent" ? "bg-red-50 text-red-500" :
-                                        "bg-amber-50 text-amber-500"
-                                  )}>
-                                    {log.status}
-                                  </span>
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <span className={cn(
+                                      "inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide",
+                                      log.status === "present" ? "bg-success/10 text-success" :
+                                        log.status === "absent" ? "bg-red-50 text-red-500" :
+                                          "bg-amber-50 text-amber-500"
+                                    )}>
+                                      {log.status}
+                                    </span>
+                                    {(() => {
+                                      const { icon: SourceIcon, label } = getSourceMeta(log);
+                                      return (
+                                        <span title={label} className="text-muted-foreground/50">
+                                          <SourceIcon className="h-3.5 w-3.5" />
+                                        </span>
+                                      );
+                                    })()}
+                                  </div>
                                 </td>
                               </tr>
                             );
@@ -760,21 +844,21 @@ function EmployeeDetailsPage() {
                   </CardHeader>
                   <CardContent className="p-6">
                     <div className="flex items-center justify-between mb-6">
-                      <Button variant="ghost" size="icon" className="rounded-xl h-10 w-10 border border-border/60">
+                      <Button variant="ghost" size="icon" className="rounded-xl h-10 w-10 border border-border/60" onClick={goToPrevMonth}>
                         <ChevronLeft className="h-5 w-5" />
                       </Button>
                       <div className="text-center">
-                        <p className="text-lg font-bold">April 2025</p>
-                        <p className="text-xs text-muted-foreground font-medium uppercase tracking-widest">Active Period</p>
+                        <p className="text-lg font-bold">{monthLabel}</p>
+                        <p className="text-xs text-muted-foreground font-medium uppercase tracking-widest">{isCurrentMonth ? "Active Period" : "Selected Period"}</p>
                       </div>
-                      <Button variant="ghost" size="icon" className="rounded-xl h-10 w-10 border border-border/60">
+                      <Button variant="ghost" size="icon" className="rounded-xl h-10 w-10 border border-border/60" onClick={goToNextMonth} disabled={isCurrentMonth}>
                         <ChevronRight className="h-5 w-5" />
                       </Button>
                     </div>
                     <div className="space-y-4 pt-4 border-t border-border/40">
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-muted-foreground font-medium">Total Working Hours</span>
-                        <span className="font-bold text-primary">169 : 18 h</span>
+                        <span className="font-bold text-primary">{totalWorkingHours}</span>
                       </div>
                       <div className="flex items-center justify-between text-sm">
                         <span className="text-muted-foreground font-medium">Estimated Net Salary</span>
@@ -818,7 +902,7 @@ function EmployeeDetailsPage() {
                 <div className="flex items-center justify-between">
                   <DialogTitle className="text-xl font-bold">Attendance Detail</DialogTitle>
                   <div className="flex items-center gap-2">
-                    {(selectedLog.shifts?.length ?? 0) > 0 && (
+                    {selectedLog.source === "lens" && (selectedLog.shifts?.length ?? 0) > 0 && (
                       <button
                         type="button"
                         onClick={() => setShowAllSessions((v) => !v)}
@@ -974,7 +1058,7 @@ function EmployeeDetailsPage() {
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
                             <Clock className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-lg font-semibold">{selectedLog.punchOut ? new Date(selectedLog.punchOut).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "Still at Office"}</span>
+                            <span className="text-lg font-semibold">{getDisplayPunchOut(selectedLog) ? new Date(getDisplayPunchOut(selectedLog)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "Still at Office"}</span>
                           </div>
                           <Badge variant="outline" className="text-[10px] bg-slate-50 text-slate-500 border-slate-200">EXIT</Badge>
                         </div>
@@ -986,7 +1070,7 @@ function EmployeeDetailsPage() {
                     </div>
                     <div className="flex flex-col items-center gap-2">
                       <div className="w-32 h-32 rounded-xl overflow-hidden shadow-md border border-border/50 bg-white flex items-center justify-center transition-transform hover:scale-105">
-                        {selectedLog.punchOutPhoto && selectedLog.punchOut ? (
+                        {selectedLog.punchOutPhoto && getDisplayPunchOut(selectedLog) ? (
                           <img src={selectedLog.punchOutPhoto} alt="Logout Selfie" className="w-full h-full object-cover" />
                         ) : (
                           <div className="flex flex-col items-center text-muted-foreground/30">
