@@ -533,8 +533,8 @@ function SettingsPage() {
                         <div className="space-y-3">
                           <div className="flex items-center justify-between p-4 rounded-xl bg-muted/20 border border-border/40">
                             <div>
-                              <div className="text-[13px] font-bold">Sandwich Rule</div>
-                              <div className="text-[11px] text-muted-foreground">Weekly-off/holiday flanked by absent on both sides becomes LOP.</div>
+                              <div className="text-[13px] font-bold">Sandwich Rule (Sunday / Weekly Off Pay)</div>
+                              <div className="text-[11px] text-muted-foreground">When enabled, Sunday & weekly off-day salary is not paid if flanking days (Saturday & Monday) are absent.</div>
                             </div>
                             <Switch checked={payroll.sandwichRuleEnabled} onCheckedChange={(v) => setPayroll(p => ({ ...p, sandwichRuleEnabled: v }))} />
                           </div>
