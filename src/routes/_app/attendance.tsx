@@ -296,34 +296,14 @@ function AttendancePage() {
     status: "present" as any
   });
 
-<<<<<<< Updated upstream
-  // Local YYYY-MM-DD key. toISOString() keys days in UTC, which rolls IST
-  // midnight timestamps (stored as the previous day's 18:30 UTC) to the wrong
-  // day — always use local date components instead, matching how the backend
-  // buckets attendance records (see backend attendance_helpers.toLocalDateKey).
-  const toLocalDateStr = (date: Date | string) => {
-    const d = new Date(date);
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-  };
-
-  // Default date filter = today
-  const todayStr = toLocalDateStr(new Date());
-=======
   // Default date filter = today (IST — matches how the backend keys each
   // attendance record's `date`, regardless of the browser's own timezone)
   const todayStr = toISTDateKey(new Date());
->>>>>>> Stashed changes
   const [dateFilter, setDateFilter] = useState<string>(todayStr);
 
   // Punched in but not yet punched out — shown as "On Duty"
   const getDisplayStatus = (t: AttendanceRecord) => (t.punchIn && !t.punchOut ? "on-duty" : t.status);
 
-<<<<<<< Updated upstream
-  const todayList = list.filter((t) => t.date && toLocalDateStr(t.date) === todayStr);
-=======
   const isToday = (dateStr?: string) => !!dateStr && toISTDateKey(dateStr) === todayStr;
 
   // Lens syncs every arrival/departure (including lunch) as a generic
@@ -341,7 +321,6 @@ function AttendancePage() {
   const getSourceMeta = (t: AttendanceRecord) => SOURCE_META[t.source || "app"];
 
   const todayList = list.filter((t) => isToday(t.date));
->>>>>>> Stashed changes
   const counts = {
     all: todayList.length,
     present: todayList.filter((t) => ["present", "late", "wfh", "half-day"].includes(t.status)).length,
@@ -372,11 +351,7 @@ function AttendancePage() {
       const displayStatus = getDisplayStatus(t);
       const matchesTab = tab === "all" || displayStatus === tab || t.status === tab;
       const matchesSearch = !search || name.toLowerCase().includes(search.toLowerCase());
-<<<<<<< Updated upstream
-      const matchesDate = !dateFilter || (t.date && toLocalDateStr(t.date) === dateFilter);
-=======
       const matchesDate = !dateFilter || (!!t.date && toISTDateKey(t.date) === dateFilter);
->>>>>>> Stashed changes
       const matchesShift = shiftFilter === "all" || t.employeeId?.shiftId?._id === shiftFilter;
       return matchesTab && matchesSearch && matchesDate && matchesShift;
     });
