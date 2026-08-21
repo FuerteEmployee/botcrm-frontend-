@@ -306,12 +306,29 @@ function AttendancePage() {
 
   const isToday = (dateStr?: string) => !!dateStr && toISTDateKey(dateStr) === todayStr;
 
-  // Lens syncs every arrival/departure (including lunch) as a generic
-  // punch-in/punch-out, so today's `punchOut` may just be the most recent
-  // lunch-out, not the real end of day — only trust it once the day is over.
-  // Use "Lens Info" (below) to see every raw event for today regardless.
+  // Lens/biometric devices only send a generic punch-in/punch-out toggle —
+  // they can't tell a lunch break from the real end of day, so today's
+  // `punchOut` may just be the most recent lunch-out. Only trust it once the
+  // day is over. Use "Lens Info" (below) to see every raw event for today
+  // regardless.
+  const isDeviceSource = (t: AttendanceRecord) => t.source === "lens" || t.source === "biometric";
+
+  // Once the employee explicitly punches out via the app, punchOutIsProvisional
+  // is cleared server-side even on a Lens-started day — so this shows their
+  // real exit immediately instead of waiting for the day to pass.
   const getDisplayPunchOut = (t: AttendanceRecord) =>
-    t.source === "lens" && isToday(t.date) ? null : t.punchOut;
+    t.punchOutIsProvisional && isToday(t.date) ? null : t.punchOut;
+
+  // A same-day re-entry (multiple shifts) on a device-sourced record means the
+  // earlier "punch-out" was actually the employee leaving for lunch, and the
+  // following "punch-in" was their return — surface those as Lunch In/Out
+  // instead of leaving the dedicated fields blank (devices never call the
+  // app's own lunch-in/lunch-out endpoints).
+  const getDisplayLunchIn = (t: AttendanceRecord) =>
+    t.lunchInTime || (isDeviceSource(t) && (t.shifts?.length ?? 0) >= 1 ? t.shifts![0]?.punchOut : undefined);
+
+  const getDisplayLunchOut = (t: AttendanceRecord) =>
+    t.lunchOutTime || (isDeviceSource(t) && (t.shifts?.length ?? 0) >= 2 ? t.shifts![t.shifts!.length - 1]?.punchIn : undefined);
 
   const SOURCE_META: Record<string, { icon: typeof ScanFace; label: string }> = {
     lens: { icon: ScanFace, label: "Lens (camera)" },
@@ -657,7 +674,7 @@ function AttendancePage() {
                       <ClockIcon className="h-2.5 w-2.5" /> Lunch In
                     </p>
                     <p className="text-[12px] font-mono font-bold text-foreground">
-                      {t.lunchInTime ? new Date(t.lunchInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                      {getDisplayLunchIn(t) ? new Date(getDisplayLunchIn(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
                     </p>
                   </div>
                   <div className="p-2 rounded-lg bg-muted/30 border border-border/40">
@@ -665,7 +682,7 @@ function AttendancePage() {
                       <ClockIcon className="h-2.5 w-2.5" /> Lunch Out
                     </p>
                     <p className="text-[12px] font-mono font-bold text-foreground">
-                      {t.lunchOutTime ? new Date(t.lunchOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                      {getDisplayLunchOut(t) ? new Date(getDisplayLunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
                     </p>
                   </div>
                   <div className="p-2 rounded-lg bg-muted/30 border border-border/40">
@@ -739,10 +756,10 @@ function AttendancePage() {
                     {t.punchIn ? new Date(t.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
                   </DataTableCell>
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {t.lunchInTime ? new Date(t.lunchInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                    {getDisplayLunchIn(t) ? new Date(getDisplayLunchIn(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
                   </DataTableCell>
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {t.lunchOutTime ? new Date(t.lunchOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                    {getDisplayLunchOut(t) ? new Date(getDisplayLunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
                   </DataTableCell>
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
                     {getDisplayPunchOut(t) ? new Date(getDisplayPunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
@@ -1247,12 +1264,12 @@ function AttendancePage() {
                 <Card className="p-4 bg-muted/20 border-border/40 rounded-2xl shadow-none space-y-2">
                   <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Lunch Break</p>
                   <div className="flex items-center justify-between text-[13px] font-mono font-bold text-foreground">
-                    <span>{detailRecord.lunchInTime ? new Date(detailRecord.lunchInTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
+                    <span>{getDisplayLunchIn(detailRecord) ? new Date(getDisplayLunchIn(detailRecord)!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
                     <span className="text-muted-foreground font-sans font-normal text-[11px]">to</span>
-                    <span>{detailRecord.lunchOutTime ? new Date(detailRecord.lunchOutTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
+                    <span>{getDisplayLunchOut(detailRecord) ? new Date(getDisplayLunchOut(detailRecord)!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
                   </div>
-                  {detailRecord.lunchInTime && detailRecord.lunchOutTime && (() => {
-                    const mins = Math.round((new Date(detailRecord.lunchOutTime).getTime() - new Date(detailRecord.lunchInTime).getTime()) / 60000);
+                  {getDisplayLunchIn(detailRecord) && getDisplayLunchOut(detailRecord) && (() => {
+                    const mins = Math.round((new Date(getDisplayLunchOut(detailRecord)!).getTime() - new Date(getDisplayLunchIn(detailRecord)!).getTime()) / 60000);
                     return mins > maxLunchMinutes ? (
                       <Badge variant="outline" className="bg-destructive/10 text-destructive border-destructive/20 text-[9px] gap-1 py-0 px-1.5 font-bold">
                         <ShieldAlert className="h-3 w-3" /> Lunch overrun ({mins}m over {maxLunchMinutes}m limit)

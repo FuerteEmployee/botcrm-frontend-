@@ -37,6 +37,8 @@ interface AttendanceLog {
   lunchOutTime?: string;
   isWFH?: boolean;
   status: "present" | "absent" | "half-day" | "late" | "weekly-off" | "festival";
+  source?: "app" | "lens" | "biometric";
+  punchOutIsProvisional?: boolean;
   remarks?: string;
   address?: string;
   punchInPhoto?: string;
@@ -301,8 +303,27 @@ function UserDashboard() {
   );
 
   const todayLog = profile?.todayAttendance;
+
+  // Lens/biometric devices only send a generic punch-in/punch-out toggle —
+  // they can't tell a lunch break from the real end of day. A same-day
+  // re-entry (multiple shifts) means the earlier "punch-out" was actually the
+  // employee leaving for lunch, and the following "punch-in" was their
+  // return, so surface those as Lunch In/Out and never trust a device
+  // punch-out as final while still viewing today. The employee's own
+  // explicit Punch Out button (source "app") is always trusted immediately.
+  const isDeviceSource = todayLog?.source === "lens" || todayLog?.source === "biometric";
+  const deviceShifts = todayLog?.shifts || [];
+  const displayLunchInTime = todayLog?.lunchInTime ||
+    (isDeviceSource && deviceShifts.length >= 1 ? deviceShifts[0]?.punchOut : undefined);
+  const displayLunchOutTime = todayLog?.lunchOutTime ||
+    (isDeviceSource && deviceShifts.length >= 2 ? deviceShifts[deviceShifts.length - 1]?.punchIn : undefined);
+  // Cleared server-side the moment the employee explicitly punches out via
+  // the app, even on a day that started via Lens — so an app punch-out
+  // always shows immediately instead of waiting for "today" to pass.
+  const displayPunchOut = todayLog?.punchOutIsProvisional ? undefined : todayLog?.punchOut;
+
   const isPunchedIn = !!todayLog?.punchIn;
-  const isPunchedOut = !!todayLog?.punchOut;
+  const isPunchedOut = !!displayPunchOut;
 
   // Real-time location tracking lifecycle. Tracking is enabled per-employee by
   // the admin (profile.trackingEnabled) — employees no longer choose. It runs
@@ -319,7 +340,7 @@ function UserDashboard() {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   useEffect(() => {
-    if (todayLog?.punchIn && !todayLog?.punchOut) {
+    if (todayLog?.punchIn && !displayPunchOut) {
       const calculateDiff = () => {
         const diffMs = new Date().getTime() - new Date(todayLog.punchIn!).getTime();
         setElapsedSeconds(Math.floor(diffMs / 1000));
@@ -969,19 +990,19 @@ function UserDashboard() {
                   <div>
                     <span className="text-[8px] font-semibold text-white/40 uppercase tracking-wider block">PUNCH-OUT</span>
                     <span className="text-[13.5px] font-medium text-white block mt-0.5">
-                      {formatTimeStr(todayLog?.punchOut)}
+                      {formatTimeStr(displayPunchOut)}
                     </span>
                   </div>
                   <div>
                     <span className="text-[7.5px] font-semibold text-white/30 uppercase tracking-wider block">LUNCH-IN</span>
                     <span className="text-[11.5px] font-normal text-white/80 block mt-0.5">
-                      {formatTimeStr(todayLog?.lunchInTime)}
+                      {formatTimeStr(displayLunchInTime)}
                     </span>
                   </div>
                   <div>
                     <span className="text-[7.5px] font-semibold text-white/30 uppercase tracking-wider block">LUNCH-OUT</span>
                     <span className="text-[11.5px] font-normal text-white/80 block mt-0.5">
-                      {formatTimeStr(todayLog?.lunchOutTime)}
+                      {formatTimeStr(displayLunchOutTime)}
                     </span>
                   </div>
                 </div>
@@ -1055,7 +1076,7 @@ function UserDashboard() {
               // Punched in, not punched out
               <div className="flex flex-col gap-3">
                 {/* Lunch states layout */}
-                {!todayLog?.lunchInTime ? (
+                {!displayLunchInTime ? (
                   // Punched In but hasn't started lunch: Can start lunch OR punch out
                   <div className="grid grid-cols-2 gap-3">
                     <Button
@@ -1080,7 +1101,7 @@ function UserDashboard() {
                       )}
                     </Button>
                   </div>
-                ) : !todayLog?.lunchOutTime ? (
+                ) : !displayLunchOutTime ? (
                   // Currently on lunch: Must end lunch break
                   <Button
                     onClick={() => lunchOutMutation.mutate()}
@@ -1152,7 +1173,7 @@ function UserDashboard() {
                     <span className="text-[9.5px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Total Worked Today</span>
                   </div>
                   <span className="text-[13px] font-mono font-bold text-slate-700 dark:text-slate-200">
-                    {formatWorkedDuration(todayLog?.punchIn, todayLog?.punchOut)}
+                    {formatWorkedDuration(todayLog?.punchIn, displayPunchOut)}
                   </span>
                 </div>
 

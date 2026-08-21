@@ -28,6 +28,9 @@ export interface AttendanceRecord {
   lunchOutDistance?: number | null;
   status: 'present' | 'absent' | 'half-day' | 'late' | 'wfh';
   source?: 'app' | 'lens' | 'biometric';
+  // True while `punchOut` was set by a device (Lens/biometric) tap and never
+  // finalized by an explicit app punch-out — it may just be a lunch-out.
+  punchOutIsProvisional?: boolean;
   isWFH?: boolean;
   wasLate?: boolean;
   remarks?: string;
