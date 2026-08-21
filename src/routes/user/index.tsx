@@ -304,19 +304,12 @@ function UserDashboard() {
 
   const todayLog = profile?.todayAttendance;
 
-  // Lens/biometric devices only send a generic punch-in/punch-out toggle —
-  // they can't tell a lunch break from the real end of day. A same-day
-  // re-entry (multiple shifts) means the earlier "punch-out" was actually the
-  // employee leaving for lunch, and the following "punch-in" was their
-  // return, so surface those as Lunch In/Out and never trust a device
-  // punch-out as final while still viewing today. The employee's own
-  // explicit Punch Out button (source "app") is always trusted immediately.
+  // Lens/biometric devices never call the app's own lunch-in/lunch-out
+  // endpoints, so their raw re-entries aren't reliably "lunch" — don't guess
+  // here. "Lens Info" (below) shows every raw event for today instead.
   const isDeviceSource = todayLog?.source === "lens" || todayLog?.source === "biometric";
-  const deviceShifts = todayLog?.shifts || [];
-  const displayLunchInTime = todayLog?.lunchInTime ||
-    (isDeviceSource && deviceShifts.length >= 1 ? deviceShifts[0]?.punchOut : undefined);
-  const displayLunchOutTime = todayLog?.lunchOutTime ||
-    (isDeviceSource && deviceShifts.length >= 2 ? deviceShifts[deviceShifts.length - 1]?.punchIn : undefined);
+  const displayLunchInTime = isDeviceSource ? undefined : todayLog?.lunchInTime;
+  const displayLunchOutTime = isDeviceSource ? undefined : todayLog?.lunchOutTime;
   // Cleared server-side the moment the employee explicitly punches out via
   // the app, even on a day that started via Lens — so an app punch-out
   // always shows immediately instead of waiting for "today" to pass.

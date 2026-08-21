@@ -319,16 +319,13 @@ function AttendancePage() {
   const getDisplayPunchOut = (t: AttendanceRecord) =>
     t.punchOutIsProvisional && isToday(t.date) ? null : t.punchOut;
 
-  // A same-day re-entry (multiple shifts) on a device-sourced record means the
-  // earlier "punch-out" was actually the employee leaving for lunch, and the
-  // following "punch-in" was their return — surface those as Lunch In/Out
-  // instead of leaving the dedicated fields blank (devices never call the
-  // app's own lunch-in/lunch-out endpoints).
-  const getDisplayLunchIn = (t: AttendanceRecord) =>
-    t.lunchInTime || (isDeviceSource(t) && (t.shifts?.length ?? 0) >= 1 ? t.shifts![0]?.punchOut : undefined);
+  // Device-sourced (lens/biometric) records never call the app's own
+  // lunch-in/lunch-out endpoints, so their raw re-entries aren't reliably
+  // "lunch" — don't guess here. Admin can see every raw tap for the day via
+  // "Lens Info" instead.
+  const getDisplayLunchIn = (t: AttendanceRecord) => (isDeviceSource(t) ? undefined : t.lunchInTime);
 
-  const getDisplayLunchOut = (t: AttendanceRecord) =>
-    t.lunchOutTime || (isDeviceSource(t) && (t.shifts?.length ?? 0) >= 2 ? t.shifts![t.shifts!.length - 1]?.punchIn : undefined);
+  const getDisplayLunchOut = (t: AttendanceRecord) => (isDeviceSource(t) ? undefined : t.lunchOutTime);
 
   const SOURCE_META: Record<string, { icon: typeof ScanFace; label: string }> = {
     lens: { icon: ScanFace, label: "Lens (camera)" },
