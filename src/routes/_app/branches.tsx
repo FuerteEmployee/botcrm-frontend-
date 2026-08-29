@@ -26,6 +26,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useBranchService, type Branch as BackendBranch } from "@/services/branch-service";
+import { acquirePosition, openLocationSettings } from "@/lib/geolocation";
 
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { useLayoutSettings } from "@/hooks/use-layout-settings";
@@ -98,28 +99,27 @@ function BranchesPage() {
 
   if (!hasMounted) return null;
 
-  const fetchLocation = () => {
-    if (!navigator.geolocation) {
-      toast.error("Geolocation is not supported by your browser");
-      return;
-    }
+  const fetchLocation = async () => {
     setFetchingLoc(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setForm(prev => ({
-          ...prev,
-          latitude: parseFloat(pos.coords.latitude.toFixed(6)),
-          longitude: parseFloat(pos.coords.longitude.toFixed(6))
-        }));
-        setFetchingLoc(false);
-        toast.success("High-precision location fetched");
-      },
-      (err) => {
-        setFetchingLoc(false);
-        toast.error("Failed to fetch location: " + err.message);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
+    const res = await acquirePosition({ silent: false });
+    setFetchingLoc(false);
+    if (res.ok) {
+      setForm((prev) => ({
+        ...prev,
+        latitude: parseFloat(res.coords.lat.toFixed(6)),
+        longitude: parseFloat(res.coords.lng.toFixed(6)),
+      }));
+      toast.success("High-precision location fetched");
+    } else {
+      if (res.reason === "denied") {
+        const opened = await openLocationSettings("denied");
+        if (!opened) {
+          toast.error("Location permission denied. Please allow location access in settings.");
+        }
+      } else {
+        toast.error("Failed to fetch location: " + res.message);
+      }
+    }
   };
 
   const filtered = list.filter((b) => {

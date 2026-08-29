@@ -15,6 +15,7 @@ import { DAY_LABELS } from "@/lib/constants";
 import { useBranchService } from "@/services/branch-service";
 import { useDepartmentService } from "@/services/department-service";
 import { useShiftService } from "@/services/shift-service";
+import { acquirePosition, openLocationSettings } from "@/lib/geolocation";
 
 // Mirrors the "Add Branch" / "Add Department" / "New Shift" dialogs on their
 // own pages (branches.tsx / departments.tsx / shifts.tsx) so a page like
@@ -37,27 +38,27 @@ export function QuickAddBranchDialog({ open, onOpenChange, onCreated }: QuickAdd
     if (open) setForm({ branchName: "", branchLocation: "", city: "", latitude: 0, longitude: 0 });
   }, [open]);
 
-  const fetchLocation = () => {
-    if (!navigator.geolocation) {
-      toast.error("Geolocation is not supported by your browser");
-      return;
-    }
+  const fetchLocation = async () => {
     setFetchingLoc(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setForm(prev => ({
-          ...prev,
-          latitude: parseFloat(pos.coords.latitude.toFixed(2)),
-          longitude: parseFloat(pos.coords.longitude.toFixed(2)),
-        }));
-        setFetchingLoc(false);
-        toast.success("Location fetched and simplified");
-      },
-      () => {
-        setFetchingLoc(false);
-        toast.error("Failed to fetch location");
+    const res = await acquirePosition({ silent: false });
+    setFetchingLoc(false);
+    if (res.ok) {
+      setForm((prev) => ({
+        ...prev,
+        latitude: parseFloat(res.coords.lat.toFixed(2)),
+        longitude: parseFloat(res.coords.lng.toFixed(2)),
+      }));
+      toast.success("Location fetched and simplified");
+    } else {
+      if (res.reason === "denied") {
+        const opened = await openLocationSettings("denied");
+        if (!opened) {
+          toast.error("Location permission denied. Please allow location access in settings.");
+        }
+      } else {
+        toast.error(res.message || "Failed to fetch location");
       }
-    );
+    }
   };
 
   const submit = async (e: React.FormEvent) => {
