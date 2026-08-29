@@ -26,6 +26,8 @@ export default defineConfig({
         enabled: true,
       },
       workbox: {
+        // Increase max file size limit to 5 MB so precaching won't fail on large bundles
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff,woff2}"],
         // Take over open pages immediately on a new deploy and purge stale
         // precaches — prevents an old service worker from serving a broken
@@ -82,5 +84,31 @@ export default defineConfig({
   },
   optimizeDeps: {
     exclude: ["@vitejs/plugin-react", "@tailwindcss/oxide"],
+  },
+  build: {
+    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            if (id.includes("react") || id.includes("react-dom")) {
+              return "vendor-react";
+            }
+            if (id.includes("@tanstack")) {
+              return "vendor-tanstack";
+            }
+            if (id.includes("recharts") || id.includes("framer-motion") || id.includes("lucide-react")) {
+              return "vendor-ui";
+            }
+            if (id.includes("leaflet")) {
+              return "vendor-maps";
+            }
+            if (id.includes("xlsx")) {
+              return "vendor-xlsx";
+            }
+          }
+        },
+      },
+    },
   },
 });

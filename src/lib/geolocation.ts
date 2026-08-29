@@ -196,3 +196,7 @@ export async function openLocationSettings(
     return false;
   }
 }
+
+export function getIOSUnblockInstructions(): string {
+  return "iPhone / iOS Safari Instructions:\n1. Tap the 'aA' or Settings icon on the left of your Safari address bar.\n2. Tap 'Website Settings'.\n3. Set 'Location' to 'Ask' or 'Allow'.\n4. Refresh the page and try again.";
+}

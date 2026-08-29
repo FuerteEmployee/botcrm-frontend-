@@ -15,7 +15,7 @@ import { DAY_LABELS } from "@/lib/constants";
 import { useBranchService } from "@/services/branch-service";
 import { useDepartmentService } from "@/services/department-service";
 import { useShiftService } from "@/services/shift-service";
-import { acquirePosition, openLocationSettings } from "@/lib/geolocation";
+import { acquirePosition, openLocationSettings, getIOSUnblockInstructions } from "@/lib/geolocation";
 
 // Mirrors the "Add Branch" / "Add Department" / "New Shift" dialogs on their
 // own pages (branches.tsx / departments.tsx / shifts.tsx) so a page like
@@ -53,7 +53,10 @@ export function QuickAddBranchDialog({ open, onOpenChange, onCreated }: QuickAdd
       if (res.reason === "denied") {
         const opened = await openLocationSettings("denied");
         if (!opened) {
-          toast.error("Location permission denied. Please allow location access in settings.");
+          toast.error("Location permission denied on iOS/Browser.", {
+            description: getIOSUnblockInstructions(),
+            duration: 8000,
+          });
         }
       } else {
         toast.error(res.message || "Failed to fetch location");
