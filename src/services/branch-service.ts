@@ -9,6 +9,7 @@ export interface Branch {
   city: string;
   latitude: number;
   longitude: number;
+  radius?: number;
   employees?: number;
   createdAt: string;
 }

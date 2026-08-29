@@ -45,16 +45,13 @@ export function Pagination({
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <div className="flex items-center gap-1">
-          {Array.from({ length: Math.min(totalPages > 5 ? 3 : 5, totalPages) }, (_, i) => {
-            let pageNum = i + 1;
-            if (totalPages > 3) {
-              if (page > 2) {
-                pageNum = page - 1 + i;
-                if (pageNum > totalPages) pageNum = totalPages - (2 - i);
-              }
-            }
-            if (pageNum <= 0 || pageNum > totalPages) return null;
-
+          {(() => {
+            const windowSize = Math.min(3, totalPages);
+            const start = totalPages > 3
+              ? Math.min(Math.max(page - 1, 1), totalPages - windowSize + 1)
+              : 1;
+            return Array.from({ length: windowSize }, (_, i) => start + i);
+          })().map((pageNum) => {
             return (
               <Button
                 key={pageNum}

@@ -10,6 +10,11 @@ export interface LeaveType {
   iconStyle: string;
   colorCode: string;
   description?: string;
+  // Whether approved leave of this type is paid — routes to the paidLeave vs
+  // unpaidLeave payroll bucket. payWeight optionally overrides the tenant's
+  // bucket weight (0..1) for this type specifically; null = use bucket default.
+  isPaid?: boolean;
+  payWeight?: number | null;
   createdAt?: string;
   updatedAt?: string;
 }

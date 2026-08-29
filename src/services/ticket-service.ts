@@ -16,26 +16,6 @@ export interface Ticket {
   createdAt: string;
 }
 
-// --- Persist deleted ticket IDs in localStorage so they stay gone after refresh ---
-const LS_KEY = "be_deleted_ticket_ids";
-
-function getDeletedIds(): Set<string> {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    return new Set(raw ? JSON.parse(raw) : []);
-  } catch {
-    return new Set();
-  }
-}
-
-function persistDeletedId(id: string) {
-  try {
-    const ids = getDeletedIds();
-    ids.add(id);
-    localStorage.setItem(LS_KEY, JSON.stringify([...ids]));
-  } catch {}
-}
-
 export function useTicketService() {
   const queryClient = useQueryClient();
 
@@ -43,11 +23,7 @@ export function useTicketService() {
     queryKey: ["tickets"],
     queryFn: async () => {
       const { data } = await apiClient.get("/tickets");
-      // Filter out any tickets the user has deleted (persisted across refreshes)
-      const deletedIds = getDeletedIds();
-      return Array.isArray(data)
-        ? data.filter((t: Ticket) => !deletedIds.has(t._id))
-        : data;
+      return data;
     },
   });
 
@@ -75,38 +51,16 @@ export function useTicketService() {
 
   const deleteTicket = useMutation({
     mutationFn: async (id: string) => {
-      try {
-        await apiClient.delete(`/tickets/${id}`);
-        return { serverDeleted: true };
-      } catch (error: any) {
-        if (error?.response?.status === 404) return { serverDeleted: false };
-        throw error;
-      }
+      const { data } = await apiClient.delete(`/tickets/${id}`);
+      return data;
     },
-    onMutate: async (id: string) => {
-      // Persist deletion immediately — survives page refresh
-      persistDeletedId(id);
-      // Cancel in-flight refetches
-      await queryClient.cancelQueries({ queryKey: ["tickets"] });
-      const previous = queryClient.getQueryData<Ticket[]>(["tickets"]);
-      // Remove from UI immediately
-      queryClient.setQueryData<Ticket[]>(["tickets"], (old) =>
-        old ? old.filter((t) => t._id !== id) : []
-      );
-      return { previous };
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      queryClient.invalidateQueries({ queryKey: ["user-tickets"] });
+      toast.success("Ticket deleted successfully");
     },
-    onError: (_err, _id, context: any) => {
-      if (context?.previous) {
-        queryClient.setQueryData(["tickets"], context.previous);
-      }
-      toast.error("Failed to delete entry");
-    },
-    onSuccess: (result) => {
-      if (result?.serverDeleted) {
-        queryClient.invalidateQueries({ queryKey: ["tickets"] });
-        queryClient.invalidateQueries({ queryKey: ["user-tickets"] });
-      }
-      toast.success("Entry deleted successfully");
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || "Failed to delete ticket");
     },
   });
 

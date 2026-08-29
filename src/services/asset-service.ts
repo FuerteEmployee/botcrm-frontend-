@@ -38,6 +38,9 @@ export function useAssetService() {
       queryClient.invalidateQueries({ queryKey: ["assets"] });
       toast.success("Device allocated successfully");
     },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || "Failed to allocate device");
+    },
   });
 
   const updateMutation = useMutation({
@@ -49,6 +52,9 @@ export function useAssetService() {
       queryClient.invalidateQueries({ queryKey: ["assets"] });
       toast.success("Allocation updated successfully");
     },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || "Failed to update allocation");
+    },
   });
 
   const deleteMutation = useMutation({
@@ -58,6 +64,9 @@ export function useAssetService() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["assets"] });
       toast.success("Allocation removed successfully");
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || "Failed to remove allocation");
     },
   });
 

@@ -40,6 +40,7 @@ export interface AttendanceRecord {
 export interface AttendanceStats {
   date: string;
   presentToday: number;
+  halfDayToday: number;
   lateArrivals: number;
   missingPunch: number;
   absentToday: number;

@@ -119,6 +119,8 @@ function AddEmployeePage() {
   }, [isAllowed, isEditing, navigate]);
 
   const [form, setForm] = useState(() => {
+    const todayObj = new Date();
+    const localToday = `${todayObj.getFullYear()}-${String(todayObj.getMonth() + 1).padStart(2, '0')}-${String(todayObj.getDate()).padStart(2, '0')}`;
     const defaults = {
     fullName: "",
     phone: "",
@@ -126,7 +128,7 @@ function AddEmployeePage() {
     gender: "male",
     dob: "",
     salary: "",
-    joiningDate: new Date().toISOString().slice(0, 10),
+    joiningDate: localToday,
     departmentId: "",
     branchId: "",
     branchIds: [] as string[],

@@ -6,7 +6,7 @@ import {
   Mail, Phone, MapPin, ShieldAlert,
   Settings, CreditCard, Briefcase, Calendar, HeartPulse,
   Clock, Receipt, Contact2, ChevronRight, IndianRupee,
-  Landmark, IdCard, FileText
+  Landmark, IdCard, FileText, Megaphone
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -39,7 +39,7 @@ interface UserProfile {
   panCardUrls?: string[];
   aadhaarCardUrls?: string[];
   departmentId?: { name: string };
-  branchId?: { name: string };
+  branchId?: { branchName: string };
   shiftId?: { name: string; startTime: string; endTime: string };
   bankDetails?: {
     accountNumber?: string;
@@ -146,7 +146,7 @@ function UserProfilePage() {
       {/* Quick Actions */}
       <div id="quick-actions" className="space-y-3 scroll-mt-24">
         <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-1">Quick Actions</h4>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
           <button
             onClick={() => setNewExpenseOpen(true)}
             className="text-left p-4 rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer relative"
@@ -183,6 +183,17 @@ function UserProfilePage() {
             </div>
             <p className="text-sm font-bold">Lead</p>
             <p className="text-xs text-white/80 flex items-center gap-1 mt-0.5">Add Lead <ChevronRight className="h-3 w-3" /></p>
+          </button>
+
+          <button
+            onClick={() => navigate({ to: "/user/announcements" })}
+            className="text-left p-4 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+          >
+            <div className="h-9 w-9 rounded-xl bg-white/20 flex items-center justify-center mb-3">
+              <Megaphone className="h-4.5 w-4.5" />
+            </div>
+            <p className="text-sm font-bold">Announcements</p>
+            <p className="text-xs text-white/80 flex items-center gap-1 mt-0.5">View Details <ChevronRight className="h-3 w-3" /></p>
           </button>
         </div>
       </div>
@@ -256,7 +267,7 @@ function UserProfilePage() {
                   <span className="text-[9px] text-slate-400 font-bold block uppercase tracking-wider">Base Geofence Branch</span>
                   <span className="text-[12px] font-black text-slate-850 dark:text-slate-250 flex items-center gap-1">
                     <MapPin className="h-3.5 w-3.5 text-slate-400" />
-                    {profile?.branchId?.name || "Main Head Office"}
+                    {profile?.branchId?.branchName || "Main Head Office"}
                   </span>
                 </div>
 

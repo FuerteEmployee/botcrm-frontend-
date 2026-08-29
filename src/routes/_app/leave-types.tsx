@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { GridCard } from "@/components/shared/grid-card";
 import {
   Plus, Search, Calendar, HeartPulse, User, Baby, Heart,
-  Settings2, Type as TypeIcon, Hash, Pencil, Trash2, Info
+  Settings2, Type as TypeIcon, Hash, Pencil, Trash2, Info, Wallet, Ban
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { ActionButton } from "@/components/shared/action-button";
@@ -17,6 +17,7 @@ import { DataTable, DataTableCell, DataTableRow } from "@/components/shared/data
 import { cn } from "@/lib/utils";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { FormDialog } from "@/components/shared/form-dialog";
 import { DeleteDialog } from "@/components/shared/delete-dialog";
 import { Label } from "@/components/ui/label";
@@ -65,6 +66,7 @@ function LeaveTypesPage() {
     description: "",
     iconStyle: "Calendar",
     colorCode: "#3b82f6",
+    isPaid: true,
   });
 
   if (!hasMounted) return null;
@@ -83,7 +85,7 @@ function LeaveTypesPage() {
       }
       setOpen(false);
       setEditing(null);
-      setForm({ leaveName: "", code: "", totalDays: 0, description: "", iconStyle: "Calendar", colorCode: "#3b82f6" });
+      setForm({ leaveName: "", code: "", totalDays: 0, description: "", iconStyle: "Calendar", colorCode: "#3b82f6", isPaid: true });
     } catch (error) {
       // Handled by service
     }
@@ -98,6 +100,7 @@ function LeaveTypesPage() {
       description: t.description || "",
       iconStyle: t.iconStyle,
       colorCode: t.colorCode || "#3b82f6",
+      isPaid: t.isPaid !== false,
     });
     setOpen(true);
   };
@@ -124,7 +127,7 @@ function LeaveTypesPage() {
               variant="add"
               showLabel
               label="Add Leave Type"
-              onClick={() => { setEditing(null); setForm({ leaveName: "", code: "", totalDays: 0, description: "", iconStyle: "Calendar", colorCode: "#3b82f6" }); setOpen(true); }}
+              onClick={() => { setEditing(null); setForm({ leaveName: "", code: "", totalDays: 0, description: "", iconStyle: "Calendar", colorCode: "#3b82f6", isPaid: true }); setOpen(true); }}
             />
           ) : null
         }
@@ -191,6 +194,7 @@ function LeaveTypesPage() {
                       onEdit={canEdit ? () => openEdit(t) : undefined}
                       onDelete={canDelete ? () => setDeleteId(t._id) : undefined}
                       metaLeft={{ icon: Settings2, label: `Max: ${t.totalDays} Days` }}
+                      metaRight={{ icon: t.isPaid !== false ? Wallet : Ban, label: t.isPaid !== false ? "Paid" : "Unpaid" }}
                     />
                   );
                 })}
@@ -203,7 +207,7 @@ function LeaveTypesPage() {
                 exit={{ opacity: 0 }}
               >
                 <DataTable
-                  headers={["Icon", "Leave Name", "Code", "Max Days", "Actions"]}
+                  headers={["Icon", "Leave Name", "Code", "Max Days", "Pay", "Actions"]}
                   isEmpty={filtered.length === 0}
                   emptyMessage="No leave types configured. Click 'Add Leave Type' to get started."
                 >
@@ -228,6 +232,15 @@ function LeaveTypesPage() {
                           <Badge variant="outline" className="text-[10px] font-bold px-2 py-0.5 border-border/60 bg-muted/30 uppercase">{t.code}</Badge>
                         </DataTableCell>
                         <DataTableCell className="text-[14px] font-semibold text-primary">{t.totalDays} Days</DataTableCell>
+                        <DataTableCell>
+                          <Badge variant="outline" className={cn(
+                            "text-[10px] font-bold px-2 py-0.5 border-transparent gap-1",
+                            t.isPaid !== false ? "bg-success/10 text-success" : "bg-muted text-muted-foreground"
+                          )}>
+                            {t.isPaid !== false ? <Wallet className="h-3 w-3" /> : <Ban className="h-3 w-3" />}
+                            {t.isPaid !== false ? "Paid" : "Unpaid"}
+                          </Badge>
+                        </DataTableCell>
                         <DataTableCell isLast>
                           <div className="flex items-center justify-end gap-1">
                             {canEdit && (
@@ -326,6 +339,18 @@ function LeaveTypesPage() {
                   />
                 </div>
               </div>
+            </div>
+
+            <div className="flex items-center justify-between p-3 bg-muted/20 rounded-xl border border-border/40">
+              <div className="flex flex-col">
+                <span className="text-[13px] font-bold">Paid Leave</span>
+                <span className="text-[11px] text-muted-foreground">Approved leave of this type counts as paid in payroll</span>
+              </div>
+              <Checkbox
+                checked={form.isPaid}
+                onCheckedChange={(checked) => setForm({ ...form, isPaid: !!checked })}
+                className="h-5 w-5 rounded-md border-primary"
+              />
             </div>
           </div>
 

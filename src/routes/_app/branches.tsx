@@ -47,7 +47,8 @@ function BranchesPage() {
     branchLocation: "",
     city: "",
     latitude: 0,
-    longitude: 0
+    longitude: 0,
+    radius: 0
   });
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -145,7 +146,8 @@ function BranchesPage() {
       branchLocation: "",
       city: "",
       latitude: 0,
-      longitude: 0
+      longitude: 0,
+      radius: 0
     });
     setOpen(true);
   };
@@ -157,7 +159,8 @@ function BranchesPage() {
       branchLocation: b.branchLocation,
       city: guessCity(b),
       latitude: b.latitude,
-      longitude: b.longitude
+      longitude: b.longitude,
+      radius: b.radius || 0
     });
     setOpen(true);
   };
@@ -423,7 +426,7 @@ function BranchesPage() {
                     loading={fetchingLoc}
                   />
                 </div>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1">
                     <label className="text-[9px] font-bold uppercase text-muted-foreground/60 ml-1">Latitude</label>
                     <FormInput
@@ -441,6 +444,17 @@ function BranchesPage() {
                       step="any"
                       value={form.longitude}
                       onChange={(e) => setForm({ ...form, longitude: parseFloat(e.target.value) || 0 })}
+                      className="h-9 text-[13px] rounded-xl bg-white/50"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-bold uppercase text-muted-foreground/60 ml-1">Allowed Radius (m)</label>
+                    <FormInput
+                      type="number"
+                      step="any"
+                      placeholder="Default (3000m)"
+                      value={form.radius || ""}
+                      onChange={(e) => setForm({ ...form, radius: parseFloat(e.target.value) || 0 })}
                       className="h-9 text-[13px] rounded-xl bg-white/50"
                     />
                   </div>

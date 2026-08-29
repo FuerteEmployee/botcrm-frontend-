@@ -28,7 +28,7 @@ interface UserProfile {
   joiningDate?: string;
   employmentType?: string;
   departmentId?: { name: string };
-  branchId?: { name: string };
+  branchId?: { branchName: string };
   shiftId?: { name: string };
 }
 
@@ -279,7 +279,7 @@ function UserAccountSummaryPage() {
           <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-[24px] overflow-hidden">
             <CardContent className="p-6 space-y-5">
               <InfoRow icon={Building2} label="Department" value={profile?.departmentId?.name || "Not Assigned"} />
-              <InfoRow icon={MapPin} label="Branch" value={profile?.branchId?.name || "Main Head Office"} />
+              <InfoRow icon={MapPin} label="Branch" value={profile?.branchId?.branchName || "Main Head Office"} />
               <InfoRow icon={Clock} label="Assigned Shift" value={profile?.shiftId?.name || "General Shift"} />
               <InfoRow icon={Briefcase} label="Employment Type" value={profile?.employmentType || "Monthly"} />
               <InfoRow

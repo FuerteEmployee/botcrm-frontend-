@@ -20,6 +20,7 @@ import { Route as UserProfileRouteImport } from './routes/user/profile'
 import { Route as UserLeavesRouteImport } from './routes/user/leaves'
 import { Route as UserHolidaysRouteImport } from './routes/user/holidays'
 import { Route as UserExpensesRouteImport } from './routes/user/expenses'
+import { Route as UserAnnouncementsRouteImport } from './routes/user/announcements'
 import { Route as UserAdvanceSalaryRouteImport } from './routes/user/advance-salary'
 import { Route as UserAccountRouteImport } from './routes/user/account'
 import { Route as SuperTenantsRouteImport } from './routes/super/tenants'
@@ -114,6 +115,11 @@ const UserHolidaysRoute = UserHolidaysRouteImport.update({
 const UserExpensesRoute = UserExpensesRouteImport.update({
   id: '/expenses',
   path: '/expenses',
+  getParentRoute: () => UserRoute,
+} as any)
+const UserAnnouncementsRoute = UserAnnouncementsRouteImport.update({
+  id: '/announcements',
+  path: '/announcements',
   getParentRoute: () => UserRoute,
 } as any)
 const UserAdvanceSalaryRoute = UserAdvanceSalaryRouteImport.update({
@@ -363,6 +369,7 @@ export interface FileRoutesByFullPath {
   '/super/tenants': typeof SuperTenantsRoute
   '/user/account': typeof UserAccountRoute
   '/user/advance-salary': typeof UserAdvanceSalaryRoute
+  '/user/announcements': typeof UserAnnouncementsRoute
   '/user/expenses': typeof UserExpensesRoute
   '/user/holidays': typeof UserHolidaysRoute
   '/user/leaves': typeof UserLeavesRoute
@@ -413,6 +420,7 @@ export interface FileRoutesByTo {
   '/super/tenants': typeof SuperTenantsRoute
   '/user/account': typeof UserAccountRoute
   '/user/advance-salary': typeof UserAdvanceSalaryRoute
+  '/user/announcements': typeof UserAnnouncementsRoute
   '/user/expenses': typeof UserExpensesRoute
   '/user/holidays': typeof UserHolidaysRoute
   '/user/leaves': typeof UserLeavesRoute
@@ -468,6 +476,7 @@ export interface FileRoutesById {
   '/super/tenants': typeof SuperTenantsRoute
   '/user/account': typeof UserAccountRoute
   '/user/advance-salary': typeof UserAdvanceSalaryRoute
+  '/user/announcements': typeof UserAnnouncementsRoute
   '/user/expenses': typeof UserExpensesRoute
   '/user/holidays': typeof UserHolidaysRoute
   '/user/leaves': typeof UserLeavesRoute
@@ -523,6 +532,7 @@ export interface FileRouteTypes {
     | '/super/tenants'
     | '/user/account'
     | '/user/advance-salary'
+    | '/user/announcements'
     | '/user/expenses'
     | '/user/holidays'
     | '/user/leaves'
@@ -573,6 +583,7 @@ export interface FileRouteTypes {
     | '/super/tenants'
     | '/user/account'
     | '/user/advance-salary'
+    | '/user/announcements'
     | '/user/expenses'
     | '/user/holidays'
     | '/user/leaves'
@@ -627,6 +638,7 @@ export interface FileRouteTypes {
     | '/super/tenants'
     | '/user/account'
     | '/user/advance-salary'
+    | '/user/announcements'
     | '/user/expenses'
     | '/user/holidays'
     | '/user/leaves'
@@ -725,6 +737,13 @@ declare module '@tanstack/react-router' {
       path: '/expenses'
       fullPath: '/user/expenses'
       preLoaderRoute: typeof UserExpensesRouteImport
+      parentRoute: typeof UserRoute
+    }
+    '/user/announcements': {
+      id: '/user/announcements'
+      path: '/announcements'
+      fullPath: '/user/announcements'
+      preLoaderRoute: typeof UserAnnouncementsRouteImport
       parentRoute: typeof UserRoute
     }
     '/user/advance-salary': {
@@ -1134,6 +1153,7 @@ const SuperRouteWithChildren = SuperRoute._addFileChildren(SuperRouteChildren)
 interface UserRouteChildren {
   UserAccountRoute: typeof UserAccountRoute
   UserAdvanceSalaryRoute: typeof UserAdvanceSalaryRoute
+  UserAnnouncementsRoute: typeof UserAnnouncementsRoute
   UserExpensesRoute: typeof UserExpensesRoute
   UserHolidaysRoute: typeof UserHolidaysRoute
   UserLeavesRoute: typeof UserLeavesRoute
@@ -1145,6 +1165,7 @@ interface UserRouteChildren {
 const UserRouteChildren: UserRouteChildren = {
   UserAccountRoute: UserAccountRoute,
   UserAdvanceSalaryRoute: UserAdvanceSalaryRoute,
+  UserAnnouncementsRoute: UserAnnouncementsRoute,
   UserExpensesRoute: UserExpensesRoute,
   UserHolidaysRoute: UserHolidaysRoute,
   UserLeavesRoute: UserLeavesRoute,

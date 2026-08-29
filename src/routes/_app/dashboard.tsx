@@ -22,10 +22,17 @@ import { StatCard } from "@/components/shared/stat-card";
 import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useDashboardService } from "@/services/dashboard-service";
-import { attendanceTrend, salaryDistribution, departmentHeadcount } from "@/lib/mock-data"; // Trends still mock for now
 import { cn } from "@/lib/utils";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
+
+const MONTH_OPTIONS = Array.from({ length: 12 }).map((_, i) => {
+  const d = new Date();
+  d.setDate(1); // avoid month-end overflow (e.g. day 31) before subtracting months
+  d.setMonth(d.getMonth() - i);
+  return { label: d.toLocaleDateString("en-US", { month: "long", year: "numeric" }), m: d.getMonth() + 1, y: d.getFullYear() };
+});
 
 export const Route = createFileRoute("/_app/dashboard")({
   component: DashboardPage,
@@ -70,7 +77,9 @@ function SectionTitle({ title, subtitle }: { title: string; subtitle?: string })
 
 function DashboardPage() {
   const [hasMounted, setHasMounted] = useState(false);
-  const { summary, isLoading } = useDashboardService();
+  const [selectedMonth, setSelectedMonth] = useState(`${MONTH_OPTIONS[0].m}-${MONTH_OPTIONS[0].y}`);
+  const [month, year] = selectedMonth.split("-").map(Number);
+  const { summary, isLoading } = useDashboardService(month, year);
 
   useEffect(() => {
     setHasMounted(true);
@@ -78,10 +87,23 @@ function DashboardPage() {
 
   if (!hasMounted) return null;
 
+  const monthPicker = (
+    <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+      <SelectTrigger className="w-[190px] h-10 text-[13px]">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {MONTH_OPTIONS.map((mo) => (
+          <SelectItem key={`${mo.m}-${mo.y}`} value={`${mo.m}-${mo.y}`}>{mo.label}</SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+
   if (isLoading || !summary) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Admin Overview" description="Loading real-time metrics..." />
+        <PageHeader title="Admin Overview" description="Loading real-time metrics..." actions={monthPicker} />
         <SkeletonLoader type="stats" count={4} />
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <SkeletonLoader type="card" count={3} className="lg:col-span-3" />
@@ -90,13 +112,20 @@ function DashboardPage() {
     );
   }
 
-  const { stats, recentEmployees, pendingTickets } = summary;
+  const { stats, recentEmployees, pendingTickets, attendanceTrend, salaryDistribution, departmentHeadcount, isCurrentMonth } = summary;
+  const hasTrendData = attendanceTrend.some(d => d.present > 0 || d.absent > 0);
+  const hasSalaryData = salaryDistribution.length > 0;
+  const hasHeadcountData = departmentHeadcount.length > 0;
+  const dayLabel = isCurrentMonth ? "Today" : "(Month)";
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Admin Overview"
-        description="Monitor your workforce performance and operational trends in real-time."
+        description={isCurrentMonth
+          ? "Monitor your workforce performance and operational trends in real-time."
+          : `Showing data for ${MONTH_OPTIONS.find(m => m.m === month && m.y === year)?.label || `${month}/${year}`}.`}
+        actions={monthPicker}
       />
 
       {/* Stat cards — row 1 */}
@@ -110,7 +139,7 @@ function DashboardPage() {
           to="/employees"
         />
         <StatCard
-          label="Present Today"
+          label={`Present ${dayLabel}`}
           value={stats.presentToday}
           icon={UserCheck}
           accent="success"
@@ -119,7 +148,7 @@ function DashboardPage() {
           search={{ status: "present" }}
         />
         <StatCard
-          label="Absent Today"
+          label={`Absent ${dayLabel}`}
           value={stats.absentToday}
           icon={UserX}
           accent="destructive"
@@ -128,7 +157,7 @@ function DashboardPage() {
           search={{ status: "absent" }}
         />
         <StatCard
-          label="Half Day"
+          label={`Half Day ${dayLabel}`}
           value={stats.halfDayToday}
           icon={Clock}
           accent="warning"
@@ -154,7 +183,7 @@ function DashboardPage() {
           icon={BadgeDollarSign}
           accent="destructive"
           delay={0.21}
-          to="/settings"
+          to="/expenses"
         />
         <StatCard
           label="Total Leads"
@@ -166,8 +195,7 @@ function DashboardPage() {
         />
       </div>
 
-      {/* eslint-disable-next-line no-constant-binary-expression */}
-      {false && (
+      {(
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {/* Attendance Performance */}
           <motion.div
@@ -198,6 +226,11 @@ function DashboardPage() {
                 </div>
               </div>
               <div className="h-[260px] min-h-[260px]">
+                {!hasTrendData ? (
+                  <div className="h-full flex items-center justify-center text-[13px] text-muted-foreground">
+                    No attendance recorded in the last 7 days
+                  </div>
+                ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={attendanceTrend} barGap={6} barCategoryGap="30%">
                     <CartesianGrid
@@ -244,6 +277,7 @@ function DashboardPage() {
                     />
                   </BarChart>
                 </ResponsiveContainer>
+                )}
               </div>
             </Card>
           </motion.div>
@@ -257,6 +291,11 @@ function DashboardPage() {
             <Card className="p-5 border border-border/60 bg-white rounded-xl shadow-sm h-full">
               <SectionTitle title="Budget Allocation" subtitle="By department" />
               <div className="h-[260px] min-h-[260px]">
+                {!hasSalaryData ? (
+                  <div className="h-full flex items-center justify-center text-[13px] text-muted-foreground">
+                    No payroll generated for this month yet
+                  </div>
+                ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
@@ -289,6 +328,7 @@ function DashboardPage() {
                     />
                   </PieChart>
                 </ResponsiveContainer>
+                )}
               </div>
             </Card>
           </motion.div>
@@ -307,6 +347,11 @@ function DashboardPage() {
                 </Badge>
               </div>
               <div className="h-[220px] min-h-[220px]">
+                {!hasHeadcountData ? (
+                  <div className="h-full flex items-center justify-center text-[13px] text-muted-foreground">
+                    No departments assigned yet
+                  </div>
+                ) : (
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={departmentHeadcount}>
                     <defs>
@@ -350,6 +395,7 @@ function DashboardPage() {
                     />
                   </AreaChart>
                 </ResponsiveContainer>
+                )}
               </div>
             </Card>
           </motion.div>

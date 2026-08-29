@@ -138,10 +138,12 @@ function UserLocationMap({ lat, lng, initials }: { lat: number; lng: number; ini
     });
 
     L.tileLayer(
-      "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
       {
+        maxZoom: 19,
+        subdomains: "abc",
         attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       }
     ).addTo(map);
 
@@ -164,7 +166,20 @@ function UserLocationMap({ lat, lng, initials }: { lat: number; lng: number; ini
     mapRef.current = map;
     markerRef.current = marker;
 
+    // Leaflet reads the container's pixel size at the instant `L.map()` runs.
+    // This map mounts inside a framer-motion modal that's still animating in
+    // (opacity/scale/y), so the container can be zero-sized or mid-transition
+    // right then — Leaflet silently freezes on that wrong size, leaving the
+    // map blank/mis-centered until something else forces a resize. Force a
+    // recompute once the entrance animation has settled, and keep recomputing
+    // if the container itself ever resizes (e.g. the modal's own layout shifts).
+    const settleTimer = setTimeout(() => map.invalidateSize(), 350);
+    const resizeObserver = new ResizeObserver(() => map.invalidateSize());
+    resizeObserver.observe(container);
+
     return () => {
+      clearTimeout(settleTimer);
+      resizeObserver.disconnect();
       if (markerRef.current) markerRef.current.remove();
       if (mapRef.current) mapRef.current.remove();
       mapRef.current = null;
@@ -584,22 +599,20 @@ function UserDashboard() {
   };
 
   const getFreshLocation = async () => {
-    let currentLocation = location;
-    let currentAddress = address;
+    let currentLocation = null;
+    let currentAddress = "Locating...";
 
-    if (!currentLocation || currentAddress === "Locating...") {
-      const result = await acquirePosition();
-      if (result.ok) {
-        currentLocation = { lat: result.coords.lat, lng: result.coords.lng };
-        currentAddress = await resolveAddress(result.coords.lat, result.coords.lng);
-        setLocation(currentLocation);
-        setLocationAccuracy(result.coords.accuracy);
-        setAddress(currentAddress);
-        setLocationFailReason(null);
-      } else {
-        currentAddress = "Location Capturing Bypassed";
-        setLocationFailReason(result.reason);
-      }
+    const result = await acquirePosition();
+    if (result.ok) {
+      currentLocation = { lat: result.coords.lat, lng: result.coords.lng };
+      currentAddress = await resolveAddress(result.coords.lat, result.coords.lng);
+      setLocation(currentLocation);
+      setLocationAccuracy(result.coords.accuracy);
+      setAddress(currentAddress);
+      setLocationFailReason(null);
+    } else {
+      currentAddress = "Location Capturing Bypassed";
+      setLocationFailReason(result.reason);
     }
     return { currentLocation, currentAddress };
   };
@@ -1941,7 +1954,7 @@ function UserDashboard() {
                   Location Verification
                 </h4>
                 <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
-                  Confirm your coordinates and choose your tracking settings.
+                  Confirm your current coordinates before you punch in.
                 </p>
               </div>
 

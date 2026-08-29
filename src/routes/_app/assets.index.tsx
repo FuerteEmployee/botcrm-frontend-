@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useState, useMemo } from "react";
-import { Plus, Monitor, Search, MoreVertical, Trash2, Pencil, Calendar, Hash, Info, Smartphone, Laptop, Speaker, User, Landmark, LayoutGrid, List, MoreHorizontal, CheckCircle2, AlertCircle, IndianRupee, MousePointer2, Keyboard, Tablet, Image as ImageIcon, Loader2 } from "lucide-react";
+import { Plus, Monitor, Search, MoreVertical, Pencil, Calendar, Hash, Info, Smartphone, Laptop, Speaker, User, Landmark, LayoutGrid, List, MoreHorizontal, CheckCircle2, AlertCircle, IndianRupee, MousePointer2, Keyboard, Tablet, Image as ImageIcon, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Button } from "@/components/ui/button";
 import { FormInput } from "@/components/shared/form-input";
@@ -44,7 +44,7 @@ const DEVICE_TYPES = [
 
 function AssetsPage() {
   const navigate = useNavigate();
-  const { assets, deleteAsset, isLoading } = useAssetService();
+  const { assets, updateAsset, isLoading } = useAssetService();
   const [search, setSearch] = useState("");
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
   const [view, setView] = useState<ViewMode>(defaultLayout === "grid" ? "employee" : "list");
@@ -81,7 +81,10 @@ function AssetsPage() {
 
   const remove = async () => {
     if (!deleteId) return;
-    await deleteAsset(deleteId);
+    // Mark returned rather than deleting the record — a hard delete destroys
+    // allocation history; "returned" is the same status the allocate-flow's
+    // own return path already uses.
+    await updateAsset({ id: deleteId, data: { status: "returned" } });
     setDeleteId(null);
   };
 
@@ -286,14 +289,14 @@ function AssetsPage() {
         <AlertDialogContent className="rounded-2xl border-destructive/20 shadow-xl">
           <AlertDialogHeader>
             <div className="h-10 w-10 rounded-xl bg-destructive/10 text-destructive grid place-items-center mb-2">
-              <Trash2 className="h-5 w-5" />
+              <CheckCircle2 className="h-5 w-5" />
             </div>
-            <AlertDialogTitle className="text-[16px]">Remove allocation?</AlertDialogTitle>
-            <AlertDialogDescription className="text-[13px]">This will remove the device from the employee's assigned assets. This action cannot be undone.</AlertDialogDescription>
+            <AlertDialogTitle className="text-[16px]">Mark as returned?</AlertDialogTitle>
+            <AlertDialogDescription className="text-[13px]">This marks the device as returned and unassigns it from the employee. The allocation record is kept for history — you can re-edit it later if needed.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="rounded-xl">Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={remove} className="bg-destructive text-destructive-foreground rounded-xl hover:bg-destructive/90 shadow-md">Remove</AlertDialogAction>
+            <AlertDialogAction onClick={remove} className="bg-destructive text-destructive-foreground rounded-xl hover:bg-destructive/90 shadow-md">Mark Returned</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

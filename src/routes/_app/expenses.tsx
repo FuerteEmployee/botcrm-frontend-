@@ -46,7 +46,7 @@ export const Route = createFileRoute("/_app/expenses")({
 type ViewMode = "list" | "employee";
 
 function ExpensesPage() {
-  const { expenses: list, isLoading: isExpensesLoading, createExpense, updateExpense, deleteExpense, approveExpense, rejectExpense, isCreating, isUpdating } = useExpenseService();
+  const { expenses: list, isLoading: isExpensesLoading, createExpense, updateExpense, deleteExpense, approveExpense, rejectExpense, approveExpenseGroup, rejectExpenseGroup, isCreating, isUpdating } = useExpenseService();
   const { employees, isLoading: isEmployeesLoading } = useEmployeeService();
   
   const isLoading = isExpensesLoading || isEmployeesLoading;
@@ -293,13 +293,13 @@ function ExpensesPage() {
                           <>
                             <ActionButton
                               variant="approve"
-                              tooltip="Approve"
-                              onClick={() => approveExpense(exp._id)}
+                              tooltip={exp.splitGroupId ? "Approve all shares of this split expense" : "Approve"}
+                              onClick={() => exp.splitGroupId ? approveExpenseGroup(exp.splitGroupId) : approveExpense(exp._id)}
                             />
                             <ActionButton
                               variant="reject"
-                              tooltip="Reject"
-                              onClick={() => rejectExpense(exp._id)}
+                              tooltip={exp.splitGroupId ? "Reject all shares of this split expense" : "Reject"}
+                              onClick={() => exp.splitGroupId ? rejectExpenseGroup(exp.splitGroupId) : rejectExpense(exp._id)}
                             />
                           </>
                         )}

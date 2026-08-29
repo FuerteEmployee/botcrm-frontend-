@@ -96,6 +96,34 @@ export function useExpenseService() {
     },
   });
 
+  const approveGroupMutation = useMutation({
+    mutationFn: async (splitGroupId: string) => {
+      const { data } = await apiClient.patch(`/expenses/group/${splitGroupId}/approve`);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["expenses"] });
+      toast.success("All shares of the split expense approved");
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || "Failed to approve split expense group");
+    },
+  });
+
+  const rejectGroupMutation = useMutation({
+    mutationFn: async (splitGroupId: string) => {
+      const { data } = await apiClient.patch(`/expenses/group/${splitGroupId}/reject`);
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["expenses"] });
+      toast.success("All shares of the split expense rejected");
+    },
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || "Failed to reject split expense group");
+    },
+  });
+
   return {
     expenses,
     isLoading,
@@ -104,6 +132,8 @@ export function useExpenseService() {
     deleteExpense: deleteMutation.mutateAsync,
     approveExpense: approveMutation.mutateAsync,
     rejectExpense: rejectMutation.mutateAsync,
+    approveExpenseGroup: approveGroupMutation.mutateAsync,
+    rejectExpenseGroup: rejectGroupMutation.mutateAsync,
     isCreating: createMutation.isPending,
     isUpdating: updateMutation.isPending,
     isApproving: approveMutation.isPending,

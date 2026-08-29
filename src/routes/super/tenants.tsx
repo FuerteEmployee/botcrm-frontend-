@@ -248,13 +248,17 @@ function TenantsPage() {
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => setManagingId(t.adminId?._id)}>
+                              <DropdownMenuItem
+                                disabled={!t.adminId?._id}
+                                onClick={() => t.adminId?._id && setManagingId(t.adminId._id)}
+                              >
                                 <Settings className="h-3.5 w-3.5 mr-2" />
                                 Manage subscription
                               </DropdownMenuItem>
                               <DropdownMenuItem
+                                disabled={!t.adminId?._id}
                                 onClick={() =>
-                                  setMachinesFor({ id: t.adminId?._id, name: t.adminId?.name })
+                                  t.adminId?._id && setMachinesFor({ id: t.adminId._id, name: t.adminId.name })
                                 }
                               >
                                 <Fingerprint className="h-3.5 w-3.5 mr-2" />
@@ -262,15 +266,16 @@ function TenantsPage() {
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 className="text-destructive focus:text-destructive"
-                                disabled={t.adminId?.isActive === false}
-                                onClick={() => setDeactivating({ id: t.adminId?._id, name: t.adminId?.name })}
+                                disabled={!t.adminId?._id || t.adminId?.isActive === false}
+                                onClick={() => t.adminId?._id && setDeactivating({ id: t.adminId._id, name: t.adminId.name })}
                               >
                                 <Power className="h-3.5 w-3.5 mr-2" />
                                 {t.adminId?.isActive === false ? "Already deactivated" : "Deactivate customer"}
                               </DropdownMenuItem>
                               <DropdownMenuItem
                                 className="text-destructive focus:text-destructive"
-                                onClick={() => setDeleting({ id: t.adminId?._id, name: t.adminId?.name })}
+                                disabled={!t.adminId?._id}
+                                onClick={() => t.adminId?._id && setDeleting({ id: t.adminId._id, name: t.adminId.name })}
                               >
                                 <Trash2 className="h-3.5 w-3.5 mr-2" />
                                 Delete permanently
@@ -334,7 +339,7 @@ function TenantsPage() {
               disabled={deactivateMutation.isPending}
               onClick={(e) => {
                 e.preventDefault();
-                if (deactivating) deactivateMutation.mutate(deactivating.id);
+                if (deactivating?.id) deactivateMutation.mutate(deactivating.id);
               }}
             >
               {deactivateMutation.isPending ? "Deactivating..." : "Deactivate"}
@@ -360,7 +365,7 @@ function TenantsPage() {
               disabled={deleteMutation.isPending}
               onClick={(e) => {
                 e.preventDefault();
-                if (deleting) deleteMutation.mutate(deleting.id);
+                if (deleting?.id) deleteMutation.mutate(deleting.id);
               }}
             >
               {deleteMutation.isPending ? "Deleting..." : "Delete permanently"}

@@ -1,22 +1,41 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import { toast }     from "sonner";
+import { toast } from "sonner";
 
 export interface Leave {
   _id: string;
-  employeeId: string;
-  leaveType: string;
-  fromDate: string;
-  toDate: string;
-  status: string;
-  createdAt?: string;
+  employeeId: {
+    _id: string;
+    name: string;
+    profileImage?: string;
+    email?: string;
+    phone?: string;
+  };
+  leaveTypeId: {
+    _id: string;
+    leaveName: string;
+    code: string;
+    colorCode?: string;
+    iconStyle?: string;
+  };
+  startDate: string;
+  endDate: string;
+  // Business days (weekends/holidays excluded) — computed server-side, not
+  // user-editable, so it always matches what payroll actually charges.
+  duration: number;
+  reason: string;
+  status: "pending" | "approved" | "rejected";
+  adminRemark?: string;
+  createdAt: string;
   updatedAt?: string;
 }
 
 export function useLeaveService() {
   const queryClient = useQueryClient();
 
-  const { data: items = [], isLoading, error } = useQuery<Leave[]>({
+  // Backend auto-scopes: employees only ever see their own leave requests,
+  // admins/subadmins see the whole tenant (optionally filtered).
+  const { data: leaves = [], isLoading, error } = useQuery<Leave[]>({
     queryKey: ["leaves"],
     queryFn: async () => {
       const { data } = await apiClient.get("/leaves");
@@ -25,50 +44,55 @@ export function useLeaveService() {
   });
 
   const createMutation = useMutation({
-    mutationFn: async (payload: Partial<Leave>) => {
+    mutationFn: async (payload: { employeeId?: string; leaveTypeId: string; startDate: string; endDate: string; reason: string }) => {
       const { data } = await apiClient.post("/leaves", payload);
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["leaves"] });
-      toast.success("Leave created");
+      toast.success("Leave request submitted");
     },
-    onError: (err: any) => toast.error(err.response?.data?.message ?? "Create failed"),
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || "Failed to submit leave request");
+    },
   });
 
-  const updateMutation = useMutation({
-    mutationFn: async ({ id, ...rest }: Partial<Leave> & { id: string }) => {
-      const { data } = await apiClient.put(`/leaves/${id}`, rest);
+  const updateStatusMutation = useMutation({
+    mutationFn: async ({ id, status, adminRemark }: { id: string; status: "pending" | "approved" | "rejected"; adminRemark?: string }) => {
+      const { data } = await apiClient.put(`/leaves/${id}`, { status, adminRemark });
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["leaves"] });
-      toast.success("Leave updated");
+      toast.success("Leave request updated");
     },
-    onError: (err: any) => toast.error(err.response?.data?.message ?? "Update failed"),
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || "Failed to update leave request");
+    },
   });
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { data } = await apiClient.delete(`/leaves/${id}`);
-      return data;
+      await apiClient.delete(`/leaves/${id}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["leaves"] });
-      toast.success("Leave deleted");
+      toast.success("Leave request deleted");
     },
-    onError: (err: any) => toast.error(err.response?.data?.message ?? "Delete failed"),
+    onError: (error: any) => {
+      toast.error(error.response?.data?.message || "Failed to delete leave request");
+    },
   });
 
   return {
-    items,
+    leaves,
     isLoading,
     error,
-    createItem:  createMutation.mutateAsync,
-    updateItem:  updateMutation.mutateAsync,
-    deleteItem:  deleteMutation.mutateAsync,
-    isCreating:  createMutation.isPending,
-    isUpdating:  updateMutation.isPending,
-    isDeleting:  deleteMutation.isPending,
+    createLeave: createMutation.mutateAsync,
+    updateLeaveStatus: updateStatusMutation.mutateAsync,
+    deleteLeave: deleteMutation.mutateAsync,
+    isCreating: createMutation.isPending,
+    isUpdating: updateStatusMutation.isPending,
+    isDeleting: deleteMutation.isPending,
   };
 }

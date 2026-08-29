@@ -622,7 +622,7 @@ function EmployeeDetailsPage() {
                             {e.name}
                             {!e.included && <Badge className="ml-2 bg-primary/10 text-primary border-none text-[8px] px-1 py-0">ON TOP</Badge>}
                           </span>
-                          <p className="text-[14px] font-bold text-foreground">#{employee?._id?.slice(-6).toUpperCase()}</p>
+                          <p className="text-[14px] font-bold text-foreground">₹{e.amount.toLocaleString()}</p>
                         </div>
                       ))}
                       <div className="pt-4 mt-2 border-t border-border/40 flex items-center justify-between">

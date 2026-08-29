@@ -35,7 +35,7 @@ import { useTicketService } from "@/services/ticket-service";
 import { parseTicketReason } from "@/lib/leave-ticket-parser";
 import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
-import { cn, toISTDateKey } from "@/lib/utils";
+import { cn, toISTDateKey, toDatetimeLocalValue } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { StatCard } from "@/components/shared/stat-card";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
@@ -198,10 +198,10 @@ function TodayRecordCard({ t, getDisplayStatus, canEdit, setModifyForm, setModif
                 <DropdownMenuItem onClick={() => {
                   setModifyForm({
                     id: t._id,
-                    punchIn: t.punchIn ? new Date(t.punchIn).toISOString().slice(0, 16) : "",
-                    punchOut: t.punchOut ? new Date(t.punchOut).toISOString().slice(0, 16) : "",
-                    lunchInTime: t.lunchInTime ? new Date(t.lunchInTime).toISOString().slice(0, 16) : "",
-                    lunchOutTime: t.lunchOutTime ? new Date(t.lunchOutTime).toISOString().slice(0, 16) : "",
+                    punchIn: t.punchIn ? toDatetimeLocalValue(t.punchIn) : "",
+                    punchOut: t.punchOut ? toDatetimeLocalValue(t.punchOut) : "",
+                    lunchInTime: t.lunchInTime ? toDatetimeLocalValue(t.lunchInTime) : "",
+                    lunchOutTime: t.lunchOutTime ? toDatetimeLocalValue(t.lunchOutTime) : "",
                     status: t.status
                   });
                   setModifyOpen(true);
@@ -337,8 +337,9 @@ function AttendancePage() {
   const todayList = list.filter((t) => isToday(t.date));
   const counts = {
     all: todayList.length,
-    present: todayList.filter((t) => ["present", "late", "wfh", "half-day"].includes(t.status)).length,
+    present: todayList.filter((t) => ["present", "late", "wfh"].includes(t.status)).length,
     late: todayList.filter((t) => t.status === "late").length,
+    halfDay: todayList.filter((t) => t.status === "half-day").length,
     absent: todayList.filter((t) => t.status === "absent").length,
   };
 
@@ -480,9 +481,10 @@ function AttendancePage() {
         }
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label="Present Today" value={stats?.presentToday ?? counts.present} icon={Check} accent="success" delay={0} />
         <StatCard label="Late Arrivals" value={stats?.lateArrivals ?? counts.late} icon={ClockIcon} accent="warning" delay={0.05} />
+        <StatCard label="Half Day Today" value={stats?.halfDayToday ?? counts.halfDay} icon={ClockIcon} accent="warning" delay={0.08} />
         <StatCard label="On Leave" value={onLeaveCount} icon={CalendarDays} accent="info" delay={0.1} />
       </div>
 
@@ -502,7 +504,7 @@ function AttendancePage() {
 
           <Select value={tab} onValueChange={(v) => { setTab(v); setTablePage(1); setCardPage(1); }}>
             <SelectTrigger className="w-full md:w-[130px] h-10 border border-primary/20 bg-primary/5 text-primary hover:bg-primary/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
-              <div className={cn("h-2 w-2 rounded-full", tab === 'present' ? "bg-success" : tab === 'late' ? "bg-warning" : tab === 'on-duty' ? "bg-blue-500" : "bg-primary")} />
+              <div className={cn("h-2 w-2 rounded-full", tab === 'present' ? "bg-success" : tab === 'late' || tab === 'half-day' ? "bg-warning" : tab === 'on-duty' ? "bg-blue-500" : tab === 'wfh' ? "bg-info" : "bg-primary")} />
               <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent className="rounded-xl border-border/60">
@@ -512,6 +514,7 @@ function AttendancePage() {
               <SelectItem value="late">Late</SelectItem>
               <SelectItem value="absent">Absent</SelectItem>
               <SelectItem value="half-day">Half Day</SelectItem>
+              <SelectItem value="wfh">WFH</SelectItem>
             </SelectContent>
           </Select>
 
@@ -614,7 +617,9 @@ function AttendancePage() {
                         getDisplayStatus(t) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
                           t.status === "present" ? "bg-success/10 text-success" :
                             t.status === "late" ? "bg-warning/15 text-warning-foreground" :
-                              "bg-destructive/10 text-destructive"
+                              t.status === "half-day" ? "bg-warning/15 text-warning-foreground" :
+                                t.status === "wfh" ? "bg-info/15 text-info" :
+                                  "bg-destructive/10 text-destructive"
                       )}
                     >{getDisplayStatus(t) === "on-duty" ? "On Duty" : t.status}</Badge>
                     {(() => {
@@ -640,10 +645,10 @@ function AttendancePage() {
                       <DropdownMenuItem onClick={() => {
                         setModifyForm({
                           id: t._id,
-                          punchIn: t.punchIn ? new Date(t.punchIn).toISOString().slice(0, 16) : "",
-                          punchOut: t.punchOut ? new Date(t.punchOut).toISOString().slice(0, 16) : "",
-                          lunchInTime: t.lunchInTime ? new Date(t.lunchInTime).toISOString().slice(0, 16) : "",
-                          lunchOutTime: t.lunchOutTime ? new Date(t.lunchOutTime).toISOString().slice(0, 16) : "",
+                          punchIn: t.punchIn ? toDatetimeLocalValue(t.punchIn) : "",
+                          punchOut: t.punchOut ? toDatetimeLocalValue(t.punchOut) : "",
+                          lunchInTime: t.lunchInTime ? toDatetimeLocalValue(t.lunchInTime) : "",
+                          lunchOutTime: t.lunchOutTime ? toDatetimeLocalValue(t.lunchOutTime) : "",
                           status: t.status
                         });
                         setModifyOpen(true);
@@ -775,7 +780,9 @@ function AttendancePage() {
                           getDisplayStatus(t) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
                             t.status === "present" ? "bg-success/10 text-success" :
                               t.status === "late" ? "bg-warning/15 text-warning-foreground" :
-                                "bg-destructive/10 text-destructive"
+                                t.status === "half-day" ? "bg-warning/15 text-warning-foreground" :
+                                  t.status === "wfh" ? "bg-info/15 text-info" :
+                                    "bg-destructive/10 text-destructive"
                         )}
                       >{getDisplayStatus(t) === "on-duty" ? "On Duty" : t.status}</Badge>
                       {(() => {
@@ -802,10 +809,10 @@ function AttendancePage() {
                         onClick={() => {
                           setModifyForm({
                             id: t._id,
-                            punchIn: t.punchIn ? new Date(t.punchIn).toISOString().slice(0, 16) : "",
-                            punchOut: t.punchOut ? new Date(t.punchOut).toISOString().slice(0, 16) : "",
-                            lunchInTime: t.lunchInTime ? new Date(t.lunchInTime).toISOString().slice(0, 16) : "",
-                            lunchOutTime: t.lunchOutTime ? new Date(t.lunchOutTime).toISOString().slice(0, 16) : "",
+                            punchIn: t.punchIn ? toDatetimeLocalValue(t.punchIn) : "",
+                            punchOut: t.punchOut ? toDatetimeLocalValue(t.punchOut) : "",
+                            lunchInTime: t.lunchInTime ? toDatetimeLocalValue(t.lunchInTime) : "",
+                            lunchOutTime: t.lunchOutTime ? toDatetimeLocalValue(t.lunchOutTime) : "",
                             status: t.status
                           });
                           setModifyOpen(true);
@@ -1172,7 +1179,9 @@ function AttendancePage() {
                         getDisplayStatus(detailRecord) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
                           detailRecord.status === "present" ? "bg-success/10 text-success" :
                             detailRecord.status === "late" ? "bg-warning/15 text-warning-foreground" :
-                              "bg-destructive/10 text-destructive"
+                              detailRecord.status === "half-day" ? "bg-warning/15 text-warning-foreground" :
+                                detailRecord.status === "wfh" ? "bg-info/15 text-info" :
+                                  "bg-destructive/10 text-destructive"
                       )}
                     >
                       {getDisplayStatus(detailRecord) === "on-duty" ? "On Duty" : detailRecord.status}
