@@ -65,7 +65,12 @@ export const Route = createFileRoute("/_app/employees/$employeeId")({
 function EmployeeDetailsPage() {
   const [hasMounted, setHasMounted] = useState(false);
   const { employeeId } = useParams({ from: "/_app/employees/$employeeId" });
-  const { employees, isLoading: empLoading } = useEmployeeService();
+  // This page looks up one specific employee out of the full list, so it
+  // can't use the Directory's default (page 1, status "active" only) —
+  // an inactive employee, or one past the first page/limit, would get
+  // filtered out client-side before the lookup even runs, showing a false
+  // "Employee not found" for someone who genuinely exists.
+  const { employees, isLoading: empLoading } = useEmployeeService({ limit: 100000, status: "all" });
   const { departments, isLoading: deptLoading } = useDepartmentService();
   const { branches, isLoading: branchLoading } = useBranchService();
   const { shifts } = useShiftService();

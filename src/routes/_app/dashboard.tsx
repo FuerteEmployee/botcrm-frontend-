@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Users, UserCheck, UserX, Clock, Wallet, TrendingUp, BadgeDollarSign } from "lucide-react";
+import { Users, UserCheck, UserX, Clock, Wallet, TrendingUp, BadgeDollarSign, CalendarRange, CalendarDays } from "lucide-react";
 import {
   ResponsiveContainer,
   BarChart,
@@ -75,11 +75,37 @@ function SectionTitle({ title, subtitle }: { title: string; subtitle?: string })
   );
 }
 
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function DashboardPage() {
   const [hasMounted, setHasMounted] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState(`${MONTH_OPTIONS[0].m}-${MONTH_OPTIONS[0].y}`);
   const [month, year] = selectedMonth.split("-").map(Number);
-  const { summary, isLoading } = useDashboardService(month, year);
+
+  // "Custom Date" is a separate mode from the month picker, not another
+  // month option — it swaps the trigger for a single date input entirely.
+  const [filterMode, setFilterMode] = useState<"month" | "date">("month");
+  const [customDate, setCustomDate] = useState(todayISO);
+
+  const isCustomDateValid = filterMode === "date" && !!customDate;
+
+  // The month view always drives the charts (Attendance Performance, Budget
+  // Allocation) — a single custom date doesn't attempt to redraw those, it
+  // only overrides the stat-card numbers above them. So these are two
+  // independent queries, not one that swaps its params.
+  const { summary: monthSummary, isLoading: monthLoading } = useDashboardService({ month, year });
+  const { summary: dateSummary, isLoading: dateLoading } = useDashboardService({
+    startDate: customDate,
+    endDate: customDate,
+    enabled: isCustomDateValid,
+  });
+
+  const summary = monthSummary && (isCustomDateValid && dateSummary
+    ? { ...monthSummary, stats: dateSummary.stats, isCustomRange: true, startDate: dateSummary.startDate, endDate: dateSummary.endDate }
+    : monthSummary);
+  const isLoading = monthLoading || (isCustomDateValid && dateLoading);
 
   useEffect(() => {
     setHasMounted(true);
@@ -87,23 +113,46 @@ function DashboardPage() {
 
   if (!hasMounted) return null;
 
-  const monthPicker = (
-    <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-      <SelectTrigger className="w-[190px] h-10 text-[13px]">
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
-        {MONTH_OPTIONS.map((mo) => (
-          <SelectItem key={`${mo.m}-${mo.y}`} value={`${mo.m}-${mo.y}`}>{mo.label}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+  const filterControls = (
+    <div className="flex items-center gap-2">
+      {filterMode === "month" ? (
+        <Select value={selectedMonth} onValueChange={setSelectedMonth}>
+          <SelectTrigger className="w-[190px] h-10 text-[13px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {MONTH_OPTIONS.map((mo) => (
+              <SelectItem key={`${mo.m}-${mo.y}`} value={`${mo.m}-${mo.y}`}>{mo.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      ) : (
+        <input
+          type="date"
+          value={customDate}
+          max={todayISO()}
+          onChange={(e) => setCustomDate(e.target.value)}
+          className="h-10 rounded-md border border-input bg-transparent px-2.5 text-[13px] shadow-sm"
+        />
+      )}
+      <button
+        type="button"
+        title={filterMode === "month" ? "Filter by a specific date" : "Back to month view"}
+        onClick={() => setFilterMode(filterMode === "month" ? "date" : "month")}
+        className={cn(
+          "h-10 w-10 shrink-0 flex items-center justify-center rounded-md border transition-colors",
+          filterMode === "date" ? "border-primary/40 bg-primary/10 text-primary" : "border-input text-muted-foreground hover:text-foreground"
+        )}
+      >
+        {filterMode === "month" ? <CalendarRange className="h-4 w-4" /> : <CalendarDays className="h-4 w-4" />}
+      </button>
+    </div>
   );
 
   if (isLoading || !summary) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Admin Overview" description="Loading real-time metrics..." actions={monthPicker} />
+        <PageHeader title="Admin Overview" description="Loading real-time metrics..." actions={filterControls} />
         <SkeletonLoader type="stats" count={4} />
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <SkeletonLoader type="card" count={3} className="lg:col-span-3" />
@@ -112,21 +161,32 @@ function DashboardPage() {
     );
   }
 
-  const { stats, recentEmployees, pendingTickets, attendanceTrend, salaryDistribution, departmentHeadcount, isCurrentMonth } = summary;
+  const { stats, recentEmployees, pendingTickets, attendanceTrend, salaryDistribution, departmentHeadcount, isCurrentMonth, isCustomRange } = summary;
   const hasTrendData = attendanceTrend.some(d => d.present > 0 || d.absent > 0);
   const hasSalaryData = salaryDistribution.length > 0;
   const hasHeadcountData = departmentHeadcount.length > 0;
-  const dayLabel = isCurrentMonth ? "Today" : "(Month)";
+  // The charts below always reflect the selected month, regardless of the
+  // date filter — only these labels/description (and the stat cards) react
+  // to a custom date, so dayLabel checks isCustomRange first.
+  const dayLabel = isCustomRange ? "(Selected Date)" : isCurrentMonth ? "Today" : "(Month)";
+
+  const description = isCurrentMonth
+    ? "Monitor your workforce performance and operational trends in real-time."
+    : `Showing data for ${MONTH_OPTIONS.find(m => m.m === month && m.y === year)?.label || `${month}/${year}`}.`;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Admin Overview"
-        description={isCurrentMonth
-          ? "Monitor your workforce performance and operational trends in real-time."
-          : `Showing data for ${MONTH_OPTIONS.find(m => m.m === month && m.y === year)?.label || `${month}/${year}`}.`}
-        actions={monthPicker}
+        description={description}
+        actions={filterControls}
       />
+
+      {isCustomRange && (
+        <p className="text-[12px] text-muted-foreground -mt-3">
+          Cards below reflect <span className="font-semibold text-foreground">{summary.startDate}</span> · charts still show {MONTH_OPTIONS.find(m => m.m === month && m.y === year)?.label || `${month}/${year}`}
+        </p>
+      )}
 
       {/* Stat cards — row 1 */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

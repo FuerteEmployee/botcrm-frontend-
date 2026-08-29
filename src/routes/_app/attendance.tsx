@@ -35,7 +35,7 @@ import { useTicketService } from "@/services/ticket-service";
 import { parseTicketReason } from "@/lib/leave-ticket-parser";
 import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
-import { cn, toISTDateKey, toDatetimeLocalValue } from "@/lib/utils";
+import { cn, toISTDateKey, toDatetimeLocalValue, formatTime12h } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { StatCard } from "@/components/shared/stat-card";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
@@ -305,6 +305,16 @@ function AttendancePage() {
   const getDisplayStatus = (t: AttendanceRecord) => (t.punchIn && !t.punchOut ? "on-duty" : t.status);
 
   const isToday = (dateStr?: string) => !!dateStr && toISTDateKey(dateStr) === todayStr;
+
+  // Shift name + hours, shown alongside Punch In/Out so admins can visually
+  // check a punch against the shift it's being judged late/half-day against —
+  // the status badge alone doesn't say what the cutoff actually was.
+  const getShiftLabel = (t: AttendanceRecord) => {
+    const shift = t.employeeId?.shiftId;
+    if (!shift) return null;
+    const hours = shift.startTime && shift.endTime ? `${formatTime12h(shift.startTime)} – ${formatTime12h(shift.endTime)}` : null;
+    return { name: shift.name, hours };
+  };
 
   // Lens/biometric devices only send a generic punch-in/punch-out toggle —
   // they can't tell a lunch break from the real end of day, so today's
@@ -594,7 +604,11 @@ function AttendancePage() {
               <GridCard
                 key={t._id}
                 title={t.employeeId?.name || "Unknown"}
-                subtitle={new Date(t.date).toLocaleDateString()}
+                subtitle={(() => {
+                  const shift = getShiftLabel(t);
+                  const dateStr = new Date(t.date).toLocaleDateString();
+                  return shift ? `${dateStr} · ${shift.name}${shift.hours ? ` (${shift.hours})` : ""}` : `${dateStr} · No Shift`;
+                })()}
                 icon={
                   t.punchInPhoto ? (
                     <img
