@@ -26,7 +26,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useBranchService, type Branch as BackendBranch } from "@/services/branch-service";
-import { acquirePosition, openLocationSettings, getIOSUnblockInstructions } from "@/lib/geolocation";
+import { acquirePosition, openLocationSettings, getIOSUnblockInstructions, isNativeApp } from "@/lib/geolocation";
 
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { useLayoutSettings } from "@/hooks/use-layout-settings";
@@ -112,13 +112,15 @@ function BranchesPage() {
       toast.success("High-precision location fetched");
     } else {
       if (res.reason === "denied") {
-        const opened = await openLocationSettings("denied");
-        if (!opened) {
-          toast.error("Location permission denied on iOS/Browser.", {
-            description: getIOSUnblockInstructions(),
-            duration: 8000,
-          });
-        }
+        toast.error("Location Permission Denied", {
+          description: isNativeApp()
+            ? "Allow location access for this app in Settings, then try auto-detect again."
+            : getIOSUnblockInstructions(),
+          duration: 10000,
+          action: isNativeApp()
+            ? { label: "Open Settings", onClick: () => { void openLocationSettings("denied"); } }
+            : undefined,
+        });
       } else {
         toast.error("Failed to fetch location: " + res.message);
       }
