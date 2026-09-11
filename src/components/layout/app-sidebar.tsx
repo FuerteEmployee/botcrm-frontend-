@@ -1,4 +1,4 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+﻿import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard,
   Users,
@@ -49,7 +49,7 @@ const NAV: NavItem[] = [
   { to: "/departments", label: "Departments", icon: Building2 },
   { to: "/employees", label: "Employees", icon: Users },
   { to: "/leaves", label: "Leave Management", icon: CalendarDays },
-  { to: "/attendance", label: "Attendance Logs", icon: CalendarCheck },
+  { to: "/attendance", label: "Attendance Dashboard", icon: CalendarCheck },
   { to: "/tickets", label: "Helpdesk Tickets", icon: Ticket },
   { to: "/salary", label: "Salary", icon: Wallet },
   { to: "/advance-salary", label: "Advance Salary & Loan", icon: Coins },
@@ -105,7 +105,7 @@ export function AppSidebar({
     : orderedNav;
   const canReorder = !query;
 
-  // ── Drag state ──────────────────────────────────────────────────────────────
+  // â”€â”€ Drag state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Refs so window listeners never have stale closure values.
   const dragIndexRef = useRef<number | null>(null);
   const overIndexRef = useRef<number | null>(null);
@@ -115,7 +115,7 @@ export function AppSidebar({
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
 
-  // One ref per visible list item — used to calculate drop slots.
+  // One ref per visible list item â€” used to calculate drop slots.
   const itemRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   /** Return the list index that corresponds to a given clientY position. */
@@ -133,11 +133,11 @@ export function AppSidebar({
   /**
    * Attached to every draggable row's onPointerDown.
    *
-   * Phase 1 – monitor movement. If the pointer moves > DRAG_THRESHOLD px
+   * Phase 1 â€“ monitor movement. If the pointer moves > DRAG_THRESHOLD px
    *           before lifting, this becomes a drag; otherwise it's a click
    *           and we do nothing (the Link inside handles navigation).
    *
-   * Phase 2 – active drag. Update the over-index on every pointermove and
+   * Phase 2 â€“ active drag. Update the over-index on every pointermove and
    *           commit the new order on pointerup.
    */
   const handleItemPointerDown = useCallback(
@@ -153,7 +153,7 @@ export function AppSidebar({
         const dx = mv.clientX - startX;
         const dy = mv.clientY - startY;
 
-        // ── Activate drag once threshold is exceeded ──
+        // â”€â”€ Activate drag once threshold is exceeded â”€â”€
         if (!dragging && Math.sqrt(dx * dx + dy * dy) > DRAG_THRESHOLD) {
           dragging = true;
           dragIndexRef.current = idx;
@@ -163,7 +163,7 @@ export function AppSidebar({
           document.body.style.cursor = "grabbing";
         }
 
-        // ── Update drop-target slot ──
+        // â”€â”€ Update drop-target slot â”€â”€
         if (dragging) {
           const slot = getSlotIndex(mv.clientY);
           if (slot !== overIndexRef.current) {
@@ -179,7 +179,7 @@ export function AppSidebar({
         window.removeEventListener("pointercancel", onUp);
         document.body.style.cursor = "";
 
-        if (!dragging) return; // pure click → let Link navigate normally
+        if (!dragging) return; // pure click â†’ let Link navigate normally
 
         // Swallow the synthetic click that fires after pointerup so the
         // Link doesn't navigate after a drag.
@@ -214,7 +214,7 @@ export function AppSidebar({
   );
 
   const handleLogout = async () => {
-    // Awaited so the session is cleared before we navigate — otherwise /login
+    // Awaited so the session is cleared before we navigate â€” otherwise /login
     // can briefly still see a session and bounce back.
     await logoutAndClear();
     toast.success("Logged out");
@@ -299,7 +299,7 @@ export function AppSidebar({
           )}
 
           {canReorder ? (
-            /* ── Draggable list ─────────────────────────────────────────── */
+            /* â”€â”€ Draggable list â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
             <div
               className="flex-1 min-h-0 overflow-y-auto scrollbar-thin"
               style={{ userSelect: "none" }}
@@ -329,7 +329,7 @@ export function AppSidebar({
                       isDragging && "opacity-35 scale-[0.97] ring-1 ring-primary/20",
                     )}
                   >
-                    {/* ── Drop indicators ── */}
+                    {/* â”€â”€ Drop indicators â”€â”€ */}
                     {showAbove && (
                       <div className="absolute -top-px inset-x-1 h-[2px] rounded-full bg-primary z-10 shadow-sm shadow-primary/30" />
                     )}
@@ -347,7 +347,7 @@ export function AppSidebar({
               })}
             </div>
           ) : (
-            /* ── Filtered / search list (no drag) ──────────────────────── */
+            /* â”€â”€ Filtered / search list (no drag) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
             <div className="flex-1 min-h-0 overflow-y-auto scrollbar-thin space-y-0.5">
               <AnimatePresence initial={false}>
                 {displayedNav.map((item, idx) => (
@@ -425,7 +425,7 @@ function isNavItemActive(item: NavItem, pathname: string) {
   );
 }
 
-/** Pure presentational nav link — zero drag logic */
+/** Pure presentational nav link â€” zero drag logic */
 function NavLink({
   item,
   active,

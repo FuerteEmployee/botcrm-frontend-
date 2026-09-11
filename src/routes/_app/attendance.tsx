@@ -665,141 +665,140 @@ function AttendancePage() {
         }
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* One row, not two. Six tall cards stacked 2x3 pushed the table itself
+          below the fold -- the numbers are context, the rows are the point. */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         <StatCard label="Present Today" value={stats?.presentToday ?? counts.present} icon={Check} accent="success" delay={0} />
-        <StatCard label="Late Arrivals" value={stats?.lateArrivals ?? counts.late} icon={ClockIcon} accent="warning" delay={0.05} />
+        <StatCard label="Late Arrivals" value={stats?.lateArrivals ?? counts.late} icon={ClockIcon} accent="warning" delay={0.04} />
         <StatCard label="Half Day Today" value={stats?.halfDayToday ?? counts.halfDay} icon={ClockIcon} accent="warning" delay={0.08} />
-        <StatCard label="On Leave" value={onLeaveCount} icon={CalendarDays} accent="info" delay={0.1} />
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <StatCard label="On Leave" value={onLeaveCount} icon={CalendarDays} accent="info" delay={0.12} />
         <div onClick={() => setAbsentSheetOpen(true)} className="cursor-pointer">
-          <StatCard label="Absent Today" value={stats?.absentToday ?? counts.absent} icon={UserX} accent="destructive" delay={0.25} />
+          <StatCard label="Absent Today" value={stats?.absentToday ?? counts.absent} icon={UserX} accent="destructive" delay={0.16} />
         </div>
         <div onClick={() => setRegSheetOpen(true)} className="cursor-pointer">
-          <StatCard label="Pending Regularizations" value={pendingRegularizations.length} icon={ClipboardList} accent="warning" delay={0.3} />
+          <StatCard label="Pending Regularizations" value={pendingRegularizations.length} icon={ClipboardList} accent="warning" delay={0.2} />
         </div>
+      </div>
+
+      {/* ── Status chips ─────────────────────────────────────────────────────── */}
+      {/* Each chip carries its count for the day and filters currently in view,
+          so the number always matches the rows below it. Given their own row
+          because sharing one with the selects wrapped them onto four lines. */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+          {STATUS_CHIPS.map((c) => {
+            const n = chipCount(c.id);
+            const active = tab === c.id;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => { setTab(c.id); setTablePage(1); setCardPage(1); }}
+                className={cn(
+                  "h-9 px-3.5 rounded-xl border text-[12.5px] font-semibold transition-all inline-flex items-center gap-1.5",
+                  active
+                    ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                    : "bg-transparent text-muted-foreground border-border/60 hover:border-primary/40 hover:text-foreground",
+                )}
+              >
+                {c.label}
+                <span className={cn("text-[11px] font-bold tabular-nums", active ? "opacity-75" : "text-muted-foreground/60")}>
+                  {n}
+                </span>
+              </button>
+            );
+          })}
       </div>
 
       {/* ── Filters Bar ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row items-center justify-between gap-3 py-1">
-        <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
-          <ViewToggle view={view} onViewChange={updateDefaultLayout} />
+      <div className="flex flex-wrap items-center gap-2.5 py-1">
+        <ViewToggle view={view} onViewChange={updateDefaultLayout} />
 
-          {/* Status chips. Each carries its count for the day and filters in
-              view, so the number always matches the rows below. */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {STATUS_CHIPS.map((c) => {
-              const n = chipCount(c.id);
-              const active = tab === c.id;
-              return (
-                <button
-                  key={c.id}
-                  type="button"
-                  onClick={() => { setTab(c.id); setTablePage(1); setCardPage(1); }}
-                  className={cn(
-                    "h-9 px-3.5 rounded-xl border text-[12.5px] font-semibold transition-all inline-flex items-center gap-1.5",
-                    active
-                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                      : "bg-transparent text-muted-foreground border-border/60 hover:border-primary/40 hover:text-foreground",
-                  )}
-                >
-                  {c.label}
-                  <span className={cn("text-[11px] font-bold tabular-nums", active ? "opacity-75" : "text-muted-foreground/60")}>
-                    {n}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+        <Select value={shiftFilter} onValueChange={(v) => { setShiftFilter(v); setTablePage(1); setCardPage(1); }}>
+          <SelectTrigger className="w-full md:w-[150px] h-10 border border-info/20 bg-info/5 text-info hover:bg-info/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
+          <Layers className="h-3.5 w-3.5" />
+          <SelectValue placeholder="Shift" />
+          </SelectTrigger>
+          <SelectContent className="rounded-xl border-border/60">
+          <SelectItem value="all">All Shifts</SelectItem>
+          {shifts.map((s) => (
+            <SelectItem key={s._id} value={s._id}>{s.name}</SelectItem>
+          ))}
+          </SelectContent>
+        </Select>
 
-          <Select value={shiftFilter} onValueChange={(v) => { setShiftFilter(v); setTablePage(1); setCardPage(1); }}>
-            <SelectTrigger className="w-full md:w-[150px] h-10 border border-info/20 bg-info/5 text-info hover:bg-info/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
-              <Layers className="h-3.5 w-3.5" />
-              <SelectValue placeholder="Shift" />
-            </SelectTrigger>
-            <SelectContent className="rounded-xl border-border/60">
-              <SelectItem value="all">All Shifts</SelectItem>
-              {shifts.map((s) => (
-                <SelectItem key={s._id} value={s._id}>{s.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <Select value={branchFilter} onValueChange={(v) => { setBranchFilter(v); setTablePage(1); setCardPage(1); }}>
+          <SelectTrigger className="w-full md:w-[160px] h-10 border border-border/60 bg-muted/20 text-foreground hover:bg-muted/40 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
+          <MapPin className="h-3.5 w-3.5" />
+          <SelectValue placeholder="Branch" />
+          </SelectTrigger>
+          <SelectContent className="rounded-xl border-border/60">
+          <SelectItem value="all">All Branches</SelectItem>
+          {branches.map((b: any) => (
+            <SelectItem key={b._id} value={b._id}>{b.branchName}</SelectItem>
+          ))}
+          </SelectContent>
+        </Select>
 
-          <Select value={branchFilter} onValueChange={(v) => { setBranchFilter(v); setTablePage(1); setCardPage(1); }}>
-            <SelectTrigger className="w-full md:w-[160px] h-10 border border-border/60 bg-muted/20 text-foreground hover:bg-muted/40 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
-              <MapPin className="h-3.5 w-3.5" />
-              <SelectValue placeholder="Branch" />
-            </SelectTrigger>
-            <SelectContent className="rounded-xl border-border/60">
-              <SelectItem value="all">All Branches</SelectItem>
-              {branches.map((b: any) => (
-                <SelectItem key={b._id} value={b._id}>{b.branchName}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              onClick={() => shiftDay(-1)}
-              aria-label="Previous day"
-              className="h-10 w-10 rounded-xl shrink-0"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <FormInput
-              type="date"
-              icon={CalendarDays}
-              max={todayStr}
-              className="h-10 w-full md:w-[170px] shadow-none"
-              value={dateFilter}
-              onChange={(e) => { setDateFilter(e.target.value); setTablePage(1); setCardPage(1); }}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              onClick={() => shiftDay(1)}
-              disabled={!dateFilter || dateFilter >= todayStr}
-              aria-label="Next day"
-              className="h-10 w-10 rounded-xl shrink-0"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-            {dateFilter && dateFilter !== todayStr && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => { setDateFilter(todayStr); setTablePage(1); setCardPage(1); }}
-                className="h-10 px-3 rounded-xl text-[12px] text-muted-foreground hover:text-foreground whitespace-nowrap"
-              >
-                Today
-              </Button>
-            )}
-            {dateFilter && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => { setDateFilter(""); setTablePage(1); setCardPage(1); }}
-                className="h-10 px-3 rounded-xl text-[12px] text-muted-foreground hover:text-foreground whitespace-nowrap"
-              >
-                Clear
-              </Button>
-            )}
-          </div>
+        <div className="flex items-center gap-2">
+          <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onClick={() => shiftDay(-1)}
+          aria-label="Previous day"
+          className="h-10 w-10 rounded-xl shrink-0"
+          >
+          <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <FormInput
+          type="date"
+          icon={CalendarDays}
+          max={todayStr}
+          className="h-10 w-full md:w-[170px] shadow-none"
+          value={dateFilter}
+          onChange={(e) => { setDateFilter(e.target.value); setTablePage(1); setCardPage(1); }}
+          />
+          <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onClick={() => shiftDay(1)}
+          disabled={!dateFilter || dateFilter >= todayStr}
+          aria-label="Next day"
+          className="h-10 w-10 rounded-xl shrink-0"
+          >
+          <ChevronRight className="h-4 w-4" />
+          </Button>
+          {dateFilter && dateFilter !== todayStr && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => { setDateFilter(todayStr); setTablePage(1); setCardPage(1); }}
+            className="h-10 px-3 rounded-xl text-[12px] text-muted-foreground hover:text-foreground whitespace-nowrap"
+          >
+            Today
+          </Button>
+          )}
+          {dateFilter && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => { setDateFilter(""); setTablePage(1); setCardPage(1); }}
+            className="h-10 px-3 rounded-xl text-[12px] text-muted-foreground hover:text-foreground whitespace-nowrap"
+          >
+            Clear
+          </Button>
+        )}
         </div>
 
         <FormInput
-          placeholder="Search employee..."
-          icon={Search}
-          className="h-10 w-full md:w-[260px] shadow-none"
-          value={search}
-          onChange={(e) => { setSearch(e.target.value); setTablePage(1); setCardPage(1); }}
+        placeholder="Search employee..."
+        icon={Search}
+        className="h-10 w-full md:w-[260px] shadow-none"
+        value={search}
+        onChange={(e) => { setSearch(e.target.value); setTablePage(1); setCardPage(1); }}
         />
       </div>
 
