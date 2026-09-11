@@ -602,9 +602,12 @@ function UserDashboard() {
     let currentLocation = null;
     let currentAddress = "Locating...";
 
+    let currentAccuracy: number | null = null;
+
     const result = await acquirePosition();
     if (result.ok) {
       currentLocation = { lat: result.coords.lat, lng: result.coords.lng };
+      currentAccuracy = result.coords.accuracy;
       currentAddress = await resolveAddress(result.coords.lat, result.coords.lng);
       setLocation(currentLocation);
       setLocationAccuracy(result.coords.accuracy);
@@ -614,13 +617,16 @@ function UserDashboard() {
       currentAddress = "Location Capturing Bypassed";
       setLocationFailReason(result.reason);
     }
-    return { currentLocation, currentAddress };
+    // Accuracy travels with the punch: the server refuses a fix too poor to
+    // place someone, and stores the figure so a disputed punch can be judged
+    // later. It was previously captured into state and then dropped here.
+    return { currentLocation, currentAddress, currentAccuracy };
   };
 
   // Punch Mutators (Accept base64 selfie parameter)
   const punchInMutation = useMutation({
     mutationFn: async (photoArg: string) => {
-      const { currentLocation, currentAddress } = await getFreshLocation();
+      const { currentLocation, currentAddress, currentAccuracy } = await getFreshLocation();
 
       // Office employees need a real location — null would make the backend
       // calculate Infinity distance and reject with 400.
@@ -639,6 +645,8 @@ function UserDashboard() {
         photo: photoArg,
         isWFH: !profile?.branchId,
         address: currentAddress === "GPS permissions needed" ? "Location Capturing Bypassed" : currentAddress,
+        accuracy: currentAccuracy,
+        fixAt: new Date().toISOString(),
       };
       const { data } = await apiClient.post("/attendance/punch-in", payload);
       return data;
@@ -655,7 +663,7 @@ function UserDashboard() {
 
   const punchOutMutation = useMutation({
     mutationFn: async (photoArg: string) => {
-      const { currentLocation, currentAddress } = await getFreshLocation();
+      const { currentLocation, currentAddress, currentAccuracy } = await getFreshLocation();
 
       if (!currentLocation && profile?.branchId) {
         throw {
@@ -671,6 +679,8 @@ function UserDashboard() {
         location: currentLocation,
         photo: photoArg,
         address: currentAddress === "GPS permissions needed" ? "Location Capturing Bypassed" : currentAddress,
+        accuracy: currentAccuracy,
+        fixAt: new Date().toISOString(),
       };
       const { data } = await apiClient.post("/attendance/punch-out", payload);
       return data;
@@ -691,6 +701,11 @@ function UserDashboard() {
         address: (!address || address === "GPS permissions needed" || address === "Locating...")
           ? "Location Capturing Bypassed"
           : address,
+        // Lunch is geofenced server-side too, so it needs the same fix
+        // quality as a punch. Paired with `location` above -- both come
+        // from the same captured position, so they describe one reading.
+        accuracy: locationAccuracy,
+        fixAt: new Date().toISOString(),
       };
       const { data } = await apiClient.post("/attendance/lunch-in", payload);
       return data;
@@ -712,6 +727,11 @@ function UserDashboard() {
         address: (!address || address === "GPS permissions needed" || address === "Locating...")
           ? "Location Capturing Bypassed"
           : address,
+        // Lunch is geofenced server-side too, so it needs the same fix
+        // quality as a punch. Paired with `location` above -- both come
+        // from the same captured position, so they describe one reading.
+        accuracy: locationAccuracy,
+        fixAt: new Date().toISOString(),
       };
       const { data } = await apiClient.post("/attendance/lunch-out", payload);
       return data;

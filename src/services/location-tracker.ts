@@ -11,7 +11,7 @@ export class LocationTracker {
   private pingIntervalId: ReturnType<typeof setInterval> | null = null;
   private lastHandledPingAt: number = 0;
   private isRunning: boolean = false;
-  private lastPosition: { lat: number; lng: number; accuracy: number } | null = null;
+  private lastPosition: { lat: number; lng: number; accuracy: number | null } | null = null;
 
   constructor(employeeId: string) {
     this.employeeId = employeeId;
@@ -30,7 +30,7 @@ export class LocationTracker {
           this.lastPosition = {
             lat: pos.coords.latitude,
             lng: pos.coords.longitude,
-            accuracy: pos.coords.accuracy || 0,
+            accuracy: pos.coords.accuracy ?? null,
           };
         },
         () => {},
@@ -52,7 +52,7 @@ export class LocationTracker {
           const payload = {
             lat: pos.coords.latitude,
             lng: pos.coords.longitude,
-            accuracy: pos.coords.accuracy || 0,
+            accuracy: pos.coords.accuracy ?? null,
           };
           this.lastPosition = payload;
           this.sendLocation(payload);
@@ -75,7 +75,7 @@ export class LocationTracker {
     }
   }
 
-  private sendLocation(pos: { lat: number; lng: number; accuracy: number }) {
+  private sendLocation(pos: { lat: number; lng: number; accuracy: number | null }) {
     const payload = {
       employeeId: this.employeeId,
       lat: pos.lat,
@@ -108,7 +108,7 @@ export class LocationTracker {
             const payload = {
               lat: pos.coords.latitude,
               lng: pos.coords.longitude,
-              accuracy: pos.coords.accuracy || 0,
+              accuracy: pos.coords.accuracy ?? null,
             };
             this.lastPosition = payload;
             this.sendLocation(payload);
