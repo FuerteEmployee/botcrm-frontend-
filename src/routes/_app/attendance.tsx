@@ -27,7 +27,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { useAttendanceService, useAttendanceStats, useAbsentToday, usePunchLog, type AttendanceRecord } from "@/services/attendance-service";
+import { useAttendanceService, useAttendanceStats, useAbsentToday, usePunchLog, type AttendanceRecord, type PunchLogTap } from "@/services/attendance-service";
 import { useRegularizationService } from "@/services/regularization-service";
 import { useShiftService } from "@/services/shift-service";
 import { useEmployeeService } from "@/services/employee-service";
@@ -62,8 +62,7 @@ const TAP_LABELS: Record<string, string> = {
   "punch-out": "Punch out",
 };
 
-function RawTapList({ employeeId, date }: { employeeId?: string; date: string }) {
-  const { taps, isLoading } = usePunchLog(employeeId, date);
+function RawTapList({ taps, isLoading }: { taps: PunchLogTap[]; isLoading: boolean }) {
   const counted = taps.filter((t) => !t.discarded);
 
   return (
@@ -388,7 +387,7 @@ function AttendancePage() {
   // `punchOut` may just be the most recent lunch-out. Only trust it once the
   // day is over. Use "Lens Info" (below) to see every raw event for today
   // regardless.
-  const isDeviceSource = (t: AttendanceRecord) => t.source === "lens" || t.source === "biometric";
+
 
   // Once the employee explicitly punches out via the app, punchOutIsProvisional
   // is cleared server-side even on a Lens-started day — so this shows their
@@ -478,6 +477,18 @@ function AttendancePage() {
   const [regSheetOpen, setRegSheetOpen] = useState(false);
   const [detailRecord, setDetailRecord] = useState<AttendanceRecord | null>(null);
   const [showAllSessions, setShowAllSessions] = useState(false);
+
+  // Raw device taps for whichever detail sheet is open. Fetched at this level,
+  // not inside the panel, so the button can key off taps actually existing.
+  // The record's `source` is the wrong signal: it records which channel
+  // CREATED the day, so a day opened on the app and later tapped on the
+  // terminal reads as 'app' and hid the list for exactly the mixed case where
+  // it matters most.
+  const { taps: detailTaps, isLoading: detailTapsLoading } = usePunchLog(
+    detailRecord?.employeeId?._id,
+    detailRecord ? toISTDateKey(new Date(detailRecord.date)) : undefined,
+    !!detailRecord,
+  );
   const [correctionOpen, setCorrectionOpen] = useState(false);
   const [correctionForm, setCorrectionForm] = useState({
     employeeId: "",
@@ -1279,7 +1290,7 @@ function AttendancePage() {
                         </span>
                       );
                     })()}
-                    {isDeviceSource(detailRecord) && (detailRecord.shifts?.length ?? 0) > 0 && (
+                    {detailTaps.length > 0 && (
                       <button
                         type="button"
                         onClick={() => setShowAllSessions((v) => !v)}
@@ -1369,11 +1380,8 @@ function AttendancePage() {
                   })()}
                 </Card>
 
-                {showAllSessions && isDeviceSource(detailRecord) && (
-                  <RawTapList
-                    employeeId={detailRecord.employeeId?._id}
-                    date={toISTDateKey(new Date(detailRecord.date))}
-                  />
+                {showAllSessions && detailTaps.length > 0 && (
+                  <RawTapList taps={detailTaps} isLoading={detailTapsLoading} />
                 )}
 
                 <div className="grid grid-cols-2 gap-4">
