@@ -28,7 +28,7 @@ import {
 import { useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
-import { clearSession } from "@/lib/auth";
+import { logoutAndClear } from "@/lib/logout";
 import { useAuth } from "@/hooks/use-auth";
 import { useSidebarOrder } from "@/hooks/use-sidebar-order";
 import { useNavigate } from "@tanstack/react-router";
@@ -213,8 +213,10 @@ export function AppSidebar({
     [reorder],
   );
 
-  const handleLogout = () => {
-    clearSession();
+  const handleLogout = async () => {
+    // Awaited so the session is cleared before we navigate — otherwise /login
+    // can briefly still see a session and bounce back.
+    await logoutAndClear();
     toast.success("Logged out");
     navigate({ to: "/login" });
   };

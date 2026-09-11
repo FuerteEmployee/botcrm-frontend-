@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Outlet, useNavigate, Link, useLocation, createFileRoute, redirect } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/use-auth";
-import { clearSession, getSession } from "@/lib/auth";
+import { getSession } from "@/lib/auth";
+import { logoutAndClear } from "@/lib/logout";
 import {
   Home, CalendarDays, Ticket, LogOut, Sparkles, Coins, Gift, Zap,
   type LucideIcon
@@ -59,8 +60,8 @@ function UserLayout() {
     window.localStorage.setItem("bot_theme", next ? "dark" : "light");
   };
 
-  const handleLogout = () => {
-    clearSession();
+  const handleLogout = async () => {
+    await logoutAndClear();
     toast.success("Successfully logged out");
     navigate({ to: "/login" });
   };

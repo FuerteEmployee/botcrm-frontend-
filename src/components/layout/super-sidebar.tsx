@@ -8,7 +8,8 @@ import {
   Fingerprint,
   LogOut,
 } from "lucide-react";
-import { clearSession, getSession } from "@/lib/auth";
+import { getSession } from "@/lib/auth";
+import { logoutAndClear } from "@/lib/logout";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import logo from "@/assets/bot-logo.png";
@@ -135,8 +136,8 @@ export function SuperSidebar({ collapsed = false }: { collapsed?: boolean }) {
             </div>
           )}
           <button
-            onClick={() => {
-              clearSession();
+            onClick={async () => {
+              await logoutAndClear();
               window.location.href = "/login";
             }}
             className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors shrink-0"

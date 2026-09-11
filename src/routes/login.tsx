@@ -195,13 +195,6 @@ function LoginPage() {
 
     setLoading(true);
     try {
-      try {
-        const ipRes = await fetch("https://api.ipify.org?format=json").then((r) => r.json());
-        if (ipRes?.ip) window.localStorage.setItem("bot_temp_ip", ipRes.ip);
-      } catch {
-        // IP fetch is best-effort
-      }
-
       const { data } = await apiClient.post("/users/verify-otp", {
         phone: cleaned,
         otp: code,
@@ -211,6 +204,7 @@ function LoginPage() {
         phone: `+91 ${data.phone}`,
         name: data.name,
         role: data.role,
+        adminId: data.adminId,
         companyName: data.companyName,
         companyLogo: data.companyLogo,
         address: data.address,

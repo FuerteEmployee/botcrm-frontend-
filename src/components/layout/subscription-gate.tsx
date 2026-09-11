@@ -3,7 +3,7 @@ import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { AlertTriangle, Lock, Clock, Phone } from "lucide-react";
 import { useMySubscription, SUPPORT_PHONES, telHref } from "@/services/subscription-service";
 import { useAuth } from "@/hooks/use-auth";
-import { clearSession } from "@/lib/auth";
+import { logoutAndClear } from "@/lib/logout";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -96,8 +96,8 @@ export function SubscriptionGate({ children }: { children: ReactNode }) {
               variant="ghost"
               size="sm"
               className="w-full text-muted-foreground"
-              onClick={() => {
-                clearSession();
+              onClick={async () => {
+                await logoutAndClear();
                 navigate({ to: "/login" });
               }}
             >
