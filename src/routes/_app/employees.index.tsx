@@ -34,6 +34,7 @@ import { Employee, useEmployeeService, type Employee as BackendEmployee } from "
 import { useDepartmentService } from "@/services/department-service";
 import { useBranchService } from "@/services/branch-service";
 import { useShiftService } from "@/services/shift-service";
+import { useClientDevices, latestDeviceByEmployee } from "@/services/client-service";
 import { cn } from "@/lib/utils";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { useLayoutSettings } from "@/hooks/use-layout-settings";
@@ -100,6 +101,8 @@ function EmployeesPage() {
   const { departments } = useDepartmentService();
   const { branches } = useBranchService();
   const { shifts } = useShiftService();
+  const { data: devices } = useClientDevices();
+  const byEmployee = useMemo(() => latestDeviceByEmployee(devices), [devices]);
 
   useEffect(() => {
     setHasMounted(true);
@@ -307,7 +310,7 @@ function EmployeesPage() {
             <DataTable
               headers={[
                 <div key="emp" className="w-[200px]">Employee Details</div>,
-                "Mobile", "Department", "Shift", "Branch / Location", "Status", <div key="act" className="text-right">Actions</div>
+                "Mobile", "Department", "Shift", "Branch / Location", "App Version", "Status", <div key="act" className="text-right">Actions</div>
               ]}
               isEmpty={pageData.length === 0}
               emptyMessage={
@@ -387,6 +390,22 @@ function EmployeesPage() {
                         </Badge>
                       )}
                     </div>
+                  </DataTableCell>
+                  <DataTableCell className="text-[13px] font-medium text-muted-foreground">
+                    {(() => {
+                      const device = byEmployee.get(e._id);
+                      if (!device?.appVersion) {
+                        return <span className="text-[13px] text-muted-foreground/50 font-medium">—</span>;
+                      }
+                      return (
+                        <span className="text-[12px] font-medium text-foreground">
+                          {device.appVersion}
+                          {device.appBuild ? (
+                            <span className="text-muted-foreground text-[11px] ml-1">({device.appBuild})</span>
+                          ) : null}
+                        </span>
+                      );
+                    })()}
                   </DataTableCell>
                   <DataTableCell>
                     <div className="flex items-center gap-3">

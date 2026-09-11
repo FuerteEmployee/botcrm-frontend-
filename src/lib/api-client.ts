@@ -9,6 +9,21 @@ export const IMAGE_BASE_URL = API_BASE_URL.replace(/\/api$/, "");
 const LOGOUT_TOAST_DURATION_MS = 5000;
 let isHandlingForcedLogout = false;
 
+// Set by lib/client-telemetry at startup. Registered through a setter rather
+// than imported directly, because client-telemetry imports apiClient from this
+// module — a direct import back would be a cycle evaluated at module load.
+type NetworkErrorReporter = (info: {
+  message: string;
+  requestUrl: string | null;
+  statusCode: number | null;
+}) => void;
+
+let networkErrorReporter: NetworkErrorReporter | null = null;
+
+export function setNetworkErrorReporter(fn: NetworkErrorReporter) {
+  networkErrorReporter = fn;
+}
+
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -83,6 +98,26 @@ apiClient.interceptors.response.use(
             },
           })
         );
+      }
+    }
+
+    // Record failed API calls so the team can see what employees actually hit.
+    // Excluded: 401/403 (expected auth/gating outcomes, not defects) and the
+    // telemetry endpoints themselves, which would loop.
+    const status = error.response?.status ?? null;
+    const url: string = error.config?.url || "";
+    if (networkErrorReporter && !url.startsWith("/client/") && status !== 401 && status !== 403) {
+      try {
+        networkErrorReporter({
+          message:
+            error.response?.data?.message ||
+            error.message ||
+            `Request failed${status ? ` with ${status}` : ""}`,
+          requestUrl: `${error.config?.method?.toUpperCase() || "GET"} ${url}`,
+          statusCode: status,
+        });
+      } catch {
+        /* reporting must never mask the original error */
       }
     }
 
