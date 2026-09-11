@@ -27,7 +27,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { useAttendanceService, useAttendanceStats, useAbsentToday, type AttendanceRecord } from "@/services/attendance-service";
+import { useAttendanceService, useAttendanceStats, useAbsentToday, usePunchLog, type AttendanceRecord } from "@/services/attendance-service";
 import { useRegularizationService } from "@/services/regularization-service";
 import { useShiftService } from "@/services/shift-service";
 import { useEmployeeService } from "@/services/employee-service";
@@ -46,6 +46,73 @@ import { usePermission } from "@/hooks/use-permission";
 const attendanceSearchSchema = z.object({
   status: z.string().optional(),
 });
+
+// Every raw tap the terminal reported for one employee on one day.
+//
+// The day's punch-in/punch-out are derived from the whole set, not decided tap
+// by tap (see backend/src/utils/punch_reconcile.js) — so with more than four
+// taps only the first and last carry a meaning, and this list is the only place
+// the rest are visible. Rejected taps are shown too, greyed out with a reason:
+// a debounced double-press is the usual answer to "I tapped and it didn't
+// count", and hiding it would defeat the point of the list.
+const TAP_LABELS: Record<string, string> = {
+  "punch-in": "Punch in",
+  "lunch-in": "Lunch break starts",
+  "lunch-out": "Back from lunch",
+  "punch-out": "Punch out",
+};
+
+function RawTapList({ employeeId, date }: { employeeId?: string; date: string }) {
+  const { taps, isLoading } = usePunchLog(employeeId, date);
+  const counted = taps.filter((t) => !t.discarded);
+
+  return (
+    <Card className="p-4 bg-muted/20 border-border/40 rounded-2xl shadow-none space-y-3">
+      <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1.5">
+        <Fingerprint className="h-3 w-3" /> Device Taps ({counted.length}
+        {taps.length !== counted.length ? ` + ${taps.length - counted.length} ignored` : ""})
+      </p>
+
+      {isLoading ? (
+        <p className="text-[12px] text-muted-foreground">Loading taps…</p>
+      ) : taps.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">
+          No raw taps recorded for this day. Records created before tap logging was enabled only
+          store the derived punch times.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          {taps.map((t) => (
+            <div
+              key={t._id}
+              className={cn(
+                "flex items-center justify-between gap-3 rounded-lg px-3 py-1.5 border text-[12px]",
+                t.discarded
+                  ? "bg-background/30 border-border/30 opacity-60"
+                  : "bg-background/60 border-border/40",
+              )}
+            >
+              <span className={cn("font-mono font-bold", t.discarded && "line-through")}>
+                {formatTime12h(t.deviceTime)}
+              </span>
+              <span className="flex-1 text-right font-sans text-[10px] font-bold uppercase tracking-wider">
+                {t.discarded ? (
+                  <span className="text-muted-foreground">
+                    {t.discardReason === "debounced" ? "Ignored — double tap" : `Ignored — ${t.discardReason}`}
+                  </span>
+                ) : t.derivedAction ? (
+                  <span className="text-primary">{TAP_LABELS[t.derivedAction] ?? t.derivedAction}</span>
+                ) : (
+                  <span className="text-muted-foreground/60">Extra tap</span>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
 
 export const Route = createFileRoute("/_app/attendance")({
   validateSearch: (search) => attendanceSearchSchema.parse(search),
@@ -329,13 +396,17 @@ function AttendancePage() {
   const getDisplayPunchOut = (t: AttendanceRecord) =>
     t.punchOutIsProvisional && isToday(t.date) ? null : t.punchOut;
 
-  // Device-sourced (lens/biometric) records never call the app's own
-  // lunch-in/lunch-out endpoints, so their raw re-entries aren't reliably
-  // "lunch" — don't guess here. Admin can see every raw tap for the day via
-  // "Lens Info" instead.
-  const getDisplayLunchIn = (t: AttendanceRecord) => (isDeviceSource(t) ? undefined : t.lunchInTime);
+  // lunchInTime/lunchOutTime are only ever written by the lunchIn/lunchOut
+  // handlers, and a device reaches those two ways — an explicit `action:
+  // 'lunch-in'` from the BOTLens camera, or a tap that a tenant's configured
+  // Settings.attendance.punchSequence maps to that step. In the default toggle
+  // mode a device never touches these fields at all. So a value being present
+  // is itself proof it was a deliberate lunch event, not a guess from a raw
+  // re-entry — which is why these are no longer hidden for device records (that
+  // was silently dropping correctly-recorded lunch times for sequence tenants).
+  const getDisplayLunchIn = (t: AttendanceRecord) => t.lunchInTime;
 
-  const getDisplayLunchOut = (t: AttendanceRecord) => (isDeviceSource(t) ? undefined : t.lunchOutTime);
+  const getDisplayLunchOut = (t: AttendanceRecord) => t.lunchOutTime;
 
   const SOURCE_META: Record<string, { icon: typeof ScanFace; label: string }> = {
     lens: { icon: ScanFace, label: "Lens (camera)" },
@@ -1208,14 +1279,14 @@ function AttendancePage() {
                         </span>
                       );
                     })()}
-                    {detailRecord.source === "lens" && (detailRecord.shifts?.length ?? 0) > 0 && (
+                    {isDeviceSource(detailRecord) && (detailRecord.shifts?.length ?? 0) > 0 && (
                       <button
                         type="button"
                         onClick={() => setShowAllSessions((v) => !v)}
                         className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-primary/80 hover:text-primary bg-primary/5 hover:bg-primary/10 border border-primary/20 rounded-full px-2.5 py-1 transition-colors"
                       >
                         <ListChecks className="h-3 w-3" />
-                        Lens Info
+                        Raw Taps
                         <ChevronDown className={`h-3 w-3 transition-transform ${showAllSessions ? "rotate-180" : ""}`} />
                       </button>
                     )}
@@ -1298,21 +1369,11 @@ function AttendancePage() {
                   })()}
                 </Card>
 
-                {showAllSessions && detailRecord.source === "lens" && (
-                  <Card className="p-4 bg-muted/20 border-border/40 rounded-2xl shadow-none space-y-3">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1.5">
-                      <ScanFace className="h-3 w-3" /> Raw Lens Events ({detailRecord.shifts?.length ?? 0})
-                    </p>
-                    <div className="space-y-1.5">
-                      {(detailRecord.shifts ?? []).map((s, i) => (
-                        <div key={i} className="flex items-center justify-between text-[12px] font-mono font-bold text-foreground bg-background/60 rounded-lg px-3 py-1.5 border border-border/40">
-                          <span>{s.punchIn ? new Date(s.punchIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</span>
-                          <span className="text-muted-foreground font-sans font-normal text-[10px]">→</span>
-                          <span>{s.punchOut ? new Date(s.punchOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Still in"}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </Card>
+                {showAllSessions && isDeviceSource(detailRecord) && (
+                  <RawTapList
+                    employeeId={detailRecord.employeeId?._id}
+                    date={toISTDateKey(new Date(detailRecord.date))}
+                  />
                 )}
 
                 <div className="grid grid-cols-2 gap-4">
