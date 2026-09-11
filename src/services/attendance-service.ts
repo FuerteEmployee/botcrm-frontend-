@@ -26,6 +26,10 @@ export interface AttendanceRecord {
   punchOutDistance?: number | null;
   lunchInDistance?: number | null;
   lunchOutDistance?: number | null;
+  // Net worked milliseconds, already lunch-deducted server-side. Preferred
+  // over recomputing from punchIn/punchOut, which ignores the break and
+  // multi-shift days.
+  totalWorkMs?: number;
   status: 'present' | 'absent' | 'half-day' | 'late' | 'wfh';
   source?: 'app' | 'lens' | 'biometric';
   // True while `punchOut` was set by a device (Lens/biometric) tap and never

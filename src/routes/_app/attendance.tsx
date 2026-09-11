@@ -30,6 +30,7 @@ import {
 import { useAttendanceService, useAttendanceStats, useAbsentToday, usePunchLog, type AttendanceRecord, type PunchLogTap } from "@/services/attendance-service";
 import { useRegularizationService } from "@/services/regularization-service";
 import { useShiftService } from "@/services/shift-service";
+import { useBranchService } from "@/services/branch-service";
 import { useEmployeeService } from "@/services/employee-service";
 import { useTicketService } from "@/services/ticket-service";
 import { parseTicketReason } from "@/lib/leave-ticket-parser";
@@ -316,6 +317,7 @@ function AttendancePage() {
   const { status } = Route.useSearch();
   const [tab, setTab] = useState<string>(status || "all");
   const [shiftFilter, setShiftFilter] = useState<string>("all");
+  const [branchFilter, setBranchFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [remarkOpenId, setRemarkOpenId] = useState<string | null>(null);
   const [remarkText, setRemarkText] = useState("");
@@ -440,17 +442,106 @@ function AttendancePage() {
   );
 
   // All-days filtered records
-  const filtered = useMemo(() => {
+  const { branches } = useBranchService();
+
+  // Net worked time. Prefers the server's lunch-deducted total; falls back to
+  // punchOut - punchIn only when totalWorkMs is absent (older records).
+  const workedHours = (t: AttendanceRecord) => {
+    const ms = t.totalWorkMs ?? (t.punchIn && t.punchOut
+      ? new Date(t.punchOut).getTime() - new Date(t.punchIn).getTime()
+      : 0);
+    if (!ms || ms <= 0) return null;
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    return `${h}:${String(m).padStart(2, "0")}`;
+  };
+
+  // Steps the selected day by n days. Clamped at today -- attendance cannot be
+  // recorded in the future, so letting the arrow run forward only produces
+  // empty pages that look like a fault.
+  const shiftDay = (n: number) => {
+    const base = dateFilter || todayStr;
+    const d = new Date(`${base}T12:00:00`);
+    d.setDate(d.getDate() + n);
+    const next = toISTDateKey(d);
+    if (next > todayStr) return;
+    setDateFilter(next);
+    setTablePage(1);
+    setCardPage(1);
+  };
+
+  // Exports exactly what is on screen -- every active filter applied -- so the
+  // file matches what the person was looking at when they clicked.
+  //
+  // xlsx is imported dynamically on purpose: a static import pulls ~400KB into
+  // the main chunk and pushes the bundle past the PWA precache limit, which
+  // breaks the production build outright (see leads.tsx for the same note).
+  const exportExcel = async () => {
+    if (filtered.length === 0) {
+      toast.error("Nothing to export for the current filters.");
+      return;
+    }
+    try {
+      const XLSX = await import("xlsx");
+      const rows = filtered.map((t) => ({
+        Staff: t.employeeId?.name || "Unknown",
+        Phone: t.employeeId?.phone || "",
+        Branch: t.employeeId?.branchId?.branchName || "",
+        Shift: t.employeeId?.shiftId?.name || "",
+        Date: toISTDateKey(t.date),
+        "Punch In": t.punchIn ? formatTime12h(t.punchIn) : "",
+        "Lunch In": getDisplayLunchIn(t) ? formatTime12h(getDisplayLunchIn(t)!) : "",
+        "Lunch Out": getDisplayLunchOut(t) ? formatTime12h(getDisplayLunchOut(t)!) : "",
+        "Punch Out": getDisplayPunchOut(t) ? formatTime12h(getDisplayPunchOut(t)!) : "",
+        "Total Hrs": workedHours(t) || "",
+        Status: getDisplayStatus(t) === "on-duty" ? "On Duty" : t.status,
+        Source: t.source || "app",
+        Remarks: t.remarks || "",
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Attendance");
+      XLSX.writeFile(wb, `attendance-${dateFilter || todayStr}.xlsx`);
+      toast.success(`Exported ${rows.length} record${rows.length === 1 ? "" : "s"}`);
+    } catch {
+      toast.error("Could not generate the Excel file.");
+    }
+  };
+
+  // Everything EXCEPT the status filter. Split out so the status chips can show
+  // counts for the day and filters actually in view -- counting the whole list
+  // would show numbers that do not match the rows below them.
+  const scopeList = useMemo(() => {
     return list.filter((t) => {
       const name = t.employeeId?.name || "";
-      const displayStatus = getDisplayStatus(t);
-      const matchesTab = tab === "all" || displayStatus === tab || t.status === tab;
       const matchesSearch = !search || name.toLowerCase().includes(search.toLowerCase());
       const matchesDate = !dateFilter || (!!t.date && toISTDateKey(t.date) === dateFilter);
       const matchesShift = shiftFilter === "all" || t.employeeId?.shiftId?._id === shiftFilter;
-      return matchesTab && matchesSearch && matchesDate && matchesShift;
+      const matchesBranch = branchFilter === "all" || t.employeeId?.branchId?._id === branchFilter;
+      return matchesSearch && matchesDate && matchesShift && matchesBranch;
     });
-  }, [list, tab, search, dateFilter, shiftFilter]);
+  }, [list, search, dateFilter, shiftFilter, branchFilter]);
+
+  const matchesStatus = (t: AttendanceRecord, status: string) =>
+    status === "all" || getDisplayStatus(t) === status || t.status === status;
+
+  const filtered = useMemo(
+    () => scopeList.filter((t) => matchesStatus(t, tab)),
+    [scopeList, tab],
+  );
+
+  const STATUS_CHIPS = [
+    { id: "all", label: "All" },
+    { id: "on-duty", label: "On Duty" },
+    { id: "present", label: "Full Day" },
+    { id: "half-day", label: "Half Day" },
+    { id: "late", label: "Late" },
+    { id: "absent", label: "Absent" },
+    { id: "wfh", label: "WFH" },
+  ] as const;
+
+  const chipCount = (status: string) =>
+    status === "all" ? scopeList.length : scopeList.filter((t) => matchesStatus(t, status)).length;
 
   // Reset pages when filters change
   useEffect(() => { setTablePage(1); setCardPage(1); }, [filtered]);
@@ -533,7 +624,7 @@ function AttendancePage() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Attendance Reports" description="Monitor daily punch logs and modify login times." />
+        <PageHeader title="Attendance Dashboard" description="Daily presence tracking and regularizations" />
         <SkeletonLoader type="stats" count={5} />
         <SkeletonLoader type="table" count={10} />
       </div>
@@ -543,14 +634,15 @@ function AttendancePage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Attendance Reports"
-        description="Monitor daily punch logs and modify login times."
+        title="Attendance Dashboard"
+        description="Daily presence tracking and regularizations"
         actions={
           <div className="flex gap-2">
             <ActionButton
               variant="download"
               showLabel
-              label="Export Logs"
+              label="Export Excel"
+              onClick={exportExcel}
             />
             {canCreate && (
               <ActionButton
@@ -594,21 +686,32 @@ function AttendancePage() {
         <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
           <ViewToggle view={view} onViewChange={updateDefaultLayout} />
 
-          <Select value={tab} onValueChange={(v) => { setTab(v); setTablePage(1); setCardPage(1); }}>
-            <SelectTrigger className="w-full md:w-[130px] h-10 border border-primary/20 bg-primary/5 text-primary hover:bg-primary/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
-              <div className={cn("h-2 w-2 rounded-full", tab === 'present' ? "bg-success" : tab === 'late' || tab === 'half-day' ? "bg-warning" : tab === 'on-duty' ? "bg-blue-500" : tab === 'wfh' ? "bg-info" : "bg-primary")} />
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent className="rounded-xl border-border/60">
-              <SelectItem value="all">All Logs</SelectItem>
-              <SelectItem value="on-duty">On Duty</SelectItem>
-              <SelectItem value="present">Present</SelectItem>
-              <SelectItem value="late">Late</SelectItem>
-              <SelectItem value="absent">Absent</SelectItem>
-              <SelectItem value="half-day">Half Day</SelectItem>
-              <SelectItem value="wfh">WFH</SelectItem>
-            </SelectContent>
-          </Select>
+          {/* Status chips. Each carries its count for the day and filters in
+              view, so the number always matches the rows below. */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {STATUS_CHIPS.map((c) => {
+              const n = chipCount(c.id);
+              const active = tab === c.id;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => { setTab(c.id); setTablePage(1); setCardPage(1); }}
+                  className={cn(
+                    "h-9 px-3.5 rounded-xl border text-[12.5px] font-semibold transition-all inline-flex items-center gap-1.5",
+                    active
+                      ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                      : "bg-transparent text-muted-foreground border-border/60 hover:border-primary/40 hover:text-foreground",
+                  )}
+                >
+                  {c.label}
+                  <span className={cn("text-[11px] font-bold tabular-nums", active ? "opacity-75" : "text-muted-foreground/60")}>
+                    {n}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
 
           <Select value={shiftFilter} onValueChange={(v) => { setShiftFilter(v); setTablePage(1); setCardPage(1); }}>
             <SelectTrigger className="w-full md:w-[150px] h-10 border border-info/20 bg-info/5 text-info hover:bg-info/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
@@ -623,14 +726,49 @@ function AttendancePage() {
             </SelectContent>
           </Select>
 
+          <Select value={branchFilter} onValueChange={(v) => { setBranchFilter(v); setTablePage(1); setCardPage(1); }}>
+            <SelectTrigger className="w-full md:w-[160px] h-10 border border-border/60 bg-muted/20 text-foreground hover:bg-muted/40 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
+              <MapPin className="h-3.5 w-3.5" />
+              <SelectValue placeholder="Branch" />
+            </SelectTrigger>
+            <SelectContent className="rounded-xl border-border/60">
+              <SelectItem value="all">All Branches</SelectItem>
+              {branches.map((b: any) => (
+                <SelectItem key={b._id} value={b._id}>{b.branchName}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
           <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={() => shiftDay(-1)}
+              aria-label="Previous day"
+              className="h-10 w-10 rounded-xl shrink-0"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
             <FormInput
               type="date"
               icon={CalendarDays}
+              max={todayStr}
               className="h-10 w-full md:w-[170px] shadow-none"
               value={dateFilter}
               onChange={(e) => { setDateFilter(e.target.value); setTablePage(1); setCardPage(1); }}
             />
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              onClick={() => shiftDay(1)}
+              disabled={!dateFilter || dateFilter >= todayStr}
+              aria-label="Next day"
+              className="h-10 w-10 rounded-xl shrink-0"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
             {dateFilter && dateFilter !== todayStr && (
               <Button
                 type="button"
@@ -764,7 +902,7 @@ function AttendancePage() {
                       <ClockIcon className="h-2.5 w-2.5" /> Punch In
                     </p>
                     <p className="text-[12px] font-mono font-bold text-foreground">
-                      {t.punchIn ? new Date(t.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                      {t.punchIn ? new Date(t.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
                     </p>
                   </div>
                   <div className="p-2 rounded-lg bg-muted/30 border border-border/40">
@@ -772,7 +910,7 @@ function AttendancePage() {
                       <ClockIcon className="h-2.5 w-2.5" /> Lunch In
                     </p>
                     <p className="text-[12px] font-mono font-bold text-foreground">
-                      {getDisplayLunchIn(t) ? new Date(getDisplayLunchIn(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                      {getDisplayLunchIn(t) ? new Date(getDisplayLunchIn(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
                     </p>
                   </div>
                   <div className="p-2 rounded-lg bg-muted/30 border border-border/40">
@@ -780,7 +918,7 @@ function AttendancePage() {
                       <ClockIcon className="h-2.5 w-2.5" /> Lunch Out
                     </p>
                     <p className="text-[12px] font-mono font-bold text-foreground">
-                      {getDisplayLunchOut(t) ? new Date(getDisplayLunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                      {getDisplayLunchOut(t) ? new Date(getDisplayLunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
                     </p>
                   </div>
                   <div className="p-2 rounded-lg bg-muted/30 border border-border/40">
@@ -788,7 +926,7 @@ function AttendancePage() {
                       <ClockIcon className="h-2.5 w-2.5" /> Punch Out
                     </p>
                     <p className="text-[12px] font-mono font-bold text-foreground">
-                      {getDisplayPunchOut(t) ? new Date(getDisplayPunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                      {getDisplayPunchOut(t) ? new Date(getDisplayPunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
                     </p>
                   </div>
                 </div>
@@ -821,7 +959,7 @@ function AttendancePage() {
             className="space-y-4"
           >
             <DataTable
-              headers={["Employee", "Date", "Punch In", "Lunch In", "Lunch Out", "Punch Out", "Location", "Status", "Actions"]}
+              headers={["Staff", "Date", "Punch In", "Lunch In", "Lunch Out", "Punch Out", "Selfie", "Total Hrs", "Location", "Status", "Actions"]}
               isEmpty={filtered.length === 0}
               emptyMessage={`No logs found.`}
               className="shadow-sm"
@@ -851,16 +989,40 @@ function AttendancePage() {
                   </DataTableCell>
                   <DataTableCell className="text-[13px] text-muted-foreground">{new Date(t.date).toLocaleDateString()}</DataTableCell>
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {t.punchIn ? new Date(t.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                    {t.punchIn ? new Date(t.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
                   </DataTableCell>
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {getDisplayLunchIn(t) ? new Date(getDisplayLunchIn(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                    {getDisplayLunchIn(t) ? new Date(getDisplayLunchIn(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
                   </DataTableCell>
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {getDisplayLunchOut(t) ? new Date(getDisplayLunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                    {getDisplayLunchOut(t) ? new Date(getDisplayLunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
                   </DataTableCell>
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {getDisplayPunchOut(t) ? new Date(getDisplayPunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                    {getDisplayPunchOut(t) ? new Date(getDisplayPunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
+                  </DataTableCell>
+                  <DataTableCell>
+                    <div className="flex items-center gap-1.5">
+                      {([["IN", t.punchInPhoto], ["OUT", t.punchOutPhoto]] as const).map(([label, src]) => (
+                        <div key={label} className="flex flex-col items-center gap-0.5">
+                          <span className="text-[8px] font-bold uppercase tracking-wider text-muted-foreground/60">{label}</span>
+                          {src ? (
+                            <img
+                              src={src}
+                              alt={`${label} selfie`}
+                              loading="lazy"
+                              className="h-8 w-8 rounded-lg object-cover border border-border/50"
+                            />
+                          ) : (
+                            <div className="h-8 w-8 rounded-lg bg-muted/40 border border-border/40 grid place-items-center text-muted-foreground/40 text-[11px]">
+                              –
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </DataTableCell>
+                  <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
+                    {workedHours(t) ?? <span className="text-muted-foreground/40">—</span>}
                   </DataTableCell>
                   <DataTableCell className="text-[12px] text-muted-foreground max-w-[150px] truncate italic">
                     {t.punchInLocation && typeof t.punchInLocation === 'object'
