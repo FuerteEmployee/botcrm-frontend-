@@ -41,7 +41,16 @@ export interface ClientInfo {
     coarseLocation: PermissionState;
     camera: PermissionState;
     notifications: PermissionState;
+    // Background-tracking readiness, read from the native plugin. Each stays
+    // "unknown" on a device without the plugin -- an old APK genuinely cannot
+    // answer, and reporting that as "denied" would fill the admin panel with
+    // problems nobody can fix.
+    backgroundLocation: PermissionState;
+    preciseLocation: PermissionState;
+    batteryUnrestricted: PermissionState;
+    autoStart: PermissionState;
   };
+  trackingSetupComplete?: boolean;
 }
 
 /**
@@ -153,8 +162,74 @@ export async function collectClientInfo(): Promise<ClientInfo> {
       coarseLocation: loc.coarseLocation,
       camera,
       notifications: readNotificationPermission(),
+      ...(await readTrackerReadiness()),
     },
+    trackingSetupComplete: readAutostartConfirmed() && (await isTrackerReady()),
   };
+}
+
+/** localStorage flag the setup gate sets; mirrors use-tracking-setup.ts. */
+function readAutostartConfirmed(): boolean {
+  try {
+    return localStorage.getItem("bot_autostart_confirmed") === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Background-tracking readiness from the native plugin.
+ *
+ * Everything degrades to "unknown" rather than "denied" when the plugin is
+ * absent. That distinction is the whole point of this block: a device on the
+ * pre-tracker APK has not refused anything, it simply cannot be asked, and
+ * showing an admin four red crosses for an employee whose build never had the
+ * feature sends them chasing a fault that does not exist.
+ */
+async function readTrackerReadiness(): Promise<{
+  backgroundLocation: PermissionState;
+  preciseLocation: PermissionState;
+  batteryUnrestricted: PermissionState;
+  autoStart: PermissionState;
+}> {
+  const unknown = {
+    backgroundLocation: "unknown" as PermissionState,
+    preciseLocation: "unknown" as PermissionState,
+    batteryUnrestricted: "unknown" as PermissionState,
+    autoStart: "unknown" as PermissionState,
+  };
+
+  try {
+    const { checkAllPermissions } = await import("@/plugins/background-tracker");
+    const r = await checkAllPermissions();
+    if (!r) return unknown;
+    const state = (v: boolean): PermissionState => (v ? "granted" : "denied");
+    return {
+      backgroundLocation: state(r.background),
+      preciseLocation: state(r.precise),
+      batteryUnrestricted: state(r.batteryUnrestricted),
+      // Unreadable by any API. Report the employee's own confirmation, and only
+      // as "unknown" when they have not confirmed -- never "denied", which
+      // would assert something we did not observe.
+      autoStart: readAutostartConfirmed()
+        ? "granted"
+        : r.hasAutostartScreen
+          ? "unknown"
+          : "unavailable",
+    };
+  } catch {
+    return unknown;
+  }
+}
+
+async function isTrackerReady(): Promise<boolean> {
+  try {
+    const { checkAllPermissions } = await import("@/plugins/background-tracker");
+    const r = await checkAllPermissions();
+    return !!r && r.precise && r.background && r.notifications && r.batteryUnrestricted;
+  } catch {
+    return false;
+  }
 }
 
 let lastReportAt = 0;

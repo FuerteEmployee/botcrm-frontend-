@@ -10,6 +10,12 @@ export interface Branch {
   latitude: number;
   longitude: number;
   radius?: number;
+  /**
+   * Per-branch fence switch. Undefined on branches created before the flag
+   * existed, and those were always fenced -- so absent must read as ON
+   * everywhere, never as off.
+   */
+  geoFenceEnabled?: boolean;
   employees?: number;
   createdAt: string;
 }

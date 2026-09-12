@@ -27,7 +27,17 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { useAttendanceService, useAttendanceStats, useAbsentToday, usePunchLog, type AttendanceRecord, type PunchLogTap } from "@/services/attendance-service";
+import { useAttendanceService, useAttendanceStats, useAbsentToday, usePunchLog, type AttendanceRecord, type AttendanceSession, type PunchLogTap } from "@/services/attendance-service";
+import { useGeofenceMode } from "@/services/geofence-service";
+import {
+  SessionTimeline,
+  DayStatsRow,
+  AutoPunchOutCard,
+  ShiftRequirementCard,
+  WhyHalfDay,
+  GeofenceExitBanner,
+  InsideFenceNote,
+} from "@/components/attendance/day-detail-blocks";
 import { useRegularizationService } from "@/services/regularization-service";
 import { useShiftService } from "@/services/shift-service";
 import { useBranchService } from "@/services/branch-service";
@@ -580,6 +590,40 @@ function AttendancePage() {
     detailRecord ? toISTDateKey(new Date(detailRecord.date)) : undefined,
     !!detailRecord,
   );
+  // Everything the detail sheet derives from the open record. Declared here,
+  // beside detailRecord, so the blocks below can never reference it earlier
+  // than it exists.
+  const detail = useMemo(() => {
+    if (!detailRecord) return null;
+
+    // Session 1 is ALSO the root punchIn/punchOut, so reading both would
+    // double-count. shifts[] is authoritative whenever it is populated.
+    const sessions: AttendanceSession[] =
+      detailRecord.shifts && detailRecord.shifts.length > 0
+        ? detailRecord.shifts
+        : detailRecord.punchIn
+          ? [{ punchIn: detailRecord.punchIn, punchOut: detailRecord.punchOut, punchInSource: detailRecord.source }]
+          : [];
+
+    const shiftRef = detailRecord.employeeId?.shiftId;
+    const shift = shiftRef
+      ? shifts.find((sh) => sh._id === (typeof shiftRef === "string" ? shiftRef : shiftRef._id)) || shiftRef
+      : null;
+
+    return {
+      sessions,
+      shift,
+      // Same two settings the server grades with (Settings.attendance).
+      lunchMins: Number(appSettings?.attendance?.minLunch ?? 30),
+      graceMins: Number(appSettings?.attendance?.lateGrace ?? 0),
+    };
+  }, [detailRecord, shifts, appSettings]);
+
+  // Reverting an auto punch-out is confirmed rather than immediate: it changes
+  // a stored day and, on reopen, puts somebody back on duty.
+  const [revertTarget, setRevertTarget] = useState<AttendanceRecord | null>(null);
+  const { revert } = useGeofenceMode();
+
   const [correctionOpen, setCorrectionOpen] = useState(false);
   const [correctionForm, setCorrectionForm] = useState({
     employeeId: "",
@@ -1422,6 +1466,45 @@ function AttendancePage() {
       </Dialog>
 
       {/* Attendance Detail Sheet */}
+      {/* Undo an auto punch-out. Two outcomes, because the two real situations
+          differ: the engine was wrong (reopen), or it was right about the exit
+          but wrong about the time (correct it via Modify Punch Time). */}
+      <Dialog open={!!revertTarget} onOpenChange={(o) => !o && setRevertTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-[15px]">Undo this auto punch-out?</DialogTitle>
+            <DialogDescription className="text-[12px]">
+              {revertTarget?.employeeId?.name} was punched out automatically
+              {revertTarget?.calculatedDistance != null && ` at ${revertTarget.calculatedDistance}m from their branch`}.
+              Reopening puts them back on duty and clears the geo-fence verdict for the day.
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-[12px] text-muted-foreground leading-relaxed">
+            If they <span className="font-bold text-foreground">did</span> leave but at a different time, close this
+            and use <span className="font-bold text-foreground">Modify Punch Time</span> instead — that keeps the
+            day closed with the correct hours.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" size="sm" className="rounded-xl" onClick={() => setRevertTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="rounded-xl font-bold"
+              disabled={revert.isPending}
+              onClick={async () => {
+                if (!revertTarget?._id) return;
+                await revert.mutateAsync({ attendanceId: revertTarget._id, mode: "reopen" });
+                setRevertTarget(null);
+                setDetailRecord(null);
+              }}
+            >
+              {revert.isPending ? "Reopening…" : "Reopen session"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Sheet open={!!detailRecord} onOpenChange={(o) => !o && setDetailRecord(null)}>
         <SheetContent className="sm:max-w-lg w-full p-0 border-l border-border/40">
           {detailRecord && (
@@ -1541,23 +1624,49 @@ function AttendancePage() {
                   })()}
                 </Card>
 
+                {/* Every session, each END tagged with the channel that
+                    reported it -- in on the phone, out on the machine. */}
+                {detail && detail.sessions.length > 0 && (
+                  <SessionTimeline sessions={detail.sessions} />
+                )}
+
                 {showAllSessions && detailTaps.length > 0 && (
                   <RawTapList taps={detailTaps} isLoading={detailTapsLoading} />
                 )}
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Total Hours</span>
-                    <div className="font-bold text-primary text-[13px]">
-                      {detailRecord.punchIn && detailRecord.punchOut
-                        ? `${((new Date(detailRecord.punchOut).getTime() - new Date(detailRecord.punchIn).getTime()) / 3600000).toFixed(2)}h`
-                        : "—"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Remarks</span>
-                    <div className="font-medium text-foreground/80 text-[13px]">{detailRecord.remarks || "—"}</div>
-                  </div>
+                {/* Worked hours come from the server's totalWorkMs, which is
+                    already lunch-deducted and clamped to the shift. This used
+                    to recompute punchOut - punchIn in the browser, so it
+                    ignored the break and every session after the first, and
+                    disagreed with the figure payroll actually pays. */}
+                <DayStatsRow record={detailRecord} displayStatus={getDisplayStatus(detailRecord)} />
+
+                <AutoPunchOutCard record={detailRecord} onRevert={() => setRevertTarget(detailRecord)} />
+
+                {detail && (
+                  <>
+                    <ShiftRequirementCard
+                      shift={detail.shift}
+                      lunchMins={detail.lunchMins}
+                      graceMins={detail.graceMins}
+                      workedMs={detailRecord.totalWorkMs || 0}
+                    />
+                    <WhyHalfDay
+                      record={detailRecord}
+                      sessions={detail.sessions}
+                      shift={detail.shift}
+                      lunchMins={detail.lunchMins}
+                      graceMins={detail.graceMins}
+                    />
+                  </>
+                )}
+
+                <GeofenceExitBanner record={detailRecord} />
+                <InsideFenceNote record={detailRecord} />
+
+                <div className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Remarks</span>
+                  <div className="font-medium text-foreground/80 text-[13px]">{detailRecord.remarks || "—"}</div>
                 </div>
               </div>
             </div>

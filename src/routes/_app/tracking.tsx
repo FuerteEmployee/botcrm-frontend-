@@ -20,10 +20,23 @@ import { useLayoutSettings } from "@/hooks/use-layout-settings";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 
+import { z } from "zod";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { useBranchService, type Branch as BackendBranch } from "@/services/branch-service";
+import { exitBufferM } from "@/components/branches/geofence-map-preview";
+
+// Params carried by the "Show on map - why this happened" button on an auto
+// punch-out. All optional: the page is normally opened with none of them.
+const trackingSearchSchema = z.object({
+  employeeId: z.string().optional(),
+  date: z.string().optional(),
+  exitLat: z.coerce.number().optional(),
+  exitLng: z.coerce.number().optional(),
+});
 
 export const Route = createFileRoute("/_app/tracking")({
+  validateSearch: (search) => trackingSearchSchema.parse(search),
   component: TrackingPage,
 });
 
@@ -48,6 +61,7 @@ function TrackingMap({
   onSelect,
   routePoints,
   tileMode,
+  branches,
 }: {
   locations: any[];
   employees: any[];
@@ -55,12 +69,14 @@ function TrackingMap({
   onSelect: (id: string) => void;
   routePoints?: { latitude: number; longitude: number; timestamp: string }[];
   tileMode: "street" | "satellite";
+  branches?: BackendBranch[];
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Map<string, L.Marker>>(new Map());
   const tileLayerRef = useRef<L.TileLayer | null>(null);
   const routeLayerRef = useRef<L.LayerGroup | null>(null);
+  const fenceLayerRef = useRef<L.LayerGroup | null>(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
 
@@ -87,6 +103,7 @@ function TrackingMap({
     L.control.scale({ position: "bottomleft", imperial: false }).addTo(map);
 
     routeLayerRef.current = L.layerGroup().addTo(map);
+    fenceLayerRef.current = L.layerGroup().addTo(map);
 
     mapRef.current = map;
 
@@ -97,6 +114,7 @@ function TrackingMap({
       mapRef.current = null;
       tileLayerRef.current = null;
       routeLayerRef.current = null;
+      fenceLayerRef.current = null;
     };
   }, []);
 
@@ -162,6 +180,52 @@ function TrackingMap({
 
     map.fitBounds(latlngs, { padding: [60, 60], maxZoom: 16 });
   }, [routePoints]);
+
+  // Branch geo-fences: the solid ring is the allowed punch radius, the dashed
+  // one is radius + exit buffer, i.e. where an auto punch-out becomes possible.
+  //
+  // Drawing only the radius is what makes every auto punch-out look wrong: an
+  // employee sitting between the two rings reads as "just outside the circle"
+  // on a map that never showed the line the decision actually used. Branches
+  // with the fence switched off are drawn grey, so an admin can see at a glance
+  // that a site is unfenced rather than wondering why nobody is ever flagged.
+  useEffect(() => {
+    const layer = fenceLayerRef.current;
+    if (!layer) return;
+    layer.clearLayers();
+
+    for (const b of branches || []) {
+      if (!Number.isFinite(b.latitude) || !Number.isFinite(b.longitude)) continue;
+      if (b.latitude === 0 && b.longitude === 0) continue;
+
+      const radius = b.radius && b.radius > 0 ? b.radius : 3000;
+      const on = b.geoFenceEnabled !== false;
+      const buffer = exitBufferM(radius);
+
+      L.circle([b.latitude, b.longitude], {
+        radius: radius + buffer,
+        color: on ? "#f59e0b" : "#94a3b8",
+        weight: 1.5,
+        dashArray: "6 6",
+        fillOpacity: 0,
+        opacity: on ? 0.7 : 0.25,
+        interactive: false,
+      }).addTo(layer);
+
+      L.circle([b.latitude, b.longitude], {
+        radius,
+        color: on ? "#16a34a" : "#94a3b8",
+        weight: 2,
+        fillColor: on ? "#16a34a" : "#94a3b8",
+        fillOpacity: on ? 0.1 : 0.04,
+      })
+        .bindTooltip(
+          `${b.branchName} - ${radius >= 1000 ? `${(radius / 1000).toFixed(radius % 1000 === 0 ? 0 : 1)} km` : `${radius} m`}${on ? "" : " (fence off)"}`,
+          { direction: "top", sticky: true },
+        )
+        .addTo(layer);
+    }
+  }, [branches]);
 
   // Sync markers whenever locations, employees, or selectedId change
   useEffect(() => {
@@ -276,7 +340,11 @@ function TrackingPage() {
   }, [attendanceWithDate, attendanceAll]);
 
   const [search, setSearch] = useState("");
-  const [selectedId, setSelectedId] = useState("");
+  // `search` is already the text filter below, hence the longer name.
+  const routeSearch = Route.useSearch();
+  // Arriving from an auto punch-out: focus that employee straight away rather
+  // than dropping the admin on an unfiltered map of everyone.
+  const [selectedId, setSelectedId] = useState(routeSearch.employeeId || "");
   const { defaultLayout } = useLayoutSettings();
   const [view, setView] = useState<"grid" | "list">(defaultLayout);
 
@@ -289,6 +357,7 @@ function TrackingPage() {
   const [selectedDate, setSelectedDate] = useState(today);
   const isToday = selectedDate === today;
   const { points: routePoints, distanceKm, refetch: refetchHistory } = useTrackingHistory(selectedId || undefined, selectedDate);
+  const { branches } = useBranchService();
   const { mutateAsync: pingEmployee, isPending: isPinging } = usePingEmployee();
 
   const shiftDate = (deltaDays: number) => {
@@ -569,6 +638,7 @@ function TrackingPage() {
                 onSelect={setSelectedId}
                 routePoints={selectedId ? routePoints : undefined}
                 tileMode={tileMode}
+                branches={branches}
               />
 
               {/* Street / Satellite toggle */}

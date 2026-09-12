@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { Plus, Pencil, Trash2, MapPin, Search, LayoutGrid, List, Users, Globe, Filter, Crosshair, Loader2, Check, Network } from "lucide-react";
+import { Plus, Pencil, Trash2, MapPin, Search, LayoutGrid, List, Users, Globe, Filter, Crosshair, Loader2, Check, Network, ShieldCheck } from "lucide-react";
+import { GeofenceMapPreview } from "@/components/branches/geofence-map-preview";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatCard } from "@/components/shared/stat-card";
@@ -38,6 +39,24 @@ export const Route = createFileRoute("/_app/branches")({
   component: BranchesPage,
 });
 
+/**
+ * Radius presets, in metres.
+ *
+ * Nothing below 100 m: that is roughly the error a phone reports indoors or on
+ * a wifi-derived fix, so a tighter fence rejects people who are genuinely at
+ * their desk. Custom still allows it, deliberately visible as a choice.
+ */
+const RADIUS_PRESETS = [
+  { value: 100, label: "100 m" },
+  { value: 250, label: "250 m" },
+  { value: 500, label: "500 m" },
+  { value: 1000, label: "1 km" },
+  { value: 5000, label: "5 km" },
+  { value: 10000, label: "10 km" },
+];
+
+const formatRadius = (m: number) => (m >= 1000 ? `${(m / 1000).toFixed(m % 1000 === 0 ? 0 : 1)} km` : `${m} m`);
+
 function BranchesPage() {
   const [hasMounted, setHasMounted] = useState(false);
   const { branches: list, isLoading, createBranch, updateBranch, deleteBranch } = useBranchService();
@@ -49,8 +68,10 @@ function BranchesPage() {
     city: "",
     latitude: 0,
     longitude: 0,
-    radius: 0
+    radius: 0,
+    geoFenceEnabled: true,
   });
+  const [customRadius, setCustomRadius] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
@@ -152,7 +173,8 @@ function BranchesPage() {
       city: "",
       latitude: 0,
       longitude: 0,
-      radius: 0
+      radius: 0,
+      geoFenceEnabled: true,
     });
     setOpen(true);
   };
@@ -165,7 +187,10 @@ function BranchesPage() {
       city: guessCity(b),
       latitude: b.latitude,
       longitude: b.longitude,
-      radius: b.radius || 0
+      radius: b.radius || 0,
+      // Existing branches predate the flag and read back undefined; they were
+      // always fenced, so absent must mean on.
+      geoFenceEnabled: b.geoFenceEnabled !== false,
     });
     setOpen(true);
   };
@@ -370,9 +395,16 @@ function BranchesPage() {
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-white/95 backdrop-blur-xl">
-          <div className="h-2 w-full bg-linear-to-r from-primary via-primary/50 to-primary/80" />
-          <div className="p-5">
+        {/* max-h + flex-col so the form scrolls internally instead of
+            overflowing the viewport -- this dialog grew past a single
+            screen's height once the geo-fence toggle, radius presets and map
+            preview were added, and with no cap it was being cropped top and
+            bottom with nothing scrollable. The gradient bar and header stay
+            fixed; only the middle fills the remaining height and scrolls;
+            the footer stays pinned so Discard/Save are always reachable. */}
+        <DialogContent className="max-w-2xl max-h-[85vh] rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-white/95 backdrop-blur-xl flex flex-col">
+          <div className="h-2 w-full shrink-0 bg-linear-to-r from-primary via-primary/50 to-primary/80" />
+          <div className="p-5 pb-0 shrink-0">
             <DialogHeader className="mb-4">
               <div className="flex items-center gap-4">
                 <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary grid place-items-center shadow-inner">
@@ -384,7 +416,11 @@ function BranchesPage() {
                 </div>
               </div>
             </DialogHeader>
-            <form onSubmit={submit} className="space-y-4">
+          </div>
+          {/* Scrollable middle. id lets the footer's submit button (now
+              outside the <form> so it can stay pinned) still trigger this
+              form via the HTML `form` attribute. */}
+          <form id="branch-form" onSubmit={submit} className="flex-1 min-h-0 overflow-y-auto px-5 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Branch Name</label>
@@ -418,6 +454,31 @@ function BranchesPage() {
                 />
               </div>
               
+              {/* Geo-fence switch. Per branch, because "one fenced office and
+                  one warehouse whose staff roam" is not expressible with a
+                  single tenant-wide toggle. Turning it off here only ever
+                  narrows enforcement -- the tenant-level requireLocation still
+                  has to be on for any fence to apply at all. */}
+              <div className="flex items-center justify-between gap-4 rounded-2xl border border-border/40 bg-muted/20 p-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="h-9 w-9 shrink-0 rounded-xl bg-primary/10 text-primary grid place-items-center">
+                    <ShieldCheck className="h-4.5 w-4.5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-black tracking-tight">Geo-Fence Attendance</p>
+                    <p className="text-[11px] text-muted-foreground font-medium">
+                      {form.geoFenceEnabled
+                        ? "Employees must be inside the radius to punch in."
+                        : "Punches from anywhere are accepted for this branch."}
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={form.geoFenceEnabled}
+                  onCheckedChange={(v) => setForm({ ...form, geoFenceEnabled: v })}
+                />
+              </div>
+
               <div className="space-y-1.5 bg-muted/20 p-4 rounded-2xl border border-border/40">
                 <div className="flex items-center justify-between mb-2">
                   <label className="text-[10px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Geographic Coordinates</label>
@@ -431,7 +492,7 @@ function BranchesPage() {
                     loading={fetchingLoc}
                   />
                 </div>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1">
                     <label className="text-[9px] font-bold uppercase text-muted-foreground/60 ml-1">Latitude</label>
                     <FormInput
@@ -452,33 +513,111 @@ function BranchesPage() {
                       className="h-9 text-[13px] rounded-xl bg-white/50"
                     />
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[9px] font-bold uppercase text-muted-foreground/60 ml-1">Allowed Radius (m)</label>
+                </div>
+
+                {/* Preset radii. A free number box makes every admin invent a
+                    value, and the ones they invent (50 m, 25 m) sit inside the
+                    GPS error, so honest punches get refused. */}
+                <div className="space-y-1.5 pt-3">
+                  <label className="text-[9px] font-bold uppercase text-muted-foreground/60 ml-1">Allowed Radius</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {RADIUS_PRESETS.map((preset) => {
+                      const active = (form.radius || 0) === preset.value;
+                      return (
+                        <button
+                          key={preset.value}
+                          type="button"
+                          onClick={() => setForm({ ...form, radius: preset.value })}
+                          className={cn(
+                            "h-8 rounded-full px-3.5 text-[11px] font-black transition-colors border",
+                            active
+                              ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/25"
+                              : "bg-white/60 text-muted-foreground border-border/50 hover:bg-muted",
+                          )}
+                        >
+                          {preset.label}
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => setCustomRadius((v) => !v)}
+                      className={cn(
+                        "h-8 rounded-full px-3.5 text-[11px] font-black transition-colors border",
+                        customRadius || !RADIUS_PRESETS.some((r) => r.value === (form.radius || 0))
+                          ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/25"
+                          : "bg-white/60 text-muted-foreground border-border/50 hover:bg-muted",
+                      )}
+                    >
+                      Custom
+                    </button>
+                  </div>
+
+                  {(customRadius || !RADIUS_PRESETS.some((r) => r.value === (form.radius || 0))) && (
                     <FormInput
                       type="number"
                       step="any"
-                      placeholder="Default (3000m)"
+                      placeholder="Radius in metres (blank = tenant default, 3000m)"
                       value={form.radius || ""}
                       onChange={(e) => setForm({ ...form, radius: parseFloat(e.target.value) || 0 })}
-                      className="h-9 text-[13px] rounded-xl bg-white/50"
+                      className="h-9 text-[13px] rounded-xl bg-white/50 mt-1.5"
                     />
+                  )}
+
+                  <div
+                    className={cn(
+                      "flex items-start gap-2 rounded-xl border px-3 py-2 mt-2",
+                      form.geoFenceEnabled
+                        ? "border-success/25 bg-success/10"
+                        : "border-border/50 bg-muted/40",
+                    )}
+                  >
+                    <ShieldCheck
+                      className={cn(
+                        "h-3.5 w-3.5 mt-0.5 shrink-0",
+                        form.geoFenceEnabled ? "text-success" : "text-muted-foreground/50",
+                      )}
+                    />
+                    <p className="text-[11px] font-semibold leading-relaxed">
+                      {form.geoFenceEnabled ? (
+                        <>
+                          Employees must be within{" "}
+                          <span className="font-black">{formatRadius(form.radius || 3000)}</span> of this
+                          branch to punch in.
+                        </>
+                      ) : (
+                        <span className="text-muted-foreground">
+                          Geo-fencing is off for this branch — the radius is still recorded, and distances
+                          are still measured for reporting, but no punch is refused.
+                        </span>
+                      )}
+                    </p>
                   </div>
                 </div>
               </div>
-              
-              <DialogFooter className="gap-2 pt-4 border-t border-border/40 mt-1">
-                <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)} className="rounded-xl h-10 font-bold px-8 text-muted-foreground hover:bg-muted/50 text-[13px]">Discard</Button>
-                <ActionButton 
-                  type="submit"
-                  variant="add"
-                  showLabel
-                  label={editing ? "Save Changes" : "Create Branch"}
-                  icon={editing ? Check : Plus}
-                  className="px-10 h-10 rounded-xl text-[14px] shadow-lg shadow-primary/20"
-                />
-              </DialogFooter>
-            </form>
-          </div>
+
+              <GeofenceMapPreview
+                lat={form.latitude}
+                lng={form.longitude}
+                radius={form.radius || 3000}
+                enabled={form.geoFenceEnabled}
+              />
+              {/* Bottom padding so the last field/map isn't flush against the
+                  scroll edge, now that the footer lives outside this pane. */}
+              <div className="h-2" />
+          </form>
+          <DialogFooter className="shrink-0 gap-2 p-5 pt-4 border-t border-border/40">
+            <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)} className="rounded-xl h-10 font-bold px-8 text-muted-foreground hover:bg-muted/50 text-[13px]">Discard</Button>
+            <ActionButton
+              type="submit"
+              form="branch-form"
+              variant="add"
+              showLabel
+              label={editing ? "Save Changes" : "Create Branch"}
+              icon={editing ? Check : Plus}
+              className="px-10 h-10 rounded-xl text-[14px] shadow-lg shadow-primary/20"
+            />
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

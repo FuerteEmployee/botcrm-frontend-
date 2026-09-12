@@ -38,7 +38,45 @@ export interface AttendanceRecord {
   isWFH?: boolean;
   wasLate?: boolean;
   remarks?: string;
-  shifts?: { punchIn?: string; punchOut?: string }[];
+  // One entry per session of the day. Session 1 is ALSO the root
+  // punchIn/punchOut, so never sum both -- read `shifts` when it is populated.
+  // Each END carries its own source, because the whole point of the three
+  // channels is that they interleave inside a single session: in on the phone,
+  // out on the terminal.
+  shifts?: AttendanceSession[];
+
+  // Geofence outcome for the day.
+  autoPunchOut?: boolean;
+  autoPunchOutReason?: string | null;
+  /** Metres from the branch on the fix that DECIDED an auto punch-out. */
+  calculatedDistance?: number | null;
+  geoStatus?: 'inside_geofence' | 'outside_geofence' | 'auto_exit' | 'unknown' | null;
+
+  punchInAccuracy?: number | null;
+  punchOutAccuracy?: number | null;
+  punchInFixAt?: string | null;
+  punchOutFixAt?: string | null;
+}
+
+export type PunchChannel = 'app' | 'lens' | 'biometric' | 'system' | 'admin';
+
+export interface AttendanceSession {
+  punchIn?: string;
+  punchOut?: string;
+  /** Why the session closed. `auto_geofence` is the engine, not the employee. */
+  closeReason?: 'manual' | 'auto_geofence' | 'shift_end' | 'admin' | 'device' | null;
+  punchInSource?: PunchChannel | null;
+  punchOutSource?: PunchChannel | null;
+  punchInLocation?: string | null;
+  punchOutLocation?: string | null;
+  punchInCoordinates?: { lat?: number; lng?: number } | null;
+  punchOutCoordinates?: { lat?: number; lng?: number } | null;
+  punchInAccuracy?: number | null;
+  punchOutAccuracy?: number | null;
+  punchInDistance?: number | null;
+  punchOutDistance?: number | null;
+  /** Gross worked ms for this session, clamped to the shift window. */
+  workMs?: number | null;
 }
 
 export interface AttendanceStats {

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { Outlet, useNavigate, Link, useLocation, createFileRoute, redirect } from "@tanstack/react-router";
 import { useAuth } from "@/hooks/use-auth";
+import { useDeveloperOptionsGate } from "@/hooks/use-developer-options-gate";
+import { DeveloperOptionsBlock } from "@/components/attendance/developer-options-block";
 import { getSession } from "@/lib/auth";
 import { logoutAndClear } from "@/lib/logout";
 import {
@@ -73,7 +75,28 @@ function UserLayout() {
     return "Good evening";
   };
 
+  // Hard block: Developer Options being on is the precondition for GPS
+  // mocking, and every feature here -- not just punch-in -- depends on the
+  // phone's location being real. Checked before anything else renders.
+  const devOptionsGate = useDeveloperOptionsGate();
+
   if (!isAuthenticated) return null;
+
+  // While this check is outstanding, render NEITHER the real app nor the
+  // block screen -- a brief "assume allowed" window would be a real gap in a
+  // security gate, however short. The native call typically resolves in well
+  // under a second, so a neutral loading screen costs nothing real.
+  if (devOptionsGate.applicable && !devOptionsGate.checked) {
+    return (
+      <div className="h-screen w-full flex items-center justify-center bg-[#FAF7F9] dark:bg-[#0D070B]">
+        <div className="h-8 w-8 rounded-full border-2 border-[#501537]/20 border-t-[#501537] animate-spin" />
+      </div>
+    );
+  }
+
+  if (devOptionsGate.applicable && devOptionsGate.blocked) {
+    return <DeveloperOptionsBlock gate={devOptionsGate} />;
+  }
 
   const navItems: { to: string; label: string; icon: LucideIcon; hash?: string }[] = [
     { to: "/user", label: "Home", icon: Home },

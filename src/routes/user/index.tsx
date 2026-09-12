@@ -15,6 +15,11 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
 import { startTracking, stopTracking } from "@/services/location-tracker";
+import { startBackgroundTracking, stopBackgroundTracking } from "@/plugins/background-tracker";
+import { getSession } from "@/lib/auth";
+import { hapticSuccess, hapticError } from "@/lib/haptics";
+import { useTrackingSetup } from "@/hooks/use-tracking-setup";
+import { TrackingSetupGate } from "@/components/attendance/tracking-setup-gate";
 import {
   acquirePosition,
   openLocationSettings,
@@ -331,17 +336,55 @@ function UserDashboard() {
   const displayPunchOut = todayLog?.punchOutIsProvisional ? undefined : todayLog?.punchOut;
 
   const isPunchedIn = !!todayLog?.punchIn;
+  // Unconditional on any capable device -- every employee goes through the
+  // same one-time permission setup, matching the reference app, whether or
+  // not an admin has separately turned on this specific person's tracking
+  // yet (see use-tracking-setup.ts for why). That separate flag still gates
+  // the effect just below, which decides whether the native service actually
+  // starts recording once punched in.
+  const trackingSetup = useTrackingSetup();
   const isPunchedOut = !!displayPunchOut;
 
   // Real-time location tracking lifecycle. Tracking is enabled per-employee by
   // the admin (profile.trackingEnabled) — employees no longer choose. It runs
   // only while the employee is punched in.
   useEffect(() => {
-    if (profile?._id && isPunchedIn && !isPunchedOut && profile.trackingEnabled) {
-      startTracking(profile._id);
-    } else {
+    const shouldTrack = !!profile?._id && isPunchedIn && !isPunchedOut && !!profile.trackingEnabled;
+
+    if (!shouldTrack) {
       stopTracking();
+      stopBackgroundTracking();
+      return;
     }
+
+    // Prefer the NATIVE foreground service when this APK has it compiled in.
+    // The in-app tracker below only reports while the WebView is alive, and
+    // Android suspends WebView timers within seconds of the screen locking --
+    // which is exactly when someone walks out of the building, i.e. precisely
+    // the moment the geofence engine needs data and currently gets none.
+    //
+    // On any device without the plugin (every APK shipped before this, since
+    // OTA cannot deliver native code) startBackgroundTracking resolves false
+    // and we fall back to today's behaviour rather than failing.
+    let cancelled = false;
+    (async () => {
+      const session = getSession();
+      const started = session?.token
+        ? await startBackgroundTracking({
+            token: session.token,
+            apiBase: import.meta.env.VITE_API_URL || "https://gray-crab-756474.hostingersite.com/api",
+            employeeId: profile._id,
+          })
+        : false;
+
+      if (cancelled) return;
+      // Run the in-app tracker only when the native service did NOT take over.
+      // Running both would double every fix, and duplicated points bias a
+      // geofence decision toward wherever the phone was reporting most often.
+      if (!started) startTracking(profile._id);
+    })();
+
+    return () => { cancelled = true; };
   }, [profile?._id, isPunchedIn, isPunchedOut, profile?.trackingEnabled]);
 
   // Real-time Shift Progress
@@ -480,6 +523,7 @@ function UserDashboard() {
     if (alreadyDone) {
       // The backend recorded the punch even though the request errored — show
       // the same success confirmation the happy path would, no error toast.
+      void hapticSuccess();
       setScanResult({
         type,
         timeLabel: nowLabel(),
@@ -493,6 +537,7 @@ function UserDashboard() {
         setScanResult(null);
       }, 1800);
     } else {
+      void hapticError();
       const rawMsg = err?.response?.data?.message as string | undefined;
       const fallback = `${type === "punch-in" ? "Punch In" : "Punch Out"} failed. Please try again.`;
       toast.error(rawMsg && !looksLikeRawCrash(rawMsg) ? rawMsg : fallback);
@@ -504,16 +549,33 @@ function UserDashboard() {
 
   const captureScannerPhoto = async () => {
     if (videoRef.current) {
+      // The punch selfie exists to verify identity, not for print-quality
+      // detail -- the native camera resolution (often 1080p+ on the front
+      // camera) produced a multi-megabyte data URL for every single punch,
+      // which the employee's mobile data has to upload before the punch even
+      // reaches the server. Capping the LONG EDGE at 480px and drawing the
+      // video into an already-small canvas (so the browser downsamples during
+      // the draw, rather than us shrinking a huge bitmap afterwards) keeps a
+      // face perfectly recognisable at a fraction of the size; the JPEG
+      // quality below does the rest.
+      const MAX_DIMENSION = 480;
+      const srcW = videoRef.current.videoWidth || 320;
+      const srcH = videoRef.current.videoHeight || 240;
+      const scale = Math.min(1, MAX_DIMENSION / Math.max(srcW, srcH));
       const canvas = document.createElement("canvas");
-      canvas.width = videoRef.current.videoWidth || 320;
-      canvas.height = videoRef.current.videoHeight || 240;
+      canvas.width = Math.round(srcW * scale);
+      canvas.height = Math.round(srcH * scale);
       const ctx = canvas.getContext("2d");
       if (ctx) {
         // Mirror horizontally to match the on-screen preview (video is shown with scale-x-[-1]).
         ctx.translate(canvas.width, 0);
         ctx.scale(-1, 1);
         ctx.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-        const dataUrl = canvas.toDataURL("image/jpeg");
+        // 0.6 rather than the browser default (~0.92): a selfie compresses
+        // exceptionally well at this quality since it's mostly smooth
+        // skin/background tones, not fine detail -- this is where most of the
+        // size reduction actually comes from, on top of the resize above.
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.6);
         setCapturedSelfie(dataUrl);
         stopScannerCamera();
 
@@ -521,6 +583,7 @@ function UserDashboard() {
         if (scanType === "punch-in") {
           punchInMutation.mutate(dataUrl, {
             onSuccess: () => {
+              void hapticSuccess();
               setScanLoading(false);
               setScanResult({ type: "punch-in", timeLabel: nowLabel() });
               setTimeout(() => {
@@ -532,16 +595,22 @@ function UserDashboard() {
             onError: (err) => handlePunchError("punch-in", err),
           });
         } else if (scanType === "punch-out") {
-          // Auto-end lunch before punching out if employee is currently on a lunch break
+          // Auto-end lunch before punching out if employee is currently on a
+          // lunch break. Calls the raw API directly, NOT lunchOutMutation --
+          // this is housekeeping for a single punch-out tap, not a second
+          // user action, so it must stay silent (no toast, no haptic) whether
+          // it succeeds or fails. The punch-out mutation just below is the
+          // one and only feedback the employee gets for this button press.
           if (todayLog?.lunchInTime && !todayLog?.lunchOutTime) {
             try {
-              await lunchOutMutation.mutateAsync();
+              await postLunchOut();
             } catch {
               // Continue with punch-out even if lunch-out fails
             }
           }
           punchOutMutation.mutate(dataUrl, {
             onSuccess: (data) => {
+              void hapticSuccess();
               setScanLoading(false);
               setScanResult({ type: "punch-out", timeLabel: nowLabel(), workHoursLabel: data?.workHours ? `${data.workHours} hrs` : undefined });
               setTimeout(() => {
@@ -711,37 +780,54 @@ function UserDashboard() {
       return data;
     },
     onSuccess: () => {
+      void hapticSuccess();
       toast.success("Lunch Break Started!");
       queryClient.invalidateQueries({ queryKey: ["user-profile"] });
       queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
     },
     onError: (err: any) => {
+      void hapticError();
       toast.error(err.response?.data?.message || "Lunch In Failed");
     }
   });
 
+  // The raw API call, with NO toast/haptic/invalidate side effects of its
+  // own. Pulled out of the mutation so the SILENT auto-close-before-punch-out
+  // path (below, inside captureScannerPhoto) can call the same lunch-out
+  // logic without also triggering the "End Lunch Break" button's feedback --
+  // React Query runs a mutation's own onSuccess/onError regardless of whether
+  // it was reached via .mutate() or .mutateAsync(), and regardless of any
+  // try/catch the caller wraps around it, so reusing lunchOutMutation itself
+  // for that internal call produced a SECOND haptic (and a second toast) for
+  // one punch-out tap: a real "auto-close, then punch out" day felt like two
+  // successes, and a failed auto-close felt like an error immediately
+  // followed by a success, for what was still just one button press.
+  const postLunchOut = async () => {
+    const payload = {
+      location: location,
+      address: (!address || address === "GPS permissions needed" || address === "Locating...")
+        ? "Location Capturing Bypassed"
+        : address,
+      // Lunch is geofenced server-side too, so it needs the same fix
+      // quality as a punch. Paired with `location` above -- both come
+      // from the same captured position, so they describe one reading.
+      accuracy: locationAccuracy,
+      fixAt: new Date().toISOString(),
+    };
+    const { data } = await apiClient.post("/attendance/lunch-out", payload);
+    return data;
+  };
+
   const lunchOutMutation = useMutation({
-    mutationFn: async () => {
-      const payload = {
-        location: location,
-        address: (!address || address === "GPS permissions needed" || address === "Locating...")
-          ? "Location Capturing Bypassed"
-          : address,
-        // Lunch is geofenced server-side too, so it needs the same fix
-        // quality as a punch. Paired with `location` above -- both come
-        // from the same captured position, so they describe one reading.
-        accuracy: locationAccuracy,
-        fixAt: new Date().toISOString(),
-      };
-      const { data } = await apiClient.post("/attendance/lunch-out", payload);
-      return data;
-    },
+    mutationFn: postLunchOut,
     onSuccess: () => {
+      void hapticSuccess();
       toast.success("Lunch Break Completed!");
       queryClient.invalidateQueries({ queryKey: ["user-profile"] });
       queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
     },
     onError: (err: any) => {
+      void hapticError();
       toast.error(err.response?.data?.message || "Lunch Out Failed");
     }
   });
@@ -1083,7 +1169,19 @@ function UserDashboard() {
 
           {/* Dynamic Primary Actions Card */}
           <div className="space-y-3">
-            {!isPunchedIn ? (
+            {/* First-run gate. Punching in is withheld until this phone can
+                actually record location in the background, because the failure
+                it prevents is SILENT: punch in with "While using the app" and
+                recording stops as soon as the screen locks, with nobody finding
+                out until the hours are already missing.
+
+                Only ever shown when the device can satisfy it -- a browser, a
+                PWA, or an APK predating the tracker plugin reports
+                applicable:false and punches in exactly as before, so shipping
+                this cannot lock out anyone already working. */}
+            {!isPunchedIn && trackingSetup.applicable && !trackingSetup.ready ? (
+              <TrackingSetupGate setup={trackingSetup} />
+            ) : !isPunchedIn ? (
               // Not punched in: Primary "Punch In" button (opens location consent and map verification popup first)
               <Button
                 onClick={() => {

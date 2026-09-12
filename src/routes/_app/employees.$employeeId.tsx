@@ -58,7 +58,7 @@ import { useBranchService } from "@/services/branch-service";
 import { useShiftService } from "@/services/shift-service";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { useClientDevices, useClientErrors, PERMISSION_LABELS } from "@/services/client-service";
+import { useClientDevices, useClientErrors, PERMISSION_LABELS, TRACKING_PERMISSIONS } from "@/services/client-service";
 
 export const Route = createFileRoute("/_app/employees/$employeeId")({
   component: EmployeeDetailsPage,
@@ -979,15 +979,71 @@ function EmployeeDetailsPage() {
                 ) : sortedDevices.map((device, index) => (
                   <div key={device._id} className={cn("space-y-3", index > 0 && "border-t border-border/40 pt-6")}>
                     <p className="text-xs font-semibold text-foreground">{device.deviceModel || device.platform || "App install"}{index === 0 && <span className="ml-2 text-muted-foreground font-normal">(most recently seen)</span>}</p>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      {(["location", "coarseLocation", "camera", "notifications"] as const).map((permission) => (
-                        <div key={permission} className="rounded-lg border border-border/50 p-3 space-y-2">
-                          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{permission === "coarseLocation" ? "Coarse location" : permission}</p>
-                          <Badge variant="outline" className={cn("capitalize", permissionBadgeClass(device.permissions[permission]))}>
-                            {PERMISSION_LABELS[device.permissions[permission]]}
-                          </Badge>
+                    {/* Setup verdict first. This is the single line support
+                        reads when an employee says "my BOT isn't working": it
+                        distinguishes NEVER SET UP from SET UP AND SINCE BROKEN,
+                        which need completely different help. */}
+                    {(() => {
+                      const blocking = TRACKING_PERMISSIONS.filter(
+                        (p) => !p.selfDeclared && device.permissions[p.key] === "denied",
+                      );
+                      const unreadable = TRACKING_PERMISSIONS.every(
+                        (p) => device.permissions[p.key] === "unknown",
+                      );
+                      if (unreadable) {
+                        return (
+                          <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
+                            <p className="text-[11px] font-semibold text-muted-foreground">
+                              This build predates background tracking — it cannot report these settings.
+                              Nothing is wrong with the phone; the employee needs the newer APK.
+                            </p>
+                          </div>
+                        );
+                      }
+                      return blocking.length === 0 ? (
+                        <div className="rounded-lg border border-success/25 bg-success/10 px-3 py-2">
+                          <p className="text-[11px] font-bold text-success">
+                            Background tracking is fully enabled on this device.
+                            {device.trackingSetupComplete === false && " Setup was never formally completed, but every required permission is granted."}
+                          </p>
                         </div>
-                      ))}
+                      ) : (
+                        <div className="rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 space-y-1">
+                          <p className="text-[11px] font-bold text-destructive">
+                            Location will stop when the screen locks — {blocking.length} setting
+                            {blocking.length > 1 ? "s are" : " is"} blocking it.
+                          </p>
+                          {blocking.map((p) => (
+                            <p key={p.key} className="text-[10px] leading-relaxed text-destructive/80">
+                              <span className="font-bold">{p.label}:</span> {p.fix}
+                            </p>
+                          ))}
+                        </div>
+                      );
+                    })()}
+
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      {TRACKING_PERMISSIONS.map((perm) => {
+                        const state = device.permissions[perm.key];
+                        return (
+                          <div key={perm.key} className="rounded-lg border border-border/50 p-3 space-y-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                              {perm.label}
+                            </p>
+                            <Badge variant="outline" className={cn("capitalize", permissionBadgeClass(state))}>
+                              {PERMISSION_LABELS[state]}
+                            </Badge>
+                            {/* Auto-start cannot be read by any Android API, so
+                                a "granted" here is the employee's own claim. Saying
+                                so stops support treating it as verified. */}
+                            {perm.selfDeclared && state === "granted" && (
+                              <p className="text-[9px] leading-tight text-muted-foreground/70">
+                                Self-reported — not verifiable
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 ))}

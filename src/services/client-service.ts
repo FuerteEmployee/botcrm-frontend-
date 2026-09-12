@@ -30,11 +30,68 @@ export interface ClientDevice {
     coarseLocation: PermissionState;
     camera: PermissionState;
     notifications: PermissionState;
+    backgroundLocation: PermissionState;
+    preciseLocation: PermissionState;
+    batteryUnrestricted: PermissionState;
+    autoStart: PermissionState;
   };
+  /** Setup gate completed at least once. Latches on and is never cleared. */
+  trackingSetupComplete?: boolean;
+  trackingSetupCompletedAt?: string | null;
+  oemHint?: string | null;
   appOpenCount: number;
   firstSeenAt: string;
   lastSeenAt: string;
 }
+
+/**
+ * The permissions background tracking actually depends on, in the order the
+ * setup gate asks for them.
+ *
+ * `camera` and `coarseLocation` are deliberately absent: the APK never requests
+ * a camera permission, so it is always "unknown" and listing it only sends
+ * admins chasing a fault that cannot exist.
+ */
+export const TRACKING_PERMISSIONS: Array<{
+  key: keyof ClientDevice["permissions"];
+  label: string;
+  /** What to tell the employee when this one is the problem. */
+  fix: string;
+  /** True when no API can verify it, so 'granted' is the employee's claim. */
+  selfDeclared?: boolean;
+}> = [
+  {
+    key: "location",
+    label: "Location",
+    fix: "Settings → Apps → BOT → Permissions → Location",
+  },
+  {
+    key: "preciseLocation",
+    label: "Precise location",
+    fix: "In the location permission screen, switch from Approximate to Precise.",
+  },
+  {
+    key: "backgroundLocation",
+    label: "Allow all the time",
+    fix: "Settings → Apps → BOT → Permissions → Location → Allow all the time. Without this, recording stops when the screen locks.",
+  },
+  {
+    key: "notifications",
+    label: "Notifications",
+    fix: "Settings → Apps → BOT → Notifications. Android stops the recording itself if this is blocked.",
+  },
+  {
+    key: "batteryUnrestricted",
+    label: "Battery unrestricted",
+    fix: "Settings → Apps → BOT → Battery → Unrestricted.",
+  },
+  {
+    key: "autoStart",
+    label: "Auto-start",
+    fix: "Phone manufacturer's security app → Auto-start / Startup manager → enable BOT.",
+    selfDeclared: true,
+  },
+];
 
 export interface ClientError {
   _id: string;
