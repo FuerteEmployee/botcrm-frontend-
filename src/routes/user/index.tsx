@@ -369,10 +369,24 @@ function UserDashboard() {
     let cancelled = false;
     (async () => {
       const session = getSession();
+      // The native syncer builds its own URLs as `$apiBase/api/tracking/...`
+      // (see LocationSyncer.kt / LocationTrackingService.kt) -- it expects the
+      // BARE HOST. VITE_API_URL, by contrast, already includes the trailing
+      // "/api" everywhere else in this app, because that's axios's baseURL
+      // and every other call site (apiClient.post("/attendance/punch-in"), …)
+      // is written relative to it. Passing VITE_API_URL straight through here
+      // produced a doubled ".../api/api/tracking/update/batch" on every
+      // single native request -- a 404 every time, silently, since the
+      // syncer's failure path is "retry with backoff", never "surface an
+      // error" -- which is exactly why zero background-sourced fixes had ever
+      // reached the server on any device, despite the native plugin itself
+      // (proven by haptics, which touches no endpoint) working correctly.
+      const rawApiBase = import.meta.env.VITE_API_URL || "https://gray-crab-756474.hostingersite.com/api";
+      const nativeApiBase = rawApiBase.replace(/\/api\/?$/, "");
       const started = session?.token
         ? await startBackgroundTracking({
             token: session.token,
-            apiBase: import.meta.env.VITE_API_URL || "https://gray-crab-756474.hostingersite.com/api",
+            apiBase: nativeApiBase,
             employeeId: profile._id,
           })
         : false;
