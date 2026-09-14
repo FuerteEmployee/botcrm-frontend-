@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { LogOut, Bell, Lock, Building2, Palette, AlertCircle, Mail, Phone, MapPin, Camera, User, LayoutGrid, List, CheckCircle2, ShieldCheck, Globe, Trash2, Edit2, Loader2, Clock, CalendarDays, Plus, X, GitBranch, Receipt, Search, LogIn, Copy, Check, Banknote } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card } from "@/components/ui/card";
@@ -9,7 +9,9 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/hooks/use-auth";
-import { setSession, clearSession, getAccessLogs, type AccessLog } from "@/lib/auth";
+import { setSession } from "@/lib/auth";
+import { logoutAndClear } from "@/lib/logout";
+import { useLoginSessions, type LoginSession } from "@/services/client-service";
 import { toast } from "sonner";
 import { apiClient, IMAGE_BASE_URL } from "@/lib/api-client";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogClose } from "@/components/ui/dialog";
@@ -95,7 +97,7 @@ function SettingsPage() {
   const [newTemplateName, setNewTemplateName] = useState("");
   const [notif, setNotif] = useState({ email: true, push: true, weekly: false });
   const [accessLogsOpen, setAccessLogsOpen] = useState(false);
-  const [accessLogs, setAccessLogs] = useState<AccessLog[]>([]);
+  const { data: sessions, isLoading: isLogsLoading } = useLoginSessions(undefined, 100);
   const [logsFilter, setLogsFilter] = useState<"all" | "login" | "logout">("all");
   const [logsSearch, setLogsSearch] = useState("");
   const [attendance, setAttendance] = useState({
@@ -281,32 +283,28 @@ function SettingsPage() {
     }
   };
 
-  useEffect(() => {
-    if (hasMounted) {
-      setAccessLogs(getAccessLogs());
-    }
-  }, [hasMounted, accessLogsOpen]);
-
-  const filteredLogs = accessLogs.filter((log) => {
-    if (logsFilter === "login" && log.action !== "login") return false;
-    if (logsFilter === "logout" && log.action !== "logout") return false;
-    
-    if (logsSearch.trim()) {
-      const q = logsSearch.toLowerCase();
-      return (
-        log.name.toLowerCase().includes(q) ||
-        log.role.toLowerCase().includes(q) ||
-        log.phone.toLowerCase().includes(q) ||
-        log.ipAddress.toLowerCase().includes(q)
-      );
-    }
-    return true;
-  });
+  const filteredLogs = useMemo(() => {
+    return (sessions ?? []).filter((log) => {
+      if (logsFilter === "login" && log.action !== "login") return false;
+      if (logsFilter === "logout" && log.action !== "logout") return false;
+      
+      if (logsSearch.trim()) {
+        const q = logsSearch.toLowerCase();
+        return (
+          (log.name?.toLowerCase().includes(q) ?? false) ||
+          (log.role?.toLowerCase().includes(q) ?? false) ||
+          (log.phone?.toLowerCase().includes(q) ?? false) ||
+          (log.ipAddress?.toLowerCase().includes(q) ?? false)
+        );
+      }
+      return true;
+    });
+  }, [sessions, logsFilter, logsSearch]);
 
   if (!hasMounted) return null;
 
-  const logout = () => {
-    clearSession();
+  const logout = async () => {
+    await logoutAndClear();
     toast.success("Logged out");
     navigate({ to: "/login" });
   };
@@ -1112,10 +1110,7 @@ function SettingsPage() {
                   <p className="text-[11px] text-muted-foreground font-medium">Enhanced security with 2FA and password rotation policies.</p>
                 </Card>
                 <Card 
-                  onClick={() => {
-                    setAccessLogs(getAccessLogs());
-                    setAccessLogsOpen(true);
-                  }}
+                  onClick={() => setAccessLogsOpen(true)}
                   className="p-6 border border-border/60 bg-white hover:border-primary/30 hover:shadow-elegant rounded-2xl transition-all cursor-pointer group"
                 >
                   <div className="flex items-center gap-3 mb-2">
@@ -1195,16 +1190,21 @@ function SettingsPage() {
 
           {/* Logs List with Custom Scrollbar */}
           <div className="max-h-[350px] overflow-y-auto pr-1 space-y-2.5 scrollbar-thin scrollbar-thumb-muted">
-            {filteredLogs.length > 0 ? (
+            {isLogsLoading ? (
+              <div className="py-12 flex flex-col items-center justify-center gap-2">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                <p className="text-[12px] text-muted-foreground font-medium">Loading access logs...</p>
+              </div>
+            ) : filteredLogs.length > 0 ? (
               filteredLogs.map((log) => {
                 const isLogin = log.action === "login";
-                const dateObj = new Date(log.timestamp);
+                const dateObj = new Date(log.createdAt);
                 const timeString = dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
                 const dateString = dateObj.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
                 
                 return (
                   <div 
-                    key={log.id} 
+                    key={log._id} 
                     className="p-4 rounded-2xl border border-border/40 bg-muted/5 hover:bg-muted/10 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4"
                   >
                     <div className="flex items-start gap-3">
@@ -1218,26 +1218,36 @@ function SettingsPage() {
                       </div>
                       <div className="space-y-0.5">
                         <div className="flex items-center gap-2">
-                          <span className="text-[13px] font-black text-foreground">{log.name}</span>
+                          <span className="text-[13px] font-black text-foreground">{log.name || "Unknown"}</span>
                           <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 bg-muted/40 px-1.5 py-0.5 rounded-md">
-                            {log.role}
+                            {log.role || "User"}
                           </span>
                         </div>
                         <p className="text-[11px] text-muted-foreground font-medium flex items-center gap-1">
-                          <span className="font-bold">{log.phone}</span>
+                          <span className="font-bold">{log.phone || "—"}</span>
                           <span className="opacity-40">•</span>
-                          <span>{getBrowserOS(log.userAgent)}</span>
+                          <span>{getBrowserOS(log.userAgent || "")}</span>
+                          {log.appVersion && (
+                            <>
+                              <span className="opacity-40">•</span>
+                              <span>v{log.appVersion}</span>
+                            </>
+                          )}
                         </p>
                       </div>
                     </div>
 
                     <div className="flex items-start sm:items-end flex-col justify-between sm:text-right shrink-0 gap-1">
-                      <div className="flex items-center gap-1.5">
-                        <code className="text-[11px] font-bold text-foreground/80 bg-white border border-border/50 px-2 py-0.5 rounded-lg select-all">
-                          {log.ipAddress}
-                        </code>
-                        <CopyButton text={log.ipAddress} />
-                      </div>
+                      {log.ipAddress ? (
+                        <div className="flex items-center gap-1.5">
+                          <code className="text-[11px] font-bold text-foreground/80 bg-white border border-border/50 px-2 py-0.5 rounded-lg select-all">
+                            {log.ipAddress}
+                          </code>
+                          <CopyButton text={log.ipAddress} />
+                        </div>
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground font-medium">—</span>
+                      )}
                       <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-tight">
                         {dateString} at {timeString}
                       </p>
@@ -1246,30 +1256,21 @@ function SettingsPage() {
                 );
               })
             ) : (
-              <div className="text-center py-12 border border-dashed border-border/60 rounded-2xl bg-muted/5">
+              <div className="text-center py-12 border border-dashed border-border/60 rounded-2xl bg-muted/5 px-4">
                 <Bell className="h-10 w-10 text-muted-foreground/30 mx-auto mb-2" />
-                <p className="text-[13px] font-bold text-foreground">No access logs found</p>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Try adjusting your filters or search query.</p>
+                <p className="text-[13px] font-bold text-foreground">
+                  {sessions && sessions.length === 0 ? "No login sessions recorded yet" : "No access logs found"}
+                </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5 max-w-sm mx-auto">
+                  {sessions && sessions.length === 0
+                    ? "Logins only started being recorded now, so this will remain empty until team members sign in again."
+                    : "Try adjusting your filters or search query."}
+                </p>
               </div>
             )}
           </div>
 
-          <div className="mt-6 flex justify-between items-center border-t border-border/40 pt-4">
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => {
-                if (window.confirm("Are you sure you want to clear all access logs?")) {
-                  window.localStorage.setItem("bot_hrms_access_logs", JSON.stringify([]));
-                  setAccessLogs([]);
-                  toast.success("Access logs cleared");
-                }
-              }}
-              disabled={filteredLogs.length === 0}
-              className="h-9 rounded-xl text-[11px] font-bold border-destructive/20 text-destructive bg-destructive/5 hover:bg-destructive hover:text-white transition-all px-4 cursor-pointer"
-            >
-              Clear Logs
-            </Button>
+          <div className="mt-6 flex justify-end items-center border-t border-border/40 pt-4">
             <DialogClose asChild>
               <Button className="h-9 px-6 rounded-xl font-bold text-[12px] cursor-pointer">
                 Close Window

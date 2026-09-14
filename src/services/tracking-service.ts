@@ -8,7 +8,9 @@ export interface Location {
   employeeId: string;
   latitude: number;
   longitude: number;
-  accuracy?: number;
+  // null when the device did not report it -- never 0, which would read as a
+  // perfect fix. Absent on older rows saved before the field existed.
+  accuracy?: number | null;
   timestamp: string;
 }
 

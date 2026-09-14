@@ -403,14 +403,28 @@ function ManageDialog({
 
   const mutation = useMutation({
     mutationFn: (data: any) => updateTenant(tenantId, data),
-    onSuccess: () => {
-      toast.success("Customer updated successfully");
+    onSuccess: (_data, variables: any) => {
+      toast.success(
+        variables?.renew ? "Subscription renewed" : "Customer updated successfully",
+      );
       queryClient.invalidateQueries({ queryKey: ["superadmin"] });
       onClose();
     },
     onError: (err: any) => {
       toast.error(err?.response?.data?.message || "Failed to update");
     },
+  });
+
+  // Shared by "Save changes" and "Renew now" — renewing also persists whatever
+  // else is currently in the form, so the two can't disagree about the plan or
+  // billing cycle the new period is priced on.
+  const formPayload = () => ({
+    planId,
+    status,
+    billingCycle,
+    bannerThresholdDays: Number(bannerThresholdDays),
+    email: botlensEmail,
+    ...(botlensPassword ? { password: botlensPassword } : {}),
   });
 
   return (
@@ -478,6 +492,34 @@ function ManageDialog({
           The tenant's trial/renewal countdown banner stays hidden until this many days before expiry.
         </p>
 
+        <div className="mt-4 pt-4 border-t flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <Label className="text-xs font-semibold">Current period</Label>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              {tenant?.currentPeriodEnd
+                ? `Ends ${new Date(tenant.currentPeriodEnd).toLocaleString("en-IN", {
+                    dateStyle: "medium",
+                    timeStyle: "short",
+                  })}`
+                : "No paid period set yet."}
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            disabled={mutation.isPending || status !== "active"}
+            title={
+              status !== "active"
+                ? "Set status to active to renew"
+                : "Adds one billing period on top of any time remaining"
+            }
+            onClick={() => mutation.mutate({ ...formPayload(), renew: true })}
+          >
+            Renew now (+{billingCycle === "annual" ? 365 : 30}d)
+          </Button>
+        </div>
+
         <div className="mt-4 pt-4 border-t space-y-3">
           <div>
             <Label className="text-xs font-semibold">BOTLens admin credentials</Label>
@@ -529,16 +571,7 @@ function ManageDialog({
             size="sm"
             className="bg-primary hover:bg-primary/90"
             disabled={mutation.isPending}
-            onClick={() =>
-              mutation.mutate({
-                planId,
-                status,
-                billingCycle,
-                bannerThresholdDays: Number(bannerThresholdDays),
-                email: botlensEmail,
-                ...(botlensPassword ? { password: botlensPassword } : {}),
-              })
-            }
+            onClick={() => mutation.mutate(formPayload())}
           >
             {mutation.isPending ? "Saving..." : "Save changes"}
           </Button>

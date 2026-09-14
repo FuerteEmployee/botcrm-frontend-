@@ -3,6 +3,8 @@ import ReactDOM from "react-dom/client";
 import { RouterProvider } from "@tanstack/react-router";
 import { Capacitor } from "@capacitor/core";
 import { getRouter } from "./router";
+import { initClientTelemetry } from "./lib/client-telemetry";
+import { initLiveUpdates, markBundleHealthy } from "./lib/live-update";
 import "./styles.css";
 import "virtual:pwa-register";
 
@@ -27,10 +29,29 @@ if (Capacitor.isNativePlatform()) {
   }
 }
 
+// Installs the global error handlers and reports the build/permission state.
+// Safe before login — the senders no-op without a session and pick it up from
+// the bot-auth-change event.
+initClientTelemetry();
+
 const router = getRouter();
+
+initLiveUpdates();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <RouterProvider router={router} />
   </React.StrictMode>,
 );
+
+// Confirm to the live-update plugin that this bundle actually runs. If this
+// never fires, the plugin rolls back to the previous bundle after
+// appReadyTimeout (10s) — the safety net that makes pushing code to every
+// phone at once recoverable.
+//
+// Deliberately AFTER render() and inside a frame callback: calling it at
+// module load would mark a bundle healthy that might still crash while
+// mounting, defeating the rollback entirely.
+requestAnimationFrame(() => {
+  void markBundleHealthy();
+});

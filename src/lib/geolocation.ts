@@ -13,7 +13,13 @@ import {
 // link the user straight to the OS screen where they can enable location.
 // In the browser / PWA we fall back to the standard navigator.geolocation API.
 
-export type Coords = { lat: number; lng: number; accuracy: number };
+// `accuracy` is null when the platform does not report it -- NEVER 0.
+//
+// Zero reads as a perfect fix and sails through any accuracy gate, which is the
+// opposite of what an absent reading means. The geofence work this feeds treats
+// unknown accuracy as untrustworthy and excludes it, biasing toward leaving an
+// employee punched in; a 0 would invert that and punch them out on no evidence.
+export type Coords = { lat: number; lng: number; accuracy: number | null };
 
 // Why location acquisition failed — drives which help text + settings screen we show.
 export type LocationFailureReason =
@@ -143,7 +149,7 @@ export async function acquirePosition(
         coords: {
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
-          accuracy: pos.coords.accuracy ?? 0,
+          accuracy: pos.coords.accuracy ?? null,
         },
       };
     }
@@ -166,7 +172,7 @@ export async function acquirePosition(
       coords: {
         lat: pos.coords.latitude,
         lng: pos.coords.longitude,
-        accuracy: pos.coords.accuracy ?? 0,
+        accuracy: pos.coords.accuracy ?? null,
       },
     };
   } catch (e) {

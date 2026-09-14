@@ -57,6 +57,8 @@ import { useDepartmentService } from "@/services/department-service";
 import { useBranchService } from "@/services/branch-service";
 import { useShiftService } from "@/services/shift-service";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { useClientDevices, useClientErrors, PERMISSION_LABELS, TRACKING_PERMISSIONS } from "@/services/client-service";
 
 export const Route = createFileRoute("/_app/employees/$employeeId")({
   component: EmployeeDetailsPage,
@@ -81,6 +83,8 @@ function EmployeeDetailsPage() {
     employeeId
   );
   const { lunchIn, lunchOut } = useAttendanceService();
+  const { data: devices, isLoading: devicesLoading } = useClientDevices(employeeId);
+  const { data: errors } = useClientErrors(employeeId, 50);
 
   const isLoading = empLoading || deptLoading || branchLoading;
 
@@ -121,7 +125,7 @@ function EmployeeDetailsPage() {
     return names.length ? names.join(", ") : "N/A";
   };
 
-  const [activeTab, setActiveTab] = useState<"profile" | "attendance">("profile");
+  const [activeTab, setActiveTab] = useState<"profile" | "attendance" | "device">("profile");
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedLog, setSelectedLog] = useState<AttendanceRecord | null>(null);
   const [showAllSessions, setShowAllSessions] = useState(false);
@@ -171,6 +175,23 @@ function EmployeeDetailsPage() {
     const minutes = Math.floor((totalMs % (1000 * 60 * 60)) / (1000 * 60));
     return `${hours} : ${String(minutes).padStart(2, "0")} h`;
   }, [monthLogs]);
+
+  const sortedDevices = useMemo(
+    () => [...(devices ?? [])].sort((a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime()),
+    [devices]
+  );
+  const formatDeviceDate = (value: string) => new Date(value).toLocaleString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const permissionBadgeClass = (state: string) => {
+    if (state === "granted") return "bg-success/10 text-success border-success/20";
+    if (state === "denied") return "bg-destructive/10 text-destructive border-destructive/20";
+    return "bg-muted text-muted-foreground border-border/60";
+  };
 
   const isCurrentMonth = isSameMonth(currentMonth, new Date());
   const monthLabel = currentMonth.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
@@ -370,6 +391,7 @@ function EmployeeDetailsPage() {
         {[
           { id: "profile", label: "Profile", icon: User },
           { id: "attendance", label: "Attendance", icon: CalendarCheck },
+          { id: "device", label: "Device", icon: Smartphone },
         ].map((tab) => (
           <button
             key={tab.id}
@@ -696,7 +718,7 @@ function EmployeeDetailsPage() {
               </Card>
             </div>
           </motion.div>
-        ) : (
+        ) : activeTab === "attendance" ? (
           <motion.div
             key="attendance"
             initial={{ opacity: 0, y: 10 }}
@@ -894,6 +916,169 @@ function EmployeeDetailsPage() {
                 </Card>
               </div>
             </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            key="device"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-6"
+          >
+            <section className="space-y-4">
+              <div>
+                <h2 className="text-sm font-bold">Installs</h2>
+                <p className="text-xs text-muted-foreground">Current and historical app installs reported by this employee.</p>
+              </div>
+              {devicesLoading ? (
+                <Card className="border-none shadow-soft rounded-2xl">
+                  <CardContent className="p-6 text-sm text-muted-foreground">Loading app reports…</CardContent>
+                </Card>
+              ) : sortedDevices.length === 0 ? (
+                <Card className="border-none shadow-soft rounded-2xl">
+                  <CardHeader className="border-b border-border/40 bg-muted/5 py-4 px-6">
+                    <CardTitle className="text-sm font-bold flex items-center gap-2"><Smartphone className="h-4 w-4 text-primary" /> No installs reported</CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-6 text-sm text-muted-foreground">
+                    No app reports yet. Employees must be running an APK built after this feature shipped.
+                  </CardContent>
+                </Card>
+              ) : sortedDevices.map((device, index) => (
+                <Card key={device._id} className={cn("border-none shadow-soft rounded-2xl overflow-hidden", index === 0 && "ring-1 ring-primary/20")}>
+                  <CardHeader className="border-b border-border/40 bg-muted/5 py-4 px-6 flex flex-row items-center justify-between">
+                    <CardTitle className="text-sm font-bold flex items-center gap-2">
+                      <Smartphone className="h-4 w-4 text-primary" />
+                      {device.appVersion ?? "Unknown version"}{device.appBuild ? ` (build ${device.appBuild})` : ""}
+                    </CardTitle>
+                    <Badge variant="outline" className={index === 0 ? "border-primary/20 bg-primary/5 text-primary" : "text-muted-foreground"}>
+                      {index === 0 ? "Most recently seen" : "Historical install"}
+                    </Badge>
+                  </CardHeader>
+                  <CardContent className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 text-sm">
+                    {[
+                      ["Platform", device.platform], ["Device", device.deviceModel], ["Manufacturer", device.manufacturer], ["OS version", device.osVersion],
+                      ["App opens", device.appOpenCount.toLocaleString()], ["First seen", formatDeviceDate(device.firstSeenAt)], ["Last seen", formatDeviceDate(device.lastSeenAt)],
+                    ].map(([label, value]) => (
+                      <div key={label} className="space-y-1">
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</p>
+                        <p className="font-medium text-foreground break-words">{value || "—"}</p>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              ))}
+            </section>
+
+            <Card className="border-none shadow-soft rounded-2xl overflow-hidden">
+              <CardHeader className="border-b border-border/40 bg-muted/5 py-4 px-6">
+                <CardTitle className="text-sm font-bold">Permissions</CardTitle>
+              </CardHeader>
+              <CardContent className="p-6 space-y-6">
+                {sortedDevices.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Permissions will appear after an app install reports in.</p>
+                ) : sortedDevices.map((device, index) => (
+                  <div key={device._id} className={cn("space-y-3", index > 0 && "border-t border-border/40 pt-6")}>
+                    <p className="text-xs font-semibold text-foreground">{device.deviceModel || device.platform || "App install"}{index === 0 && <span className="ml-2 text-muted-foreground font-normal">(most recently seen)</span>}</p>
+                    {/* Setup verdict first. This is the single line support
+                        reads when an employee says "my BOT isn't working": it
+                        distinguishes NEVER SET UP from SET UP AND SINCE BROKEN,
+                        which need completely different help. */}
+                    {(() => {
+                      const blocking = TRACKING_PERMISSIONS.filter(
+                        (p) => !p.selfDeclared && device.permissions[p.key] === "denied",
+                      );
+                      const unreadable = TRACKING_PERMISSIONS.every(
+                        (p) => device.permissions[p.key] === "unknown",
+                      );
+                      if (unreadable) {
+                        return (
+                          <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
+                            <p className="text-[11px] font-semibold text-muted-foreground">
+                              This build predates background tracking — it cannot report these settings.
+                              Nothing is wrong with the phone; the employee needs the newer APK.
+                            </p>
+                          </div>
+                        );
+                      }
+                      return blocking.length === 0 ? (
+                        <div className="rounded-lg border border-success/25 bg-success/10 px-3 py-2">
+                          <p className="text-[11px] font-bold text-success">
+                            Background tracking is fully enabled on this device.
+                            {device.trackingSetupComplete === false && " Setup was never formally completed, but every required permission is granted."}
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 space-y-1">
+                          <p className="text-[11px] font-bold text-destructive">
+                            Location will stop when the screen locks — {blocking.length} setting
+                            {blocking.length > 1 ? "s are" : " is"} blocking it.
+                          </p>
+                          {blocking.map((p) => (
+                            <p key={p.key} className="text-[10px] leading-relaxed text-destructive/80">
+                              <span className="font-bold">{p.label}:</span> {p.fix}
+                            </p>
+                          ))}
+                        </div>
+                      );
+                    })()}
+
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      {TRACKING_PERMISSIONS.map((perm) => {
+                        const state = device.permissions[perm.key];
+                        return (
+                          <div key={perm.key} className="rounded-lg border border-border/50 p-3 space-y-2">
+                            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                              {perm.label}
+                            </p>
+                            <Badge variant="outline" className={cn("capitalize", permissionBadgeClass(state))}>
+                              {PERMISSION_LABELS[state]}
+                            </Badge>
+                            {/* Auto-start cannot be read by any Android API, so
+                                a "granted" here is the employee's own claim. Saying
+                                so stops support treating it as verified. */}
+                            {perm.selfDeclared && state === "granted" && (
+                              <p className="text-[9px] leading-tight text-muted-foreground/70">
+                                Self-reported — not verifiable
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <Card className="border-none shadow-soft rounded-2xl overflow-hidden">
+              <CardHeader className="border-b border-border/40 bg-muted/5 py-4 px-6">
+                <CardTitle className="text-sm font-bold">Recent errors</CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                {!errors?.length ? (
+                  <p className="p-6 text-sm text-muted-foreground">No app errors have been reported for this employee.</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[850px] text-sm">
+                      <thead className="bg-muted/30 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                        <tr><th className="px-6 py-3 text-left">Occurred</th><th className="px-6 py-3 text-left">Kind</th><th className="px-6 py-3 text-left">Message</th><th className="px-6 py-3 text-left">Route</th><th className="px-6 py-3 text-left">Request</th></tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/40">
+                        {errors.map((error) => (
+                          <tr key={error._id} className="align-top">
+                            <td className="px-6 py-4 text-xs text-muted-foreground whitespace-nowrap">{formatDeviceDate(error.occurredAt)}</td>
+                            <td className="px-6 py-4"><Badge variant="outline" className="capitalize">{error.kind}</Badge></td>
+                            <td className="px-6 py-4 max-w-sm break-words">{error.message}{error.stack && <Collapsible className="mt-2"><CollapsibleTrigger className="text-xs font-semibold text-primary hover:underline">Show stack</CollapsibleTrigger><CollapsibleContent><pre className="mt-2 max-w-sm whitespace-pre-wrap break-words rounded bg-muted p-3 text-[11px] text-muted-foreground">{error.stack}</pre></CollapsibleContent></Collapsible>}</td>
+                            <td className="px-6 py-4 text-xs text-muted-foreground">{error.route || "—"}</td>
+                            <td className="px-6 py-4 text-xs text-muted-foreground break-all">{error.statusCode ? <span className="mr-2 font-semibold text-foreground">{error.statusCode}</span> : null}{error.requestUrl || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </motion.div>
         )}
       </AnimatePresence>

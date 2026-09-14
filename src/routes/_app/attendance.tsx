@@ -27,9 +27,20 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { useAttendanceService, useAttendanceStats, useAbsentToday, type AttendanceRecord } from "@/services/attendance-service";
+import { useAttendanceService, useAttendanceStats, useAbsentToday, usePunchLog, type AttendanceRecord, type AttendanceSession, type PunchLogTap } from "@/services/attendance-service";
+import { useGeofenceMode } from "@/services/geofence-service";
+import {
+  SessionTimeline,
+  DayStatsRow,
+  AutoPunchOutCard,
+  ShiftRequirementCard,
+  WhyHalfDay,
+  GeofenceExitBanner,
+  InsideFenceNote,
+} from "@/components/attendance/day-detail-blocks";
 import { useRegularizationService } from "@/services/regularization-service";
 import { useShiftService } from "@/services/shift-service";
+import { useBranchService } from "@/services/branch-service";
 import { useEmployeeService } from "@/services/employee-service";
 import { useTicketService } from "@/services/ticket-service";
 import { parseTicketReason } from "@/lib/leave-ticket-parser";
@@ -46,6 +57,72 @@ import { usePermission } from "@/hooks/use-permission";
 const attendanceSearchSchema = z.object({
   status: z.string().optional(),
 });
+
+// Every raw tap the terminal reported for one employee on one day.
+//
+// The day's punch-in/punch-out are derived from the whole set, not decided tap
+// by tap (see backend/src/utils/punch_reconcile.js) — so with more than four
+// taps only the first and last carry a meaning, and this list is the only place
+// the rest are visible. Rejected taps are shown too, greyed out with a reason:
+// a debounced double-press is the usual answer to "I tapped and it didn't
+// count", and hiding it would defeat the point of the list.
+const TAP_LABELS: Record<string, string> = {
+  "punch-in": "Punch in",
+  "lunch-in": "Lunch break starts",
+  "lunch-out": "Back from lunch",
+  "punch-out": "Punch out",
+};
+
+function RawTapList({ taps, isLoading }: { taps: PunchLogTap[]; isLoading: boolean }) {
+  const counted = taps.filter((t) => !t.discarded);
+
+  return (
+    <Card className="p-4 bg-muted/20 border-border/40 rounded-2xl shadow-none space-y-3">
+      <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1.5">
+        <Fingerprint className="h-3 w-3" /> Device Taps ({counted.length}
+        {taps.length !== counted.length ? ` + ${taps.length - counted.length} ignored` : ""})
+      </p>
+
+      {isLoading ? (
+        <p className="text-[12px] text-muted-foreground">Loading taps…</p>
+      ) : taps.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">
+          No raw taps recorded for this day. Records created before tap logging was enabled only
+          store the derived punch times.
+        </p>
+      ) : (
+        <div className="space-y-1.5">
+          {taps.map((t) => (
+            <div
+              key={t._id}
+              className={cn(
+                "flex items-center justify-between gap-3 rounded-lg px-3 py-1.5 border text-[12px]",
+                t.discarded
+                  ? "bg-background/30 border-border/30 opacity-60"
+                  : "bg-background/60 border-border/40",
+              )}
+            >
+              <span className={cn("font-mono font-bold", t.discarded && "line-through")}>
+                {formatTime12h(t.deviceTime)}
+              </span>
+              <span className="flex-1 text-right font-sans text-[10px] font-bold uppercase tracking-wider">
+                {t.discarded ? (
+                  <span className="text-muted-foreground">
+                    {t.discardReason === "debounced" ? "Ignored — double tap" : `Ignored — ${t.discardReason}`}
+                  </span>
+                ) : t.derivedAction ? (
+                  <span className="text-primary">{TAP_LABELS[t.derivedAction] ?? t.derivedAction}</span>
+                ) : (
+                  <span className="text-muted-foreground/60">Extra tap</span>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
 
 export const Route = createFileRoute("/_app/attendance")({
   validateSearch: (search) => attendanceSearchSchema.parse(search),
@@ -250,6 +327,7 @@ function AttendancePage() {
   const { status } = Route.useSearch();
   const [tab, setTab] = useState<string>(status || "all");
   const [shiftFilter, setShiftFilter] = useState<string>("all");
+  const [branchFilter, setBranchFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [remarkOpenId, setRemarkOpenId] = useState<string | null>(null);
   const [remarkText, setRemarkText] = useState("");
@@ -321,7 +399,7 @@ function AttendancePage() {
   // `punchOut` may just be the most recent lunch-out. Only trust it once the
   // day is over. Use "Lens Info" (below) to see every raw event for today
   // regardless.
-  const isDeviceSource = (t: AttendanceRecord) => t.source === "lens" || t.source === "biometric";
+
 
   // Once the employee explicitly punches out via the app, punchOutIsProvisional
   // is cleared server-side even on a Lens-started day — so this shows their
@@ -329,13 +407,17 @@ function AttendancePage() {
   const getDisplayPunchOut = (t: AttendanceRecord) =>
     t.punchOutIsProvisional && isToday(t.date) ? null : t.punchOut;
 
-  // Device-sourced (lens/biometric) records never call the app's own
-  // lunch-in/lunch-out endpoints, so their raw re-entries aren't reliably
-  // "lunch" — don't guess here. Admin can see every raw tap for the day via
-  // "Lens Info" instead.
-  const getDisplayLunchIn = (t: AttendanceRecord) => (isDeviceSource(t) ? undefined : t.lunchInTime);
+  // lunchInTime/lunchOutTime are only ever written by the lunchIn/lunchOut
+  // handlers, and a device reaches those two ways — an explicit `action:
+  // 'lunch-in'` from the BOTLens camera, or a tap that a tenant's configured
+  // Settings.attendance.punchSequence maps to that step. In the default toggle
+  // mode a device never touches these fields at all. So a value being present
+  // is itself proof it was a deliberate lunch event, not a guess from a raw
+  // re-entry — which is why these are no longer hidden for device records (that
+  // was silently dropping correctly-recorded lunch times for sequence tenants).
+  const getDisplayLunchIn = (t: AttendanceRecord) => t.lunchInTime;
 
-  const getDisplayLunchOut = (t: AttendanceRecord) => (isDeviceSource(t) ? undefined : t.lunchOutTime);
+  const getDisplayLunchOut = (t: AttendanceRecord) => t.lunchOutTime;
 
   const SOURCE_META: Record<string, { icon: typeof ScanFace; label: string }> = {
     lens: { icon: ScanFace, label: "Lens (camera)" },
@@ -370,17 +452,106 @@ function AttendancePage() {
   );
 
   // All-days filtered records
-  const filtered = useMemo(() => {
+  const { branches } = useBranchService();
+
+  // Net worked time. Prefers the server's lunch-deducted total; falls back to
+  // punchOut - punchIn only when totalWorkMs is absent (older records).
+  const workedHours = (t: AttendanceRecord) => {
+    const ms = t.totalWorkMs ?? (t.punchIn && t.punchOut
+      ? new Date(t.punchOut).getTime() - new Date(t.punchIn).getTime()
+      : 0);
+    if (!ms || ms <= 0) return null;
+    const h = Math.floor(ms / 3600000);
+    const m = Math.floor((ms % 3600000) / 60000);
+    return `${h}:${String(m).padStart(2, "0")}`;
+  };
+
+  // Steps the selected day by n days. Clamped at today -- attendance cannot be
+  // recorded in the future, so letting the arrow run forward only produces
+  // empty pages that look like a fault.
+  const shiftDay = (n: number) => {
+    const base = dateFilter || todayStr;
+    const d = new Date(`${base}T12:00:00`);
+    d.setDate(d.getDate() + n);
+    const next = toISTDateKey(d);
+    if (next > todayStr) return;
+    setDateFilter(next);
+    setTablePage(1);
+    setCardPage(1);
+  };
+
+  // Exports exactly what is on screen -- every active filter applied -- so the
+  // file matches what the person was looking at when they clicked.
+  //
+  // xlsx is imported dynamically on purpose: a static import pulls ~400KB into
+  // the main chunk and pushes the bundle past the PWA precache limit, which
+  // breaks the production build outright (see leads.tsx for the same note).
+  const exportExcel = async () => {
+    if (filtered.length === 0) {
+      toast.error("Nothing to export for the current filters.");
+      return;
+    }
+    try {
+      const XLSX = await import("xlsx");
+      const rows = filtered.map((t) => ({
+        Staff: t.employeeId?.name || "Unknown",
+        Phone: t.employeeId?.phone || "",
+        Branch: t.employeeId?.branchId?.branchName || "",
+        Shift: t.employeeId?.shiftId?.name || "",
+        Date: toISTDateKey(t.date),
+        "Punch In": t.punchIn ? formatTime12h(t.punchIn) : "",
+        "Lunch In": getDisplayLunchIn(t) ? formatTime12h(getDisplayLunchIn(t)!) : "",
+        "Lunch Out": getDisplayLunchOut(t) ? formatTime12h(getDisplayLunchOut(t)!) : "",
+        "Punch Out": getDisplayPunchOut(t) ? formatTime12h(getDisplayPunchOut(t)!) : "",
+        "Total Hrs": workedHours(t) || "",
+        Status: getDisplayStatus(t) === "on-duty" ? "On Duty" : t.status,
+        Source: t.source || "app",
+        Remarks: t.remarks || "",
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Attendance");
+      XLSX.writeFile(wb, `attendance-${dateFilter || todayStr}.xlsx`);
+      toast.success(`Exported ${rows.length} record${rows.length === 1 ? "" : "s"}`);
+    } catch {
+      toast.error("Could not generate the Excel file.");
+    }
+  };
+
+  // Everything EXCEPT the status filter. Split out so the status chips can show
+  // counts for the day and filters actually in view -- counting the whole list
+  // would show numbers that do not match the rows below them.
+  const scopeList = useMemo(() => {
     return list.filter((t) => {
       const name = t.employeeId?.name || "";
-      const displayStatus = getDisplayStatus(t);
-      const matchesTab = tab === "all" || displayStatus === tab || t.status === tab;
       const matchesSearch = !search || name.toLowerCase().includes(search.toLowerCase());
       const matchesDate = !dateFilter || (!!t.date && toISTDateKey(t.date) === dateFilter);
       const matchesShift = shiftFilter === "all" || t.employeeId?.shiftId?._id === shiftFilter;
-      return matchesTab && matchesSearch && matchesDate && matchesShift;
+      const matchesBranch = branchFilter === "all" || t.employeeId?.branchId?._id === branchFilter;
+      return matchesSearch && matchesDate && matchesShift && matchesBranch;
     });
-  }, [list, tab, search, dateFilter, shiftFilter]);
+  }, [list, search, dateFilter, shiftFilter, branchFilter]);
+
+  const matchesStatus = (t: AttendanceRecord, status: string) =>
+    status === "all" || getDisplayStatus(t) === status || t.status === status;
+
+  const filtered = useMemo(
+    () => scopeList.filter((t) => matchesStatus(t, tab)),
+    [scopeList, tab],
+  );
+
+  const STATUS_CHIPS = [
+    { id: "all", label: "All" },
+    { id: "on-duty", label: "On Duty" },
+    { id: "present", label: "Full Day" },
+    { id: "half-day", label: "Half Day" },
+    { id: "late", label: "Late" },
+    { id: "absent", label: "Absent" },
+    { id: "wfh", label: "WFH" },
+  ] as const;
+
+  const chipCount = (status: string) =>
+    status === "all" ? scopeList.length : scopeList.filter((t) => matchesStatus(t, status)).length;
 
   // Reset pages when filters change
   useEffect(() => { setTablePage(1); setCardPage(1); }, [filtered]);
@@ -407,6 +578,52 @@ function AttendancePage() {
   const [regSheetOpen, setRegSheetOpen] = useState(false);
   const [detailRecord, setDetailRecord] = useState<AttendanceRecord | null>(null);
   const [showAllSessions, setShowAllSessions] = useState(false);
+
+  // Raw device taps for whichever detail sheet is open. Fetched at this level,
+  // not inside the panel, so the button can key off taps actually existing.
+  // The record's `source` is the wrong signal: it records which channel
+  // CREATED the day, so a day opened on the app and later tapped on the
+  // terminal reads as 'app' and hid the list for exactly the mixed case where
+  // it matters most.
+  const { taps: detailTaps, isLoading: detailTapsLoading } = usePunchLog(
+    detailRecord?.employeeId?._id,
+    detailRecord ? toISTDateKey(new Date(detailRecord.date)) : undefined,
+    !!detailRecord,
+  );
+  // Everything the detail sheet derives from the open record. Declared here,
+  // beside detailRecord, so the blocks below can never reference it earlier
+  // than it exists.
+  const detail = useMemo(() => {
+    if (!detailRecord) return null;
+
+    // Session 1 is ALSO the root punchIn/punchOut, so reading both would
+    // double-count. shifts[] is authoritative whenever it is populated.
+    const sessions: AttendanceSession[] =
+      detailRecord.shifts && detailRecord.shifts.length > 0
+        ? detailRecord.shifts
+        : detailRecord.punchIn
+          ? [{ punchIn: detailRecord.punchIn, punchOut: detailRecord.punchOut, punchInSource: detailRecord.source }]
+          : [];
+
+    const shiftRef = detailRecord.employeeId?.shiftId;
+    const shift = shiftRef
+      ? shifts.find((sh) => sh._id === (typeof shiftRef === "string" ? shiftRef : shiftRef._id)) || shiftRef
+      : null;
+
+    return {
+      sessions,
+      shift,
+      // Same two settings the server grades with (Settings.attendance).
+      lunchMins: Number(appSettings?.attendance?.minLunch ?? 30),
+      graceMins: Number(appSettings?.attendance?.lateGrace ?? 0),
+    };
+  }, [detailRecord, shifts, appSettings]);
+
+  // Reverting an auto punch-out is confirmed rather than immediate: it changes
+  // a stored day and, on reopen, puts somebody back on duty.
+  const [revertTarget, setRevertTarget] = useState<AttendanceRecord | null>(null);
+  const { revert } = useGeofenceMode();
+
   const [correctionOpen, setCorrectionOpen] = useState(false);
   const [correctionForm, setCorrectionForm] = useState({
     employeeId: "",
@@ -451,7 +668,7 @@ function AttendancePage() {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Attendance Reports" description="Monitor daily punch logs and modify login times." />
+        <PageHeader title="Attendance Dashboard" description="Daily presence tracking and regularizations" />
         <SkeletonLoader type="stats" count={5} />
         <SkeletonLoader type="table" count={10} />
       </div>
@@ -461,14 +678,15 @@ function AttendancePage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Attendance Reports"
-        description="Monitor daily punch logs and modify login times."
+        title="Attendance Dashboard"
+        description="Daily presence tracking and regularizations"
         actions={
           <div className="flex gap-2">
             <ActionButton
               variant="download"
               showLabel
-              label="Export Logs"
+              label="Export Excel"
+              onClick={exportExcel}
             />
             {canCreate && (
               <ActionButton
@@ -491,95 +709,140 @@ function AttendancePage() {
         }
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* One row, not two. Six tall cards stacked 2x3 pushed the table itself
+          below the fold -- the numbers are context, the rows are the point. */}
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
         <StatCard label="Present Today" value={stats?.presentToday ?? counts.present} icon={Check} accent="success" delay={0} />
-        <StatCard label="Late Arrivals" value={stats?.lateArrivals ?? counts.late} icon={ClockIcon} accent="warning" delay={0.05} />
+        <StatCard label="Late Arrivals" value={stats?.lateArrivals ?? counts.late} icon={ClockIcon} accent="warning" delay={0.04} />
         <StatCard label="Half Day Today" value={stats?.halfDayToday ?? counts.halfDay} icon={ClockIcon} accent="warning" delay={0.08} />
-        <StatCard label="On Leave" value={onLeaveCount} icon={CalendarDays} accent="info" delay={0.1} />
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <StatCard label="On Leave" value={onLeaveCount} icon={CalendarDays} accent="info" delay={0.12} />
         <div onClick={() => setAbsentSheetOpen(true)} className="cursor-pointer">
-          <StatCard label="Absent Today" value={stats?.absentToday ?? counts.absent} icon={UserX} accent="destructive" delay={0.25} />
+          <StatCard label="Absent Today" value={stats?.absentToday ?? counts.absent} icon={UserX} accent="destructive" delay={0.16} />
         </div>
         <div onClick={() => setRegSheetOpen(true)} className="cursor-pointer">
-          <StatCard label="Pending Regularizations" value={pendingRegularizations.length} icon={ClipboardList} accent="warning" delay={0.3} />
+          <StatCard label="Pending Regularizations" value={pendingRegularizations.length} icon={ClipboardList} accent="warning" delay={0.2} />
         </div>
+      </div>
+
+      {/* ── Status chips ─────────────────────────────────────────────────────── */}
+      {/* Each chip carries its count for the day and filters currently in view,
+          so the number always matches the rows below it. Given their own row
+          because sharing one with the selects wrapped them onto four lines. */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+          {STATUS_CHIPS.map((c) => {
+            const n = chipCount(c.id);
+            const active = tab === c.id;
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => { setTab(c.id); setTablePage(1); setCardPage(1); }}
+                className={cn(
+                  "h-9 px-3.5 rounded-xl border text-[12.5px] font-semibold transition-all inline-flex items-center gap-1.5",
+                  active
+                    ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                    : "bg-transparent text-muted-foreground border-border/60 hover:border-primary/40 hover:text-foreground",
+                )}
+              >
+                {c.label}
+                <span className={cn("text-[11px] font-bold tabular-nums", active ? "opacity-75" : "text-muted-foreground/60")}>
+                  {n}
+                </span>
+              </button>
+            );
+          })}
       </div>
 
       {/* ── Filters Bar ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-col md:flex-row items-center justify-between gap-3 py-1">
-        <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
-          <ViewToggle view={view} onViewChange={updateDefaultLayout} />
+      <div className="flex flex-wrap items-center gap-2.5 py-1">
+        <ViewToggle view={view} onViewChange={updateDefaultLayout} />
 
-          <Select value={tab} onValueChange={(v) => { setTab(v); setTablePage(1); setCardPage(1); }}>
-            <SelectTrigger className="w-full md:w-[130px] h-10 border border-primary/20 bg-primary/5 text-primary hover:bg-primary/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
-              <div className={cn("h-2 w-2 rounded-full", tab === 'present' ? "bg-success" : tab === 'late' || tab === 'half-day' ? "bg-warning" : tab === 'on-duty' ? "bg-blue-500" : tab === 'wfh' ? "bg-info" : "bg-primary")} />
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent className="rounded-xl border-border/60">
-              <SelectItem value="all">All Logs</SelectItem>
-              <SelectItem value="on-duty">On Duty</SelectItem>
-              <SelectItem value="present">Present</SelectItem>
-              <SelectItem value="late">Late</SelectItem>
-              <SelectItem value="absent">Absent</SelectItem>
-              <SelectItem value="half-day">Half Day</SelectItem>
-              <SelectItem value="wfh">WFH</SelectItem>
-            </SelectContent>
-          </Select>
+        <Select value={shiftFilter} onValueChange={(v) => { setShiftFilter(v); setTablePage(1); setCardPage(1); }}>
+          <SelectTrigger className="w-full md:w-[150px] h-10 border border-info/20 bg-info/5 text-info hover:bg-info/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
+          <Layers className="h-3.5 w-3.5" />
+          <SelectValue placeholder="Shift" />
+          </SelectTrigger>
+          <SelectContent className="rounded-xl border-border/60">
+          <SelectItem value="all">All Shifts</SelectItem>
+          {shifts.map((s) => (
+            <SelectItem key={s._id} value={s._id}>{s.name}</SelectItem>
+          ))}
+          </SelectContent>
+        </Select>
 
-          <Select value={shiftFilter} onValueChange={(v) => { setShiftFilter(v); setTablePage(1); setCardPage(1); }}>
-            <SelectTrigger className="w-full md:w-[150px] h-10 border border-info/20 bg-info/5 text-info hover:bg-info/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
-              <Layers className="h-3.5 w-3.5" />
-              <SelectValue placeholder="Shift" />
-            </SelectTrigger>
-            <SelectContent className="rounded-xl border-border/60">
-              <SelectItem value="all">All Shifts</SelectItem>
-              {shifts.map((s) => (
-                <SelectItem key={s._id} value={s._id}>{s.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <Select value={branchFilter} onValueChange={(v) => { setBranchFilter(v); setTablePage(1); setCardPage(1); }}>
+          <SelectTrigger className="w-full md:w-[160px] h-10 border border-border/60 bg-muted/20 text-foreground hover:bg-muted/40 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
+          <MapPin className="h-3.5 w-3.5" />
+          <SelectValue placeholder="Branch" />
+          </SelectTrigger>
+          <SelectContent className="rounded-xl border-border/60">
+          <SelectItem value="all">All Branches</SelectItem>
+          {branches.map((b: any) => (
+            <SelectItem key={b._id} value={b._id}>{b.branchName}</SelectItem>
+          ))}
+          </SelectContent>
+        </Select>
 
-          <div className="flex items-center gap-2">
-            <FormInput
-              type="date"
-              icon={CalendarDays}
-              className="h-10 w-full md:w-[170px] shadow-none"
-              value={dateFilter}
-              onChange={(e) => { setDateFilter(e.target.value); setTablePage(1); setCardPage(1); }}
-            />
-            {dateFilter && dateFilter !== todayStr && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => { setDateFilter(todayStr); setTablePage(1); setCardPage(1); }}
-                className="h-10 px-3 rounded-xl text-[12px] text-muted-foreground hover:text-foreground whitespace-nowrap"
-              >
-                Today
-              </Button>
-            )}
-            {dateFilter && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => { setDateFilter(""); setTablePage(1); setCardPage(1); }}
-                className="h-10 px-3 rounded-xl text-[12px] text-muted-foreground hover:text-foreground whitespace-nowrap"
-              >
-                Clear
-              </Button>
-            )}
-          </div>
+        <div className="flex items-center gap-2">
+          <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onClick={() => shiftDay(-1)}
+          aria-label="Previous day"
+          className="h-10 w-10 rounded-xl shrink-0"
+          >
+          <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <FormInput
+          type="date"
+          icon={CalendarDays}
+          max={todayStr}
+          className="h-10 w-full md:w-[170px] shadow-none"
+          value={dateFilter}
+          onChange={(e) => { setDateFilter(e.target.value); setTablePage(1); setCardPage(1); }}
+          />
+          <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onClick={() => shiftDay(1)}
+          disabled={!dateFilter || dateFilter >= todayStr}
+          aria-label="Next day"
+          className="h-10 w-10 rounded-xl shrink-0"
+          >
+          <ChevronRight className="h-4 w-4" />
+          </Button>
+          {dateFilter && dateFilter !== todayStr && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => { setDateFilter(todayStr); setTablePage(1); setCardPage(1); }}
+            className="h-10 px-3 rounded-xl text-[12px] text-muted-foreground hover:text-foreground whitespace-nowrap"
+          >
+            Today
+          </Button>
+          )}
+          {dateFilter && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => { setDateFilter(""); setTablePage(1); setCardPage(1); }}
+            className="h-10 px-3 rounded-xl text-[12px] text-muted-foreground hover:text-foreground whitespace-nowrap"
+          >
+            Clear
+          </Button>
+        )}
         </div>
 
         <FormInput
-          placeholder="Search employee..."
-          icon={Search}
-          className="h-10 w-full md:w-[260px] shadow-none"
-          value={search}
-          onChange={(e) => { setSearch(e.target.value); setTablePage(1); setCardPage(1); }}
+        placeholder="Search employee..."
+        icon={Search}
+        className="h-10 w-full md:w-[260px] shadow-none"
+        value={search}
+        onChange={(e) => { setSearch(e.target.value); setTablePage(1); setCardPage(1); }}
         />
       </div>
 
@@ -682,7 +945,7 @@ function AttendancePage() {
                       <ClockIcon className="h-2.5 w-2.5" /> Punch In
                     </p>
                     <p className="text-[12px] font-mono font-bold text-foreground">
-                      {t.punchIn ? new Date(t.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                      {t.punchIn ? new Date(t.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
                     </p>
                   </div>
                   <div className="p-2 rounded-lg bg-muted/30 border border-border/40">
@@ -690,7 +953,7 @@ function AttendancePage() {
                       <ClockIcon className="h-2.5 w-2.5" /> Lunch In
                     </p>
                     <p className="text-[12px] font-mono font-bold text-foreground">
-                      {getDisplayLunchIn(t) ? new Date(getDisplayLunchIn(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                      {getDisplayLunchIn(t) ? new Date(getDisplayLunchIn(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
                     </p>
                   </div>
                   <div className="p-2 rounded-lg bg-muted/30 border border-border/40">
@@ -698,7 +961,7 @@ function AttendancePage() {
                       <ClockIcon className="h-2.5 w-2.5" /> Lunch Out
                     </p>
                     <p className="text-[12px] font-mono font-bold text-foreground">
-                      {getDisplayLunchOut(t) ? new Date(getDisplayLunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                      {getDisplayLunchOut(t) ? new Date(getDisplayLunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
                     </p>
                   </div>
                   <div className="p-2 rounded-lg bg-muted/30 border border-border/40">
@@ -706,7 +969,7 @@ function AttendancePage() {
                       <ClockIcon className="h-2.5 w-2.5" /> Punch Out
                     </p>
                     <p className="text-[12px] font-mono font-bold text-foreground">
-                      {getDisplayPunchOut(t) ? new Date(getDisplayPunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                      {getDisplayPunchOut(t) ? new Date(getDisplayPunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
                     </p>
                   </div>
                 </div>
@@ -739,7 +1002,7 @@ function AttendancePage() {
             className="space-y-4"
           >
             <DataTable
-              headers={["Employee", "Date", "Punch In", "Lunch In", "Lunch Out", "Punch Out", "Location", "Status", "Actions"]}
+              headers={["Staff", "Date", "Punch In", "Lunch In", "Lunch Out", "Punch Out", "Selfie", "Total Hrs", "Location", "Status", "Actions"]}
               isEmpty={filtered.length === 0}
               emptyMessage={`No logs found.`}
               className="shadow-sm"
@@ -769,16 +1032,40 @@ function AttendancePage() {
                   </DataTableCell>
                   <DataTableCell className="text-[13px] text-muted-foreground">{new Date(t.date).toLocaleDateString()}</DataTableCell>
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {t.punchIn ? new Date(t.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                    {t.punchIn ? new Date(t.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
                   </DataTableCell>
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {getDisplayLunchIn(t) ? new Date(getDisplayLunchIn(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                    {getDisplayLunchIn(t) ? new Date(getDisplayLunchIn(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
                   </DataTableCell>
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {getDisplayLunchOut(t) ? new Date(getDisplayLunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                    {getDisplayLunchOut(t) ? new Date(getDisplayLunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
                   </DataTableCell>
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {getDisplayPunchOut(t) ? new Date(getDisplayPunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : "—"}
+                    {getDisplayPunchOut(t) ? new Date(getDisplayPunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
+                  </DataTableCell>
+                  <DataTableCell>
+                    <div className="flex items-center gap-1.5">
+                      {([["IN", t.punchInPhoto], ["OUT", t.punchOutPhoto]] as const).map(([label, src]) => (
+                        <div key={label} className="flex flex-col items-center gap-0.5">
+                          <span className="text-[8px] font-bold uppercase tracking-wider text-muted-foreground/60">{label}</span>
+                          {src ? (
+                            <img
+                              src={src}
+                              alt={`${label} selfie`}
+                              loading="lazy"
+                              className="h-8 w-8 rounded-lg object-cover border border-border/50"
+                            />
+                          ) : (
+                            <div className="h-8 w-8 rounded-lg bg-muted/40 border border-border/40 grid place-items-center text-muted-foreground/40 text-[11px]">
+                              –
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </DataTableCell>
+                  <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
+                    {workedHours(t) ?? <span className="text-muted-foreground/40">—</span>}
                   </DataTableCell>
                   <DataTableCell className="text-[12px] text-muted-foreground max-w-[150px] truncate italic">
                     {t.punchInLocation && typeof t.punchInLocation === 'object'
@@ -1180,6 +1467,45 @@ function AttendancePage() {
       </Dialog>
 
       {/* Attendance Detail Sheet */}
+      {/* Undo an auto punch-out. Two outcomes, because the two real situations
+          differ: the engine was wrong (reopen), or it was right about the exit
+          but wrong about the time (correct it via Modify Punch Time). */}
+      <Dialog open={!!revertTarget} onOpenChange={(o) => !o && setRevertTarget(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-[15px]">Undo this auto punch-out?</DialogTitle>
+            <DialogDescription className="text-[12px]">
+              {revertTarget?.employeeId?.name} was punched out automatically
+              {revertTarget?.calculatedDistance != null && ` at ${revertTarget.calculatedDistance}m from their branch`}.
+              Reopening puts them back on duty and clears the geo-fence verdict for the day.
+            </DialogDescription>
+          </DialogHeader>
+          <p className="text-[12px] text-muted-foreground leading-relaxed">
+            If they <span className="font-bold text-foreground">did</span> leave but at a different time, close this
+            and use <span className="font-bold text-foreground">Modify Punch Time</span> instead — that keeps the
+            day closed with the correct hours.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="ghost" size="sm" className="rounded-xl" onClick={() => setRevertTarget(null)}>
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="rounded-xl font-bold"
+              disabled={revert.isPending}
+              onClick={async () => {
+                if (!revertTarget?._id) return;
+                await revert.mutateAsync({ attendanceId: revertTarget._id, mode: "reopen" });
+                setRevertTarget(null);
+                setDetailRecord(null);
+              }}
+            >
+              {revert.isPending ? "Reopening…" : "Reopen session"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Sheet open={!!detailRecord} onOpenChange={(o) => !o && setDetailRecord(null)}>
         <SheetContent className="sm:max-w-lg w-full p-0 border-l border-border/40">
           {detailRecord && (
@@ -1209,14 +1535,14 @@ function AttendancePage() {
                         </span>
                       );
                     })()}
-                    {detailRecord.source === "lens" && (detailRecord.shifts?.length ?? 0) > 0 && (
+                    {detailTaps.length > 0 && (
                       <button
                         type="button"
                         onClick={() => setShowAllSessions((v) => !v)}
                         className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-primary/80 hover:text-primary bg-primary/5 hover:bg-primary/10 border border-primary/20 rounded-full px-2.5 py-1 transition-colors"
                       >
                         <ListChecks className="h-3 w-3" />
-                        Lens Info
+                        Raw Taps
                         <ChevronDown className={`h-3 w-3 transition-transform ${showAllSessions ? "rotate-180" : ""}`} />
                       </button>
                     )}
@@ -1299,36 +1625,49 @@ function AttendancePage() {
                   })()}
                 </Card>
 
-                {showAllSessions && detailRecord.source === "lens" && (
-                  <Card className="p-4 bg-muted/20 border-border/40 rounded-2xl shadow-none space-y-3">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 flex items-center gap-1.5">
-                      <ScanFace className="h-3 w-3" /> Raw Lens Events ({detailRecord.shifts?.length ?? 0})
-                    </p>
-                    <div className="space-y-1.5">
-                      {(detailRecord.shifts ?? []).map((s, i) => (
-                        <div key={i} className="flex items-center justify-between text-[12px] font-mono font-bold text-foreground bg-background/60 rounded-lg px-3 py-1.5 border border-border/40">
-                          <span>{s.punchIn ? new Date(s.punchIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</span>
-                          <span className="text-muted-foreground font-sans font-normal text-[10px]">→</span>
-                          <span>{s.punchOut ? new Date(s.punchOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "Still in"}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </Card>
+                {/* Every session, each END tagged with the channel that
+                    reported it -- in on the phone, out on the machine. */}
+                {detail && detail.sessions.length > 0 && (
+                  <SessionTimeline sessions={detail.sessions} />
                 )}
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Total Hours</span>
-                    <div className="font-bold text-primary text-[13px]">
-                      {detailRecord.punchIn && detailRecord.punchOut
-                        ? `${((new Date(detailRecord.punchOut).getTime() - new Date(detailRecord.punchIn).getTime()) / 3600000).toFixed(2)}h`
-                        : "—"}
-                    </div>
-                  </div>
-                  <div className="space-y-1">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Remarks</span>
-                    <div className="font-medium text-foreground/80 text-[13px]">{detailRecord.remarks || "—"}</div>
-                  </div>
+                {showAllSessions && detailTaps.length > 0 && (
+                  <RawTapList taps={detailTaps} isLoading={detailTapsLoading} />
+                )}
+
+                {/* Worked hours come from the server's totalWorkMs, which is
+                    already lunch-deducted and clamped to the shift. This used
+                    to recompute punchOut - punchIn in the browser, so it
+                    ignored the break and every session after the first, and
+                    disagreed with the figure payroll actually pays. */}
+                <DayStatsRow record={detailRecord} displayStatus={getDisplayStatus(detailRecord)} />
+
+                <AutoPunchOutCard record={detailRecord} onRevert={() => setRevertTarget(detailRecord)} />
+
+                {detail && (
+                  <>
+                    <ShiftRequirementCard
+                      shift={detail.shift}
+                      lunchMins={detail.lunchMins}
+                      graceMins={detail.graceMins}
+                      workedMs={detailRecord.totalWorkMs || 0}
+                    />
+                    <WhyHalfDay
+                      record={detailRecord}
+                      sessions={detail.sessions}
+                      shift={detail.shift}
+                      lunchMins={detail.lunchMins}
+                      graceMins={detail.graceMins}
+                    />
+                  </>
+                )}
+
+                <GeofenceExitBanner record={detailRecord} />
+                <InsideFenceNote record={detailRecord} />
+
+                <div className="space-y-1">
+                  <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Remarks</span>
+                  <div className="font-medium text-foreground/80 text-[13px]">{detailRecord.remarks || "—"}</div>
                 </div>
               </div>
             </div>
