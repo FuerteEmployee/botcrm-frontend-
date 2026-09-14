@@ -950,6 +950,7 @@ function AttendancePage() {
                 { label: "Present", value: "present" },
                 { label: "Late", value: "late" },
                 { label: "Half Day", value: "half-day" },
+                { label: "WFH", value: "wfh" },
                 { label: "Absent", value: "absent" },
               ]}
               containerClassName="space-y-1"
