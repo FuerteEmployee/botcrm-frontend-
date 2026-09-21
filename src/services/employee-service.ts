@@ -101,15 +101,16 @@ interface EmployeeParams {
   search?: string;
   departmentId?: string;
   shiftId?: string;
+  branchId?: string;
   status?: string;
 }
 
 export function useEmployeeService(params: EmployeeParams = {}) {
   const queryClient = useQueryClient();
-  const { page = 1, limit = 10, search = "", departmentId = "all", shiftId = "all", status = "active" } = params;
+  const { page = 1, limit = 10, search = "", departmentId = "all", shiftId = "all", branchId = "all", status = "active" } = params;
 
   const { data, isLoading, isFetching } = useQuery<EmployeeResponse>({
-    queryKey: ["employees", page, limit, search, departmentId, shiftId, status],
+    queryKey: ["employees", page, limit, search, departmentId, shiftId, branchId, status],
     queryFn: async () => {
       const qp = new URLSearchParams();
       qp.append("page", page.toString());
@@ -117,6 +118,7 @@ export function useEmployeeService(params: EmployeeParams = {}) {
       if (search) qp.append("search", search);
       if (departmentId && departmentId !== "all") qp.append("departmentId", departmentId);
       if (shiftId && shiftId !== "all") qp.append("shiftId", shiftId);
+      if (branchId && branchId !== "all") qp.append("branchId", branchId);
       if (status && status !== "all") qp.append("status", status);
 
       const { data } = await apiClient.get(`/users/employees?${qp.toString()}`);
@@ -134,8 +136,12 @@ export function useEmployeeService(params: EmployeeParams = {}) {
             e.shiftId === shiftId ||
             (e.shiftId as any)?._id === shiftId ||
             (e.shiftIds || []).some((s: any) => (s?._id || s) === shiftId);
+          const matchesBranch = branchId === "all" ||
+            e.branchId === branchId ||
+            (e.branchId as any)?._id === branchId ||
+            ((e as any).branchIds || []).some((b: any) => (b?._id || b) === branchId);
           const matchesStatus = status === "all" || e.status === status;
-          return matchesSearch && matchesDept && matchesShift && matchesStatus;
+          return matchesSearch && matchesDept && matchesShift && matchesBranch && matchesStatus;
         });
 
         const start = (page - 1) * limit;

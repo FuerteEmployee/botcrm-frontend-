@@ -205,6 +205,45 @@ function EmployeeDetailsPage() {
   const getDisplayPunchOut = (l: AttendanceRecord) =>
     l.source === "lens" && isRecordToday(l.date) ? null : l.punchOut;
 
+  // Punched in but not yet punched out TODAY — shown as "On Duty" instead of
+  // whatever status was set at punch-in time. Restricted to today's date: a
+  // past day missing a punch-out is a stale/forgotten record, not someone
+  // still working, so it should keep showing its real stored status.
+  const getDisplayStatus = (l: AttendanceRecord) =>
+    l.punchIn && !getDisplayPunchOut(l) && isRecordToday(l.date) ? "on-duty" : l.status;
+
+  // This employee's primary assigned shift (first of shiftIds, falling back to
+  // the single legacy shiftId) — used only to estimate hours for a past day
+  // that's missing a punch-out; there's no real punch-out to measure from.
+  const getPrimaryShift = () => {
+    const e = employee as any;
+    const raw = (e?.shiftIds?.length ? e.shiftIds : (e?.shiftId ? [e.shiftId] : [])) as any[];
+    const first = raw[0];
+    if (!first) return null;
+    const id = typeof first === "object" ? first?._id : first;
+    return (typeof first === "object" && first?.startTime) ? first : shifts.find((x: any) => x._id === id);
+  };
+
+  // Hours worked for a log row. A completed session (or today's still-running
+  // one) measures real elapsed time. A past day missing its punch-out has no
+  // real end time to measure from, so it's estimated as punch-in through the
+  // employee's scheduled shift end instead — flagged as an estimate, not a fact.
+  const getWorkedHours = (log: AttendanceRecord): { hours: number; estimated: boolean } | null => {
+    if (!log.punchIn) return null;
+    const end = getDisplayPunchOut(log) ?? (isRecordToday(log.date) ? new Date() : null);
+    if (end) {
+      return { hours: Math.round((new Date(end).getTime() - new Date(log.punchIn).getTime()) / (1000 * 60 * 60)), estimated: false };
+    }
+    const shift = getPrimaryShift();
+    if (!shift?.endTime) return null;
+    const punchInDate = new Date(log.punchIn);
+    const [eh, em] = shift.endTime.split(":").map(Number);
+    const shiftEnd = new Date(punchInDate);
+    shiftEnd.setHours(eh, em, 0, 0);
+    if (shiftEnd < punchInDate) shiftEnd.setDate(shiftEnd.getDate() + 1); // overnight shift wraps past midnight
+    return { hours: Math.max(0, Math.round((shiftEnd.getTime() - punchInDate.getTime()) / (1000 * 60 * 60))), estimated: true };
+  };
+
   const SOURCE_META: Record<string, { icon: typeof ScanFace; label: string }> = {
     lens: { icon: ScanFace, label: "Lens (camera)" },
     biometric: { icon: Fingerprint, label: "Biometric device" },
@@ -829,19 +868,32 @@ function EmployeeDetailsPage() {
                                 </td>
                                 <td className="px-6 py-4 text-center text-muted-foreground font-medium text-xs">{formatTime(getDisplayPunchOut(log) ?? undefined)}</td>
                                 <td className="px-6 py-4 text-center">
-                                  <Badge variant="secondary" className="font-medium text-[9px] px-1.5 py-0 bg-muted/50 text-muted-foreground border-none">
-                                    {log.punchIn && getDisplayPunchOut(log) ? `${Math.round((new Date(getDisplayPunchOut(log)!).getTime() - new Date(log.punchIn).getTime()) / (1000 * 60 * 60))}h` : "0h"}
-                                  </Badge>
+                                  {(() => {
+                                    const worked = getWorkedHours(log);
+                                    return (
+                                      <Badge
+                                        variant="secondary"
+                                        title={worked?.estimated ? "Estimated — punch-out was never recorded for this day; shown as punch-in through scheduled shift end" : undefined}
+                                        className={cn(
+                                          "font-medium text-[9px] px-1.5 py-0 border-none",
+                                          worked?.estimated ? "bg-amber-50 text-amber-600 italic" : "bg-muted/50 text-muted-foreground"
+                                        )}
+                                      >
+                                        {worked ? `${worked.hours}h${worked.estimated ? "*" : ""}` : "0h"}
+                                      </Badge>
+                                    );
+                                  })()}
                                 </td>
                                 <td className="px-6 py-4 text-right">
                                   <div className="flex items-center justify-end gap-1.5">
                                     <span className={cn(
                                       "inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide",
-                                      log.status === "present" ? "bg-success/10 text-success" :
-                                        log.status === "absent" ? "bg-red-50 text-red-500" :
-                                          "bg-amber-50 text-amber-500"
+                                      getDisplayStatus(log) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
+                                        log.status === "present" ? "bg-success/10 text-success" :
+                                          log.status === "absent" ? "bg-red-50 text-red-500" :
+                                            "bg-amber-50 text-amber-500"
                                     )}>
-                                      {log.status}
+                                      {getDisplayStatus(log) === "on-duty" ? "On Duty" : log.status}
                                     </span>
                                     {(() => {
                                       const { icon: SourceIcon, label } = getSourceMeta(log);

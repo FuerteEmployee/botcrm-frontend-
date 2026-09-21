@@ -58,6 +58,7 @@ function EmployeesPage() {
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState<string>(departmentId || "all");
   const [shiftFilter, setShiftFilter] = useState<string>("all");
+  const [branchFilter, setBranchFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
 
   useEffect(() => {
@@ -95,6 +96,7 @@ function EmployeesPage() {
     search,
     departmentId: deptFilter,
     shiftId: shiftFilter,
+    branchId: branchFilter,
     status: statusFilter
   });
 
@@ -212,6 +214,19 @@ function EmployeesPage() {
                 <SelectItem value="all">All Shifts</SelectItem>
                 {shifts.map((s) => (
                   <SelectItem key={s._id} value={s._id}>{s.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={branchFilter} onValueChange={(v) => { setBranchFilter(v); setPage(1); }}>
+              <SelectTrigger className="w-full md:w-[160px] h-10 border border-info/20 bg-info/5 text-info hover:bg-info/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
+                <MapPin className="h-3.5 w-3.5" />
+                <SelectValue placeholder="Branch" />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-border/60">
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((b: any) => (
+                  <SelectItem key={b._id} value={b._id}>{b.branchName}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
