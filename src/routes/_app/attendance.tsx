@@ -37,6 +37,7 @@ import {
   WhyHalfDay,
   GeofenceExitBanner,
   InsideFenceNote,
+  getWorkedEstimate,
 } from "@/components/attendance/day-detail-blocks";
 import { useRegularizationService } from "@/services/regularization-service";
 import { useShiftService } from "@/services/shift-service";
@@ -610,12 +611,23 @@ function AttendancePage() {
       ? shifts.find((sh) => sh._id === (typeof shiftRef === "string" ? shiftRef : shiftRef._id)) || shiftRef
       : null;
 
+    const lunchMins = Number(appSettings?.attendance?.minLunch ?? 30);
+
     return {
       sessions,
       shift,
       // Same two settings the server grades with (Settings.attendance).
-      lunchMins: Number(appSettings?.attendance?.minLunch ?? 30),
+      lunchMins,
       graceMins: Number(appSettings?.attendance?.lateGrace ?? 0),
+      // Display-only fallback for the known 11-20 Sep totalWorkMs=0 bug and
+      // for a missing punch-out — see day-detail-blocks.tsx header comment.
+      worked: getWorkedEstimate(
+        detailRecord,
+        shift,
+        lunchMins,
+        getDisplayPunchOut(detailRecord),
+        isToday(detailRecord.date),
+      ),
     };
   }, [detailRecord, shifts, appSettings]);
 
@@ -1636,11 +1648,13 @@ function AttendancePage() {
                 )}
 
                 {/* Worked hours come from the server's totalWorkMs, which is
-                    already lunch-deducted and clamped to the shift. This used
-                    to recompute punchOut - punchIn in the browser, so it
-                    ignored the break and every session after the first, and
-                    disagreed with the figure payroll actually pays. */}
-                <DayStatsRow record={detailRecord} displayStatus={getDisplayStatus(detailRecord)} />
+                    already lunch-deducted and clamped to the shift, whenever
+                    it's present and trustworthy. `detail.worked` falls back to
+                    a clearly-flagged client estimate only for the known
+                    totalWorkMs=0 bug or a missing punch-out — see
+                    day-detail-blocks.tsx header comment. It never overrides
+                    record.status or the figure payroll actually pays. */}
+                <DayStatsRow record={detailRecord} displayStatus={getDisplayStatus(detailRecord)} worked={detail?.worked ?? null} />
 
                 <AutoPunchOutCard record={detailRecord} onRevert={() => setRevertTarget(detailRecord)} />
 
@@ -1650,7 +1664,7 @@ function AttendancePage() {
                       shift={detail.shift}
                       lunchMins={detail.lunchMins}
                       graceMins={detail.graceMins}
-                      workedMs={detailRecord.totalWorkMs || 0}
+                      worked={detail.worked}
                     />
                     <WhyHalfDay
                       record={detailRecord}
@@ -1658,6 +1672,7 @@ function AttendancePage() {
                       shift={detail.shift}
                       lunchMins={detail.lunchMins}
                       graceMins={detail.graceMins}
+                      worked={detail.worked}
                     />
                   </>
                 )}

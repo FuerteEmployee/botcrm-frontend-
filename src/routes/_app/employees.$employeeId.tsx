@@ -50,7 +50,10 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { useQuery } from "@tanstack/react-query";
 import { useAttendanceService, type AttendanceRecord } from "@/services/attendance-service";
+import { fmtHM, getWorkedEstimate, ESTIMATE_TOOLTIP } from "@/components/attendance/day-detail-blocks";
+import { apiClient } from "@/lib/api-client";
 import { cn, toISTDateKey } from "@/lib/utils";
 import { useEmployeeService } from "@/services/employee-service";
 import { useDepartmentService } from "@/services/department-service";
@@ -85,6 +88,11 @@ function EmployeeDetailsPage() {
   const { lunchIn, lunchOut } = useAttendanceService();
   const { data: devices, isLoading: devicesLoading } = useClientDevices(employeeId);
   const { data: errors } = useClientErrors(employeeId, 50);
+  const { data: appSettings } = useQuery({
+    queryKey: ["settings"],
+    queryFn: async () => (await apiClient.get("/settings")).data,
+  });
+  const lunchMins = Number(appSettings?.attendance?.minLunch ?? 30);
 
   const isLoading = empLoading || deptLoading || branchLoading;
 
@@ -224,25 +232,13 @@ function EmployeeDetailsPage() {
     return (typeof first === "object" && first?.startTime) ? first : shifts.find((x: any) => x._id === id);
   };
 
-  // Hours worked for a log row. A completed session (or today's still-running
-  // one) measures real elapsed time. A past day missing its punch-out has no
-  // real end time to measure from, so it's estimated as punch-in through the
-  // employee's scheduled shift end instead — flagged as an estimate, not a fact.
-  const getWorkedHours = (log: AttendanceRecord): { hours: number; estimated: boolean } | null => {
-    if (!log.punchIn) return null;
-    const end = getDisplayPunchOut(log) ?? (isRecordToday(log.date) ? new Date() : null);
-    if (end) {
-      return { hours: Math.round((new Date(end).getTime() - new Date(log.punchIn).getTime()) / (1000 * 60 * 60)), estimated: false };
-    }
-    const shift = getPrimaryShift();
-    if (!shift?.endTime) return null;
-    const punchInDate = new Date(log.punchIn);
-    const [eh, em] = shift.endTime.split(":").map(Number);
-    const shiftEnd = new Date(punchInDate);
-    shiftEnd.setHours(eh, em, 0, 0);
-    if (shiftEnd < punchInDate) shiftEnd.setDate(shiftEnd.getDate() + 1); // overnight shift wraps past midnight
-    return { hours: Math.max(0, Math.round((shiftEnd.getTime() - punchInDate.getTime()) / (1000 * 60 * 60))), estimated: true };
-  };
+  // Worked time for a log row — prefers the server's real, lunch-deducted
+  // totalWorkMs (shared logic with the Attendance page's detail panel; see
+  // day-detail-blocks.tsx for the stale-zero/live/missing-punch-out fallback
+  // rules). Not rounded to whole hours — "6h" hides a 55-minute difference
+  // that "6h 23m" doesn't.
+  const getWorkedHours = (log: AttendanceRecord) =>
+    getWorkedEstimate(log, getPrimaryShift(), lunchMins, getDisplayPunchOut(log), isRecordToday(log.date));
 
   const SOURCE_META: Record<string, { icon: typeof ScanFace; label: string }> = {
     lens: { icon: ScanFace, label: "Lens (camera)" },
@@ -873,13 +869,13 @@ function EmployeeDetailsPage() {
                                     return (
                                       <Badge
                                         variant="secondary"
-                                        title={worked?.estimated ? "Estimated — punch-out was never recorded for this day; shown as punch-in through scheduled shift end" : undefined}
+                                        title={worked?.estimated ? ESTIMATE_TOOLTIP[worked.reason] : undefined}
                                         className={cn(
                                           "font-medium text-[9px] px-1.5 py-0 border-none",
                                           worked?.estimated ? "bg-amber-50 text-amber-600 italic" : "bg-muted/50 text-muted-foreground"
                                         )}
                                       >
-                                        {worked ? `${worked.hours}h${worked.estimated ? "*" : ""}` : "0h"}
+                                        {worked ? `${fmtHM(worked.ms)}${worked.estimated ? "*" : ""}` : "0h 0m"}
                                       </Badge>
                                     );
                                   })()}

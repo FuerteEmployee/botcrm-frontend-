@@ -23,9 +23,17 @@ import type { AttendanceRecord, AttendanceSession, PunchChannel } from "@/servic
 //
 // Everything here mirrors server-side maths that already exists, so the two
 // must not drift: worked time comes from `totalWorkMs` (already lunch-deducted
-// and shift-clamped by utils/shift_status.js) rather than being recomputed from
-// punchIn/punchOut, and the required-hours figure repeats the backend's
-// `requiredWorkMs`: shift span - configured lunch - grace.
+// and shift-clamped by utils/shift_status.js) by default, and the
+// required-hours figure repeats the backend's `requiredWorkMs`: shift span -
+// configured lunch - grace.
+//
+// `getWorkedEstimate` below is the one narrow exception: a server timezone bug
+// (fixed, but not yet backfilled) saved `totalWorkMs` as 0 for many closed
+// records between 11-20 Sep 2026 despite real punches. Rather than showing a
+// bare, misleading "0h 0m", these blocks fall back to a client-computed
+// estimate in that specific case (and in the separate case of a missing
+// punch-out). It is always visibly flagged as an estimate and never feeds back
+// into `record.status` or anything persisted — display only.
 //
 // The one thing computed here and nowhere else is the plain-English REASON a
 // day came out as a half day. That is presentation, not policy: it explains a
@@ -49,6 +57,80 @@ export const fmtHM = (ms: number | null | undefined) => {
   const mins = Math.max(0, Math.round(ms / 60000));
   return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 };
+
+// ─── Worked-hours estimate (display-only fallback) ──────────────────────────
+
+/**
+ * A punch-in/out gap this short (ms) with a stored 0 is treated as a genuine
+ * near-instant punch, not the known zero-totalWorkMs bug — below it we trust
+ * the stored 0 as real.
+ */
+const STALE_ZERO_GAP_MS = 3 * 60_000;
+
+export interface WorkedEstimate {
+  ms: number;
+  estimated: boolean;
+  reason: "measured" | "stale-zero-fallback" | "live" | "shift-end-estimate";
+}
+
+export const ESTIMATE_TOOLTIP: Record<WorkedEstimate["reason"], string | undefined> = {
+  measured: undefined,
+  "stale-zero-fallback":
+    "Estimated — the server recorded 0 worked time for this day (a known data issue for records between 11–20 Sep 2026); calculated here from punch-in/punch-out instead of the stored figure.",
+  live: "Estimated — still on duty; this is punch-in through now, not yet finalized.",
+  "shift-end-estimate":
+    "Estimated — punch-out was never recorded for this day; shown as punch-in through the scheduled shift end.",
+};
+
+/** Actual punched lunch duration if longer than the configured minimum, else the configured minimum. */
+function actualOrConfiguredLunchMins(record: AttendanceRecord, lunchMins: number): number {
+  if (record.lunchInTime && record.lunchOutTime) {
+    const punched = Math.round(
+      (new Date(record.lunchOutTime).getTime() - new Date(record.lunchInTime).getTime()) / 60000,
+    );
+    return Math.max(punched, lunchMins);
+  }
+  return lunchMins;
+}
+
+/**
+ * Worked time for display, falling back to a clearly-flagged estimate only
+ * when the stored `totalWorkMs` is missing/wrong in a known way. Never writes
+ * anything, never changes `record.status` — see the file header comment.
+ */
+export function getWorkedEstimate(
+  record: AttendanceRecord,
+  shift: ShiftLike | null | undefined,
+  lunchMins: number,
+  effectivePunchOut: string | null | undefined,
+  isRecordToday: boolean,
+): WorkedEstimate | null {
+  if (!record.punchIn) return { ms: record.totalWorkMs || 0, estimated: false, reason: "measured" };
+  if (record.totalWorkMs) return { ms: record.totalWorkMs, estimated: false, reason: "measured" };
+
+  if (effectivePunchOut) {
+    const rawMs = new Date(effectivePunchOut).getTime() - new Date(record.punchIn).getTime();
+    if (rawMs <= STALE_ZERO_GAP_MS) return { ms: record.totalWorkMs || 0, estimated: false, reason: "measured" };
+    const ms = Math.max(0, rawMs - actualOrConfiguredLunchMins(record, lunchMins) * 60000);
+    return { ms, estimated: true, reason: "stale-zero-fallback" };
+  }
+
+  if (isRecordToday) {
+    const rawMs = Date.now() - new Date(record.punchIn).getTime();
+    const ms = Math.max(0, rawMs - actualOrConfiguredLunchMins(record, lunchMins) * 60000);
+    return { ms, estimated: true, reason: "live" };
+  }
+
+  if (!shift?.endTime) return null;
+  const punchInDate = new Date(record.punchIn);
+  const [eh, em] = shift.endTime.split(":").map(Number);
+  const shiftEnd = new Date(punchInDate);
+  shiftEnd.setHours(eh, em, 0, 0);
+  if (shiftEnd < punchInDate) shiftEnd.setDate(shiftEnd.getDate() + 1); // overnight shift wraps past midnight
+  const rawMs = Math.max(0, shiftEnd.getTime() - punchInDate.getTime());
+  const ms = Math.max(0, rawMs - actualOrConfiguredLunchMins(record, lunchMins) * 60000);
+  return { ms, estimated: true, reason: "shift-end-estimate" };
+}
 
 const fmtTime = (value?: string | null) =>
   value
@@ -133,6 +215,14 @@ export function SessionTimeline({ sessions }: { sessions: AttendanceSession[] })
       {sessions.map((s, i) => {
         const open = !!s.punchIn && !s.punchOut;
         const autoExit = s.closeReason === "auto_geofence";
+
+        // Per-session workMs is gross (never lunch-deducted — see shift_status.js),
+        // so the fallback estimate here is just the raw punch gap, no lunch
+        // subtraction, matching what a real workMs would have measured.
+        const rawGapMs = s.punchIn && s.punchOut ? new Date(s.punchOut).getTime() - new Date(s.punchIn).getTime() : null;
+        const sessionIsStale = !s.workMs && rawGapMs != null && rawGapMs > STALE_ZERO_GAP_MS;
+        const sessionWorkedMs = sessionIsStale ? rawGapMs : s.workMs;
+
         return (
           <div
             key={i}
@@ -161,8 +251,14 @@ export function SessionTimeline({ sessions }: { sessions: AttendanceSession[] })
                 <span className="font-black text-success">Live</span>
               )}
 
-              {s.workMs != null && (
-                <span className="ml-auto text-muted-foreground font-bold">{fmtHM(s.workMs)}</span>
+              {sessionWorkedMs != null && (
+                <span
+                  className={cn("ml-auto text-muted-foreground font-bold", sessionIsStale && "italic")}
+                  title={sessionIsStale ? ESTIMATE_TOOLTIP["stale-zero-fallback"] : undefined}
+                >
+                  {fmtHM(sessionWorkedMs)}
+                  {sessionIsStale && "*"}
+                </span>
               )}
 
               {autoExit && (
@@ -201,9 +297,11 @@ export function SessionTimeline({ sessions }: { sessions: AttendanceSession[] })
 export function DayStatsRow({
   record,
   displayStatus,
+  worked,
 }: {
   record: AttendanceRecord;
   displayStatus: string;
+  worked?: WorkedEstimate | null;
 }) {
   const geo = record.autoPunchOut
     ? { label: "Auto exit", className: "bg-destructive/10 text-destructive border-destructive/25" }
@@ -217,7 +315,13 @@ export function DayStatsRow({
     <div className="grid grid-cols-3 gap-3 rounded-2xl border border-border/40 bg-muted/20 p-4 text-center">
       <div className="space-y-1">
         <p className={LABEL}>Total Hours</p>
-        <p className="text-[13px] font-black text-primary">{fmtHM(record.totalWorkMs)}</p>
+        <p
+          className={cn("text-[13px] font-black text-primary", worked?.estimated && "italic")}
+          title={worked?.estimated ? ESTIMATE_TOOLTIP[worked.reason] : undefined}
+        >
+          {fmtHM(worked?.ms ?? record.totalWorkMs)}
+          {worked?.estimated && "*"}
+        </p>
       </div>
       <div className="space-y-1">
         <p className={LABEL}>Geo Status</p>
@@ -371,16 +475,17 @@ export function ShiftRequirementCard({
   shift,
   lunchMins,
   graceMins,
-  workedMs,
+  worked,
 }: {
   shift: ShiftLike | null | undefined;
   lunchMins: number;
   graceMins: number;
-  workedMs: number;
+  worked: WorkedEstimate | null;
 }) {
   const required = requiredMinutes(shift, lunchMins, graceMins);
   const span = shiftSpanMinutes(shift);
-  const workedMins = Math.round((workedMs || 0) / 60000);
+  const workedMs = worked?.ms ?? 0;
+  const workedMins = Math.round(workedMs / 60000);
 
   return (
     <div className="rounded-2xl border border-border/40 bg-muted/20 p-4 space-y-2">
@@ -415,9 +520,12 @@ export function ShiftRequirementCard({
               className={cn(
                 "text-[12px] font-black",
                 workedMins >= required ? "text-success" : "text-warning-foreground",
+                worked?.estimated && "italic",
               )}
+              title={worked?.estimated ? ESTIMATE_TOOLTIP[worked.reason] : undefined}
             >
               {fmtHM(workedMs)}
+              {worked?.estimated && "*"}
             </p>
             <p className="text-[10px] text-muted-foreground">
               {required > 0 ? Math.round((workedMins / required) * 100) : 0}% of required
@@ -447,22 +555,29 @@ export function WhyHalfDay({
   shift,
   lunchMins,
   graceMins,
+  worked,
 }: {
   record: AttendanceRecord;
   sessions: AttendanceSession[];
   shift: ShiftLike | null | undefined;
   lunchMins: number;
   graceMins: number;
+  worked: WorkedEstimate | null;
 }) {
   if (record.status !== "half-day") return null;
 
   const required = requiredMinutes(shift, lunchMins, graceMins);
-  const workedMins = Math.round((record.totalWorkMs || 0) / 60000);
+  const workedMs = worked?.ms ?? 0;
+  const workedMins = Math.round(workedMs / 60000);
   const reasons: string[] = [];
+
+  if (worked?.estimated) {
+    reasons.push(ESTIMATE_TOOLTIP[worked.reason]!);
+  }
 
   if (required != null && workedMins < required) {
     reasons.push(
-      `Worked ${fmtHM(record.totalWorkMs)} — ${required - workedMins} min short of the required ${fmtHM(required * 60000)}.`,
+      `Worked ${fmtHM(workedMs)} — ${required - workedMins} min short of the required ${fmtHM(required * 60000)}.`,
     );
 
     const firstIn = sessions[0]?.punchIn || record.punchIn;
@@ -524,7 +639,7 @@ export function WhyHalfDay({
     }
   } else if (required != null) {
     reasons.push(
-      `Hours met the requirement (${fmtHM(record.totalWorkMs)} ≥ ${fmtHM(required * 60000)}) — the half day came from a late arrival or early departure rule, or an admin correction.`,
+      `Hours met the requirement (${fmtHM(workedMs)} ≥ ${fmtHM(required * 60000)}) — the half day came from a late arrival or early departure rule, or an admin correction.`,
     );
   }
 
