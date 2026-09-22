@@ -49,10 +49,30 @@ export interface TrackerReadiness {
   background: boolean;
   notifications: boolean;
   batteryUnrestricted: boolean;
+  /**
+   * Physical-activity permission. Lets the tracker read the accelerometer and
+   * tell a phone standing still from one whose GPS is drifting.
+   *
+   * Optional in the sense that refusing it costs route accuracy, not
+   * attendance -- but it is the difference between a desk phone logging 0 km
+   * and logging 11.
+   */
+  activityRecognition: boolean;
   locationState: "always" | "foreground" | "denied";
   manufacturer: string;
   /** Whether this OEM has an auto-start screen worth sending the user to. */
   hasAutostartScreen: boolean;
+  /**
+   * Has the app ever actually resumed tracking after a device reboot?
+   *
+   * The only real evidence that OEM auto-start is enabled. No Android API
+   * exposes that setting, so the alternative is asking the employee — and an
+   * admin reading "granted" wants to know whether that was observed or merely
+   * claimed. Absent on builds older than 1.5.
+   */
+  autostartProven?: boolean;
+  /** Epoch ms of that reboot recovery, 0 if it has never happened. */
+  lastBootRestartAt?: number;
 }
 
 export interface TrackerPermissions {
@@ -66,10 +86,27 @@ export interface StartOptions {
   apiBase: string;
   employeeId: string;
   sessionId?: string;
+  /**
+   * The web layer's install id, handed to native so the device event log and
+   * the device row describe the same install. Optional: an older native build
+   * ignores it, and a missing one only costs the events their device grouping.
+   */
+  installId?: string;
+}
+
+export interface NativeCrash {
+  /** Epoch ms at which the process died. */
+  at: number;
+  thread: string;
+  /** Fully-qualified Throwable class, e.g. android.app.RemoteServiceException. */
+  type: string;
+  message: string;
+  stack: string;
 }
 
 interface BackgroundTrackerPlugin {
   start(options: StartOptions): Promise<{ started: boolean }>;
+  getLastCrash(): Promise<{ crash: NativeCrash | null }>;
   stop(): Promise<void>;
   getStatus(): Promise<TrackerStatus>;
   requestPermissions(): Promise<TrackerPermissions>;
@@ -125,6 +162,25 @@ export async function stopBackgroundTracking(): Promise<void> {
     await Native.stop();
   } catch (err) {
     console.warn("[bg-tracker] stop failed:", err);
+  }
+}
+
+/**
+ * The stack trace of the last fatal NATIVE crash, or null.
+ *
+ * Native crashes are invisible to every other channel we have: the system kills
+ * the process, so window.onerror never fires and no request is ever made. This
+ * is the only way one is ever seen. Reading it clears it.
+ */
+export async function getLastNativeCrash(): Promise<NativeCrash | null> {
+  if (!available()) return null;
+  try {
+    const res = await Native.getLastCrash();
+    return res?.crash ?? null;
+  } catch {
+    // An older APK has no such method. Nothing to report, and certainly nothing
+    // worth surfacing at startup.
+    return null;
   }
 }
 

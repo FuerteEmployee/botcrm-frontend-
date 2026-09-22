@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { AppVersionCard } from "@/components/shared/app-update";
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiClient, IMAGE_BASE_URL } from "@/lib/api-client";
@@ -291,6 +292,11 @@ function UserAccountSummaryPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Support's first question is always "what version are you on?" — this
+          is so the employee can answer it without being talked through
+          Android's app-info screen. */}
+      <AppVersionCard className="mt-4" />
 
     </div>
   );

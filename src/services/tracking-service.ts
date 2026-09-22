@@ -12,6 +12,34 @@ export interface Location {
   // perfect fix. Absent on older rows saved before the field existed.
   accuracy?: number | null;
   timestamp: string;
+  // Freshness, computed by the server so the threshold has one definition.
+  // Absent on rows that arrive by socket, which carry no age -- treat a
+  // missing isLive as "work it out from timestamp", never as "not live".
+  ageSeconds?: number;
+  isLive?: boolean;
+  liveWindowSeconds?: number;
+}
+
+/** Seconds since this fix was recorded, recomputed now rather than at fetch. */
+export function locationAgeSeconds(loc: Location): number {
+  return Math.max(0, Math.round((Date.now() - new Date(loc.timestamp).getTime()) / 1000));
+}
+
+/**
+ * Is this position current enough to represent where someone IS, rather than
+ * where they were? Recomputed on every render so a pin goes stale on screen
+ * even if the page has not re-fetched.
+ */
+export function isLocationLive(loc: Location): boolean {
+  return locationAgeSeconds(loc) <= (loc.liveWindowSeconds ?? 120);
+}
+
+/** "12s" / "8m" / "3h" / "24d" — compact enough for a map label. */
+export function formatAge(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
+  return `${Math.round(seconds / 86400)}d`;
 }
 
 function normalizeLocations(raw: any): Location[] {
@@ -34,6 +62,9 @@ function normalizeLocations(raw: any): Location[] {
       longitude: item.longitude ?? item.lng ?? 0,
       accuracy: item.accuracy,
       timestamp: item.timestamp ?? item.updatedAt ?? new Date().toISOString(),
+      ageSeconds: item.ageSeconds,
+      isLive: item.isLive,
+      liveWindowSeconds: item.liveWindowSeconds,
     }))
     .filter((l) => l.employeeId && l.latitude !== 0 && l.longitude !== 0);
 }
@@ -156,7 +187,14 @@ export function useTrackingStats() {
 // One employee's full route for a given day (YYYY-MM-DD, defaults to today) —
 // powers the map's polyline + Start/End markers + distance readout.
 export function useTrackingHistory(employeeId: string | undefined, date: string) {
-  const { data, isLoading, refetch } = useQuery<{ points: Location[]; distanceKm: number }>({
+  const { data, isLoading, refetch } = useQuery<{
+    points: Location[];
+    distanceKm: number;
+    /** Fixes actually received. `points` is the smoothed route drawn from them. */
+    rawCount?: number;
+    /** Distance before smoothing — kept so the drop is explainable, not mysterious. */
+    rawDistanceKm?: number;
+  }>({
     queryKey: ["tracking-history", employeeId, date],
     queryFn: async () => {
       const { data } = await apiClient.get("/tracking/history", { params: { employeeId, date } });
@@ -166,7 +204,14 @@ export function useTrackingHistory(employeeId: string | undefined, date: string)
     refetchInterval: 30000,
   });
 
-  return { points: data?.points ?? [], distanceKm: data?.distanceKm ?? 0, isLoading, refetch };
+  return {
+    points: data?.points ?? [],
+    distanceKm: data?.distanceKm ?? 0,
+    rawCount: data?.rawCount ?? data?.points?.length ?? 0,
+    rawDistanceKm: data?.rawDistanceKm ?? 0,
+    isLoading,
+    refetch,
+  };
 }
 
 export function usePingEmployee() {

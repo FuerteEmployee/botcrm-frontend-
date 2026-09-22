@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { useDepartmentService, type Department as BackendDept } from "@/services/department-service";
 
@@ -37,7 +38,7 @@ function DepartmentsPage() {
   const { departments: list, isLoading, createDepartment, updateDepartment, deleteDepartment } = useDepartmentService();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<BackendDept | null>(null);
-  const [form, setForm] = useState({ name: "", colorCode: "#6366f1" });
+  const [form, setForm] = useState({ name: "", colorCode: "#6366f1", trackingEnabled: false, autoPunchOutEnabled: false });
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
@@ -63,8 +64,8 @@ function DepartmentsPage() {
 
   const totalEmployees = list.reduce((s, d) => s + (d.employees || 0), 0);
 
-  const openAdd = () => { setEditing(null); setForm({ name: "", colorCode: "#6366f1" }); setOpen(true); };
-  const openEdit = (d: BackendDept) => { setEditing(d); setForm({ name: d.name, colorCode: d.colorCode }); setOpen(true); };
+  const openAdd = () => { setEditing(null); setForm({ name: "", colorCode: "#6366f1", trackingEnabled: false, autoPunchOutEnabled: false }); setOpen(true); };
+  const openEdit = (d: BackendDept) => { setEditing(d); setForm({ name: d.name, colorCode: d.colorCode, trackingEnabled: !!d.trackingEnabled, autoPunchOutEnabled: !!d.autoPunchOutEnabled }); setOpen(true); };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -292,6 +293,48 @@ function DepartmentsPage() {
               
               <div className="pt-2">
                 <p className="text-[11px] text-muted-foreground/60 italic">* Choose a unique color to distinguish this department in the main dashboard.</p>
+              </div>
+
+              {/* Location policy.
+                  Two switches rather than one, because they are different
+                  decisions: the first says "we know where these people are",
+                  the second says "we may end their working day on the strength
+                  of it". Every sensible rollout does the first for a while
+                  before the second, and a single toggle would not allow that. */}
+              <div className="rounded-xl border border-border/50 bg-muted/20 divide-y divide-border/40">
+                <div className="flex items-start justify-between gap-4 p-3.5">
+                  <div className="space-y-0.5">
+                    <p className="text-[12px] font-bold">Track location on duty</p>
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                      Employees in this department send their location while punched in. Individually
+                      enabled employees stay tracked whatever this is set to.
+                    </p>
+                  </div>
+                  <Switch
+                    id="dept-tracking"
+                    checked={form.trackingEnabled}
+                    onCheckedChange={(v) => setForm({ ...form, trackingEnabled: v, autoPunchOutEnabled: v ? form.autoPunchOutEnabled : false })}
+                  />
+                </div>
+
+                <div className="flex items-start justify-between gap-4 p-3.5">
+                  <div className="space-y-0.5">
+                    <p className={cn("text-[12px] font-bold", !form.trackingEnabled && "text-muted-foreground")}>
+                      Auto punch-out when they leave
+                    </p>
+                    <p className="text-[11px] leading-relaxed text-muted-foreground">
+                      {form.trackingEnabled
+                        ? "Ends the day automatically once someone has demonstrably left their branch. The close time is the last moment they were inside, so nobody loses the walk. Leave this off until you have watched the tracking for a while."
+                        : "Needs location tracking first — there is nothing to decide on without it."}
+                    </p>
+                  </div>
+                  <Switch
+                    id="dept-autopunchout"
+                    disabled={!form.trackingEnabled}
+                    checked={form.autoPunchOutEnabled}
+                    onCheckedChange={(v) => setForm({ ...form, autoPunchOutEnabled: v })}
+                  />
+                </div>
               </div>
 
               <DialogFooter className="gap-2 pt-4 border-t border-border/40 mt-1">

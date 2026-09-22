@@ -22,6 +22,19 @@ const queryClient = new QueryClient({
       retry: 1,
       refetchOnWindowFocus: false,
       enabled: typeof window !== "undefined",
+      // Without a staleTime this defaults to 0, so every query refetched on
+      // every mount: navigating away and back re-hit the API for data that had
+      // not changed, and a phone on a weak connection paid for all of it. A
+      // minute is short enough that nothing on screen is meaningfully old, and
+      // long enough to remove almost all of that traffic.
+      //
+      // Anything that must be fresher says so at the call site — live tracking
+      // and today's attendance already pass their own staleTime.
+      staleTime: 60 * 1000,
+      // Keep a query's data around after its last observer unmounts, so going
+      // back to a screen paints instantly from cache and then revalidates,
+      // rather than showing a skeleton again.
+      gcTime: 10 * 60 * 1000,
     },
   },
 });

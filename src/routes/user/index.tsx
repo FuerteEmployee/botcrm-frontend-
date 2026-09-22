@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, lazy, Suspense } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient, IMAGE_BASE_URL } from "@/lib/api-client";
 import { useAuth } from "@/hooks/use-auth";
@@ -7,18 +7,30 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Clock, MapPin, Camera, Coffee, CheckCircle,
   AlertTriangle, Calendar, Award, Fingerprint, ChevronLeft, ChevronRight,
-  Home, RefreshCw, Sparkles, Settings, Filter, ChevronDown, ListChecks
+  Home, RefreshCw, Sparkles, Settings, Filter, ChevronDown, ListChecks,
+  Loader2, CloudOff, ShieldAlert,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { toast } from "sonner";
 import { startTracking, stopTracking } from "@/services/location-tracker";
-import { startBackgroundTracking, stopBackgroundTracking } from "@/plugins/background-tracker";
+import { startBackgroundTracking, stopBackgroundTracking, getTrackerStatus, available as trackerAvailable } from "@/plugins/background-tracker";
 import { getSession } from "@/lib/auth";
-import { hapticSuccess, hapticError } from "@/lib/haptics";
+import { getInstallId } from "@/lib/client-telemetry";
+import {
+  buildSessions,
+  TodaySessions,
+  TodayActivity,
+  type AttendanceSession,
+} from "@/components/user/today-sessions";
+import { hapticSuccess, haptic } from "@/lib/haptics";
 import { useTrackingSetup } from "@/hooks/use-tracking-setup";
+import { HapticOverlay } from "@/components/shared/haptic-overlay";
+import { useOnlineStatus } from "@/hooks/use-online-status";
+import { checkApkUpdate } from "@/lib/apk-update";
 import { TrackingSetupGate } from "@/components/attendance/tracking-setup-gate";
 import {
   acquirePosition,
@@ -26,8 +38,10 @@ import {
   getPlatform,
   type LocationFailureReason,
 } from "@/lib/geolocation";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+// Lazy: Leaflet is ~148 KB and is only needed once the location-consent modal
+// is actually opened. Importing it here statically made every employee pay for
+// it — download and parse — on every single app open.
+const UserLocationMap = lazy(() => import("@/components/user/user-location-map"));
 
 export const Route = createFileRoute("/user/")({
   component: UserDashboard,
@@ -44,6 +58,12 @@ interface AttendanceLog {
   status: "present" | "absent" | "half-day" | "late" | "weekly-off" | "festival";
   source?: "app" | "lens" | "biometric";
   punchOutIsProvisional?: boolean;
+  /**
+   * Which punch fields the server's day-reconciliation INFERRED from raw device
+   * taps, as opposed to the app having set them explicitly. Absent from this
+   * list means somebody pressed the button on purpose.
+   */
+  derivedFields?: string[];
   remarks?: string;
   address?: string;
   punchInPhoto?: string;
@@ -52,7 +72,12 @@ interface AttendanceLog {
   punchOutLocation?: string;
   lunchInLocation?: string;
   lunchOutLocation?: string;
-  shifts?: { punchIn?: string; punchOut?: string }[];
+  /** Metres from the nearest assigned branch at each end of the root session. */
+  punchInDistance?: number | null;
+  punchOutDistance?: number | null;
+  punchInSource?: string | null;
+  punchOutSource?: string | null;
+  shifts?: AttendanceSession[];
 }
 
 interface UserProfile {
@@ -67,10 +92,20 @@ interface UserProfile {
   departmentId?: { name: string };
   branchId?: { name: string; latitude: number; longitude: number };
   shiftId?: { name: string; startTime: string; endTime: string };
+  /** Server-side cap on punch-in sessions per day. Server is the authority. */
+  maxDailySessions?: number;
   todayAttendance?: AttendanceLog | null;
   recentAttendance?: AttendanceLog[];
   upcomingHolidays?: Array<{ _id: string; name: string; startDate: string }>;
   allowMultiplePunches?: boolean;
+  /**
+   * May this employee mark a punch Work From Home?
+   *
+   * Resolved server-side by the same rule that accepts or refuses the punch
+   * (per-employee `attendanceExceptions.remotePunch`, else the tenant default),
+   * so the toggle is only offered when it would actually work.
+   */
+  canWorkFromHome?: boolean;
   trackingEnabled?: boolean;
 }
 
@@ -123,87 +158,6 @@ const CircularProgress = ({
   );
 };
 
-// Leaflet Map component specifically for showing the employee's current location in the consent modal
-function UserLocationMap({ lat, lng, initials }: { lat: number; lng: number; initials: string }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<L.Map | null>(null);
-  const markerRef = useRef<L.Marker | null>(null);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    // Safety: clear any stale Leaflet stamp
-    delete (container as any)._leaflet_id;
-
-    const map = L.map(container, {
-      center: [lat, lng],
-      zoom: 15,
-      zoomControl: false,
-    });
-
-    L.tileLayer(
-      "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
-      {
-        maxZoom: 19,
-        subdomains: "abc",
-        attribution:
-          '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      }
-    ).addTo(map);
-
-    L.control.zoom({ position: "bottomright" }).addTo(map);
-
-    const icon = L.divIcon({
-      className: "custom-leaflet-marker",
-      html: `
-        <div style="position:relative;display:flex;flex-direction:column;align-items:center;cursor:pointer;">
-          <span style="position:absolute;top:-4px;width:44px;height:44px;border-radius:50%;background:rgba(140,32,89,0.25);animation:ping 1.5s cubic-bezier(0,0,0.2,1) infinite;"></span>
-          <div style="position:relative;width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#8C2059 0%,#501537 100%);color:white;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 4px 10px rgba(0,0,0,0.25);">
-            ${initials}
-          </div>
-        </div>`,
-      iconSize: [40, 50],
-      iconAnchor: [20, 20],
-    });
-
-    const marker = L.marker([lat, lng], { icon }).addTo(map);
-    mapRef.current = map;
-    markerRef.current = marker;
-
-    // Leaflet reads the container's pixel size at the instant `L.map()` runs.
-    // This map mounts inside a framer-motion modal that's still animating in
-    // (opacity/scale/y), so the container can be zero-sized or mid-transition
-    // right then — Leaflet silently freezes on that wrong size, leaving the
-    // map blank/mis-centered until something else forces a resize. Force a
-    // recompute once the entrance animation has settled, and keep recomputing
-    // if the container itself ever resizes (e.g. the modal's own layout shifts).
-    const settleTimer = setTimeout(() => map.invalidateSize(), 350);
-    const resizeObserver = new ResizeObserver(() => map.invalidateSize());
-    resizeObserver.observe(container);
-
-    return () => {
-      clearTimeout(settleTimer);
-      resizeObserver.disconnect();
-      if (markerRef.current) markerRef.current.remove();
-      if (mapRef.current) mapRef.current.remove();
-      mapRef.current = null;
-      markerRef.current = null;
-    };
-  }, []);
-
-  // Update map view and marker position when lat/lng changes
-  useEffect(() => {
-    const map = mapRef.current;
-    const marker = markerRef.current;
-    if (map && marker) {
-      map.setView([lat, lng], 15, { animate: true });
-      marker.setLatLng([lat, lng]);
-    }
-  }, [lat, lng]);
-
-  return <div ref={containerRef} style={{ height: "100%", width: "100%" }} />;
-}
 
 // Device-appropriate instructions for enabling location, shown in the help dialog.
 function locationHelpSteps(
@@ -232,8 +186,67 @@ function locationHelpSteps(
   ];
 }
 
+/** "18:30" -> "06:30 PM". Returns the raw value if it is not an HH:mm string. */
+function formatShiftTime(hhmm?: string | null): string {
+  if (!hhmm) return "shift end";
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
+  if (!m) return hhmm;
+  const h = Number(m[1]);
+  const suffix = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${String(h12).padStart(2, "0")}:${m[2]} ${suffix}`;
+}
+
+/**
+ * When today's occurrence of `shift` ends, as a real instant, or null when the
+ * shift has no usable times.
+ *
+ * An overnight shift (22:00-06:00) ends TOMORROW, so the end is pushed a day
+ * forward whenever it would otherwise land at or before the start. Without
+ * that, a night worker's punch-in control would disappear the moment they
+ * arrived.
+ *
+ * Resolved against the handset's own clock, which is the same clock the
+ * employee is reading. The server re-checks in IST and is the authority on
+ * whether a punch is accepted.
+ */
+function useShiftEndToday(shift?: { startTime?: string; endTime?: string } | null) {
+  const [end, setEnd] = useState<Date | null>(null);
+
+  const start = shift?.startTime;
+  const finish = shift?.endTime;
+
+  useEffect(() => {
+    if (!start || !finish) { setEnd(null); return; }
+    const parse = (hhmm: string) => {
+      const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
+      if (!m) return null;
+      const d = new Date();
+      d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+      return d;
+    };
+    const s = parse(start);
+    const e = parse(finish);
+    if (!s || !e) { setEnd(null); return; }
+    if (e.getTime() <= s.getTime()) e.setDate(e.getDate() + 1); // overnight
+    setEnd(e);
+  }, [start, finish]);
+
+  return end;
+}
+
 function UserDashboard() {
   useAuth();
+
+  // Coarse clock for time-of-day gating (the shift-end check below). Deliberately
+  // 30s rather than the 1s ticker used for the elapsed-time readout: this only
+  // has to notice a boundary, and re-rendering the whole screen every second for
+  // it would cost battery on a phone that is already running a GPS service.
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
   const queryClient = useQueryClient();
   const [time, setTime] = useState(new Date());
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
@@ -241,9 +254,45 @@ function UserDashboard() {
   const [locationLoading, setLocationLoading] = useState(false);
   const [locationAccuracy, setLocationAccuracy] = useState<number | null>(null);
   const [showLocationVerification, setShowLocationVerification] = useState(false);
+
+  // Work From Home, chosen for THIS punch.
+  //
+  // Reset every time the sheet opens (see the effect below), never remembered.
+  // A remembered toggle is how somebody walks into the office on Tuesday and
+  // silently records a remote day because they left it on over the weekend --
+  // and the consequence is not cosmetic, since a WFH day is exempt from the
+  // fence and from auto punch-out.
+  const [wfhForThisPunch, setWfhForThisPunch] = useState(false);
+
+  // Every punch starts as an office punch.
+  useEffect(() => {
+    if (showLocationVerification) setWfhForThisPunch(false);
+  }, [showLocationVerification]);
   // "Enable Location" guided-help dialog (steps + deep link to OS settings).
   const [showLocationHelp, setShowLocationHelp] = useState(false);
+  /**
+   * Guard on opening a SECOND session for the day.
+   *
+   * Without it the button sits exactly where "Punch Out" was a moment earlier,
+   * so the tap that ends a shift and the tap that starts a new one land on the
+   * same pixels. The server caps the day at a fixed number of sessions, and a
+   * misfire spends one of them and puts a punch on the record that has to be
+   * corrected by an admin.
+   */
+  const [confirmNewSession, setConfirmNewSession] = useState(false);
   const [locationFailReason, setLocationFailReason] = useState<LocationFailureReason | null>(null);
+  /**
+   * Has the first location attempt finished?
+   *
+   * Needed because "we have no coordinates" and "we cannot get coordinates" are
+   * different facts, and the UI was treating the first as the second: on every
+   * app open the banner read "Location blocked — tap to enable GPS" in red for
+   * the two or three seconds the GPS took to return, on phones where nothing
+   * was blocked at all. Employees are told to stop and punch in only when that
+   * warning is gone, so a false one is not cosmetic — it teaches them to
+   * distrust the only warning that matters.
+   */
+  const [locationProbed, setLocationProbed] = useState(false);
   // Punch action queued while we wait for the user to enable location.
   const [pendingPunch, setPendingPunch] = useState<"punch-in" | "punch-out" | null>(null);
 
@@ -280,6 +329,12 @@ function UserDashboard() {
       const { data } = await apiClient.get("/users/profile");
       return data;
     },
+    // Overrides the 60s default: this carries todayAttendance, which decides
+    // whether the button says Punch In or Punch Out. A punch made on the
+    // biometric terminal changes it with no mutation here to invalidate the
+    // cache, so this one has to re-check often enough that the screen cannot
+    // disagree with the machine the employee just used.
+    staleTime: 10 * 1000,
   });
 
   // 1.5 Fetch Unified Employee Dashboard Summary (Backend Stats)
@@ -324,18 +379,54 @@ function UserDashboard() {
 
   const todayLog = profile?.todayAttendance;
 
-  // Lens/biometric devices never call the app's own lunch-in/lunch-out
-  // endpoints, so their raw re-entries aren't reliably "lunch" — don't guess
-  // here. "Lens Info" (below) shows every raw event for today instead.
-  const isDeviceSource = todayLog?.source === "lens" || todayLog?.source === "biometric";
-  const displayLunchInTime = isDeviceSource ? undefined : todayLog?.lunchInTime;
-  const displayLunchOutTime = isDeviceSource ? undefined : todayLog?.lunchOutTime;
+  // Time-ordered and numbered. Kept next to todayLog rather than computed at
+  // each render site so the strip and the activity list can never disagree
+  // about which session is which.
+  const todaySessions = buildSessions(todayLog);
+
+  // The cap comes from the server (MAX_DAILY_SESSIONS). Falling back to 5 only
+  // covers an older backend that does not send it; the value is never the
+  // client's to decide, because the server is what actually refuses the punch.
+  const maxSessions = profile?.maxDailySessions ?? 5;
+  const sessionsLeft = Math.max(0, maxSessions - todaySessions.length);
+
+  // A lens/biometric terminal never calls the app's own lunch endpoints — it
+  // only reports that somebody was recognised, and the server INFERS which
+  // middle taps bounded a break. That inference is a guess, so it must not be
+  // shown here as fact; "Session details" (below) lists every raw tap instead.
+  //
+  // But it is only the INFERENCE that is unreliable. A lunch the employee
+  // explicitly recorded in this app is a deliberate action and is exactly as
+  // trustworthy on a day the terminal opened as on any other. Keying this off
+  // `source` blanked both alike: after pressing Start Lunch on a machine-opened
+  // day, the app cleared the time it had just recorded and went on offering
+  // "Start Lunch", while the admin screen showed the break correctly.
+  //
+  // `derivedFields` is the server's own record of which fields its
+  // reconciliation wrote, so a field absent from it was set deliberately. Same
+  // distinction `punchOutIsProvisional` draws for the punch-out just below.
+  const inferredByDevice = new Set(todayLog?.derivedFields ?? []);
+  const displayLunchInTime = inferredByDevice.has("lunchInTime") ? undefined : todayLog?.lunchInTime;
+  const displayLunchOutTime = inferredByDevice.has("lunchOutTime") ? undefined : todayLog?.lunchOutTime;
   // Cleared server-side the moment the employee explicitly punches out via
   // the app, even on a day that started via Lens — so an app punch-out
   // always shows immediately instead of waiting for "today" to pass.
   const displayPunchOut = todayLog?.punchOutIsProvisional ? undefined : todayLog?.punchOut;
 
   const isPunchedIn = !!todayLog?.punchIn;
+
+  // Has the employee's shift finished for today?
+  //
+  // Only ever used to withdraw the PUNCH-IN control. Punch Out, Start Lunch
+  // and End Lunch stay available at all times: somebody still on the clock at
+  // shift end must be able to close their own day, and hiding that button
+  // would strand the session for the 04:00 job to close at an arbitrary
+  // instant -- which is the zero-length, unpayable day this rule prevents.
+  //
+  // The server enforces the same rule (attendance_controller.punchIn) and is
+  // the authority; this only stops the employee walking into a refusal.
+  const shiftEnd = useShiftEndToday(profile?.shiftId);
+  const shiftIsOver = !!shiftEnd && nowTick >= shiftEnd.getTime();
   // Unconditional on any capable device -- every employee goes through the
   // same one-time permission setup, matching the reference app, whether or
   // not an admin has separately turned on this specific person's tracking
@@ -343,13 +434,46 @@ function UserDashboard() {
   // the effect just below, which decides whether the native service actually
   // starts recording once punched in.
   const trackingSetup = useTrackingSetup();
+  const isOnline = useOnlineStatus();
+
+  // Mandatory-update gate. Defaults to false and only ever becomes true after
+  // a successful check against a real installed versionCode, so a failed or
+  // unreadable check leaves punching exactly as it was.
+  const [apkBlocking, setApkBlocking] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void checkApkUpdate(getSession()?.adminId).then((s) => {
+      if (alive) setApkBlocking(s.blocking);
+    });
+    return () => { alive = false; };
+  }, []);
   const isPunchedOut = !!displayPunchOut;
 
   // Real-time location tracking lifecycle. Tracking is enabled per-employee by
   // the admin (profile.trackingEnabled) — employees no longer choose. It runs
   // only while the employee is punched in.
   useEffect(() => {
-    const shouldTrack = !!profile?._id && isPunchedIn && !isPunchedOut && !!profile.trackingEnabled;
+    // NEVER touch the tracker before we know what it should be doing.
+    //
+    // This effect used to fold "the profile has not loaded yet" into
+    // shouldTrack, so on every single app open the first render computed FALSE
+    // and immediately called stopBackgroundTracking() — killing a healthy
+    // foreground service before finding out whether it was supposed to be
+    // running. If the restart that followed then failed or raced, the employee
+    // was left silently untracked with every permission granted and no way to
+    // know.
+    //
+    // That is what happened on 2026-09-16: an employee tracked steadily for two
+    // and a half hours, punched in, and stopped three seconds later. The native
+    // side had done nothing wrong — START_STICKY, onTaskRemoved and BootReceiver
+    // are all in place — it was told to stop. Autostart cannot rescue a service
+    // that was deliberately shut down.
+    //
+    // Unknown is not the same as "should be off". While it is unknown, leave the
+    // service exactly as it is.
+    if (!profile?._id) return;
+
+    const shouldTrack = isPunchedIn && !isPunchedOut && !!profile.trackingEnabled;
 
     if (!shouldTrack) {
       stopTracking();
@@ -385,6 +509,7 @@ function UserDashboard() {
       const nativeApiBase = rawApiBase.replace(/\/api\/?$/, "");
       const started = session?.token
         ? await startBackgroundTracking({
+            installId: getInstallId(),
             token: session.token,
             apiBase: nativeApiBase,
             employeeId: profile._id,
@@ -398,7 +523,59 @@ function UserDashboard() {
       if (!started) startTracking(profile._id);
     })();
 
-    return () => { cancelled = true; };
+    // ── Watchdog ─────────────────────────────────────────────────────────────
+    //
+    // Starting the service once and trusting it to stay up is not good enough.
+    // A foreground service can die for reasons the employee has no part in and
+    // no way to see: an OEM battery manager reaping it, the system reclaiming
+    // memory, or a restart racing the punch-in that triggered it. Observed on
+    // 2026-09-16: an employee with every permission granted tracked steadily
+    // for two and a half hours, punched in, and stopped three seconds later.
+    // Nothing noticed. She would have had to know to force-stop the app.
+    //
+    // The people using this are not going to diagnose a foreground service.
+    // They grant the permissions once and expect it to work forever, which is
+    // a completely reasonable expectation. So the app checks whether the
+    // service is actually alive and silently restarts it if not — no prompt,
+    // no message, nothing for them to understand or act on.
+    //
+    // Cheap by design: getStatus() is a bridge call answered from memory, once
+    // a minute, only while genuinely on duty.
+    const restartIfDead = async () => {
+      if (cancelled || !trackerAvailable()) return;
+      try {
+        const status = await getTrackerStatus();
+        if (cancelled || !status || status.active) return;
+
+        const session = getSession();
+        if (!session?.token) return;
+        const rawBase = import.meta.env.VITE_API_URL || "";
+        console.warn("[bg-tracker] service was not running while on duty — restarting");
+        await startBackgroundTracking({
+          installId: getInstallId(),
+          token: session.token,
+          apiBase: rawBase.replace(/\/api\/?$/, ""),
+          employeeId: profile._id,
+        });
+      } catch {
+        // A failed health check must never surface to the employee, and must
+        // never break the punch flow. The next tick tries again.
+      }
+    };
+
+    const timer = window.setInterval(restartIfDead, 60_000);
+
+    // Returning to the app is the single most likely moment to discover the
+    // service was killed while it was in the background, so check immediately
+    // rather than waiting up to a minute for the next tick.
+    const onResume = () => { void restartIfDead(); };
+    document.addEventListener("visibilitychange", onResume);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onResume);
+    };
   }, [profile?._id, isPunchedIn, isPunchedOut, profile?.trackingEnabled]);
 
   // Real-time Shift Progress
@@ -453,9 +630,13 @@ function UserDashboard() {
       if (result.ok) {
         setLocation({ lat: result.coords.lat, lng: result.coords.lng });
         setLocationAccuracy(result.coords.accuracy);
+        setLocationProbed(true);
         const addr = await resolveAddress(result.coords.lat, result.coords.lng);
         if (!cancelled) setAddress(addr);
       } else {
+        // Only NOW is it fair to say something is wrong.
+        setLocationFailReason(result.reason);
+        setLocationProbed(true);
         setAddress("GPS permissions needed");
       }
     })();
@@ -475,6 +656,7 @@ function UserDashboard() {
       setAddress(addr);
     } else {
       setLocationFailReason(result.reason);
+      setLocationProbed(true);
       setAddress("GPS permissions needed");
       if (result.reason === "timeout") {
         toast.error(`${result.message} Please try again.`);
@@ -537,6 +719,13 @@ function UserDashboard() {
     if (alreadyDone) {
       // The backend recorded the punch even though the request errored — show
       // the same success confirmation the happy path would, no error toast.
+      //
+      // The ONLY haptic still called by hand in this file. Everywhere else the
+      // feedback rides on the toast (see lib/haptic-toast.ts); this branch
+      // deliberately raises no toast, so without this the one path where the
+      // employee most needs reassurance would be the one path that stays
+      // silent. Adding a toast here instead would re-introduce the error
+      // message this branch exists to suppress.
       void hapticSuccess();
       setScanResult({
         type,
@@ -551,13 +740,20 @@ function UserDashboard() {
         setScanResult(null);
       }, 1800);
     } else {
-      void hapticError();
       const rawMsg = err?.response?.data?.message as string | undefined;
       const fallback = `${type === "punch-in" ? "Punch In" : "Punch Out"} failed. Please try again.`;
-      toast.error(rawMsg && !looksLikeRawCrash(rawMsg) ? rawMsg : fallback);
+      // Explicit, generous duration -- this is the one message that actually
+      // explains why nothing happened (wrong location, poor accuracy, already
+      // punched in…), so it must not rely on Sonner's shorter default and get
+      // cut off before someone on a phone has read it.
+      toast.error(rawMsg && !looksLikeRawCrash(rawMsg) ? rawMsg : fallback, { duration: 6000 });
+      // A real pause before the camera reopens -- 200ms is barely enough time
+      // to notice the toast even appeared, let alone read "You Are Not At
+      // Office Location (Distance: 925.5 km)", before a full-screen, blurred
+      // camera view comes back and draws every bit of attention away from it.
       setTimeout(() => {
         startScannerCamera();
-      }, 200);
+      }, 1500);
     }
   };
 
@@ -597,7 +793,6 @@ function UserDashboard() {
         if (scanType === "punch-in") {
           punchInMutation.mutate(dataUrl, {
             onSuccess: () => {
-              void hapticSuccess();
               setScanLoading(false);
               setScanResult({ type: "punch-in", timeLabel: nowLabel() });
               setTimeout(() => {
@@ -624,7 +819,6 @@ function UserDashboard() {
           }
           punchOutMutation.mutate(dataUrl, {
             onSuccess: (data) => {
-              void hapticSuccess();
               setScanLoading(false);
               setScanResult({ type: "punch-out", timeLabel: nowLabel(), workHoursLabel: data?.workHours ? `${data.workHours} hrs` : undefined });
               setTimeout(() => {
@@ -656,6 +850,16 @@ function UserDashboard() {
   // "enable location" help instead of dead-ending. WFH / branch-less employees
   // skip the location gate entirely.
   const beginPunch = async (type: "punch-in" | "punch-out") => {
+    // Acknowledge the PRESS, not the result.
+    //
+    // The success haptic already fires when the punch is recorded (via
+    // haptic-toast), but that can be a second or more later — after a location
+    // fix and a round trip. Without something at the moment of the tap the
+    // button feels dead, which on the one control the whole app exists for is
+    // exactly the "this is a web page" feeling. Medium impact: this is a
+    // commitment, unlike navigation.
+    void haptic("impactMedium");
+
     if (!profile?.branchId || location) {
       openScanner(type);
       return;
@@ -711,9 +915,15 @@ function UserDashboard() {
     mutationFn: async (photoArg: string) => {
       const { currentLocation, currentAddress, currentAccuracy } = await getFreshLocation();
 
+      // A branch-less employee is remote by definition; anyone else is remote
+      // only for a punch they explicitly marked Work From Home.
+      const punchIsWFH = wfhForThisPunch || !profile?.branchId;
+
       // Office employees need a real location — null would make the backend
-      // calculate Infinity distance and reject with 400.
-      if (!currentLocation && profile?.branchId) {
+      // calculate Infinity distance and reject with 400. A WFH punch is not
+      // measured against a branch at all, so a missing fix is not an obstacle
+      // and demanding one here would block the very case the toggle exists for.
+      if (!currentLocation && profile?.branchId && !punchIsWFH) {
         throw {
           response: {
             data: {
@@ -726,7 +936,7 @@ function UserDashboard() {
       const payload = {
         location: currentLocation,
         photo: photoArg,
-        isWFH: !profile?.branchId,
+        isWFH: punchIsWFH,
         address: currentAddress === "GPS permissions needed" ? "Location Capturing Bypassed" : currentAddress,
         accuracy: currentAccuracy,
         fixAt: new Date().toISOString(),
@@ -794,13 +1004,11 @@ function UserDashboard() {
       return data;
     },
     onSuccess: () => {
-      void hapticSuccess();
       toast.success("Lunch Break Started!");
       queryClient.invalidateQueries({ queryKey: ["user-profile"] });
       queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
     },
     onError: (err: any) => {
-      void hapticError();
       toast.error(err.response?.data?.message || "Lunch In Failed");
     }
   });
@@ -835,13 +1043,11 @@ function UserDashboard() {
   const lunchOutMutation = useMutation({
     mutationFn: postLunchOut,
     onSuccess: () => {
-      void hapticSuccess();
       toast.success("Lunch Break Completed!");
       queryClient.invalidateQueries({ queryKey: ["user-profile"] });
       queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
     },
     onError: (err: any) => {
-      void hapticError();
       toast.error(err.response?.data?.message || "Lunch Out Failed");
     }
   });
@@ -980,10 +1186,14 @@ function UserDashboard() {
     return Math.min(100, (elapsedSeconds / totalShiftSecs) * 100);
   };
 
-  // Time formatter
+  // Time formatter.
+  //
+  // hour12 is explicit rather than left to the handset: without it this follows
+  // the device locale while the clock above it is fixed, so the same screen
+  // could show "02:56 PM" beside "14:41" on one phone and agree on another.
   const formatTimeStr = (isoString?: string) => {
     if (!isoString) return "--";
-    return new Date(isoString).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return new Date(isoString).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
   };
 
   // Month navigation (does not allow going into the future)
@@ -1062,7 +1272,7 @@ function UserDashboard() {
               <div className="flex items-start justify-between">
                 <div className="text-left">
                   <h3 className="text-4xl font-semibold tracking-tight text-white drop-shadow-sm">
-                    {time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })}
+                    {time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}
                   </h3>
                   <div className="flex items-center gap-2 mt-1.5">
                     <Badge className={`border-none px-2.5 py-0.5 text-[8px] font-bold uppercase tracking-wider rounded-full shadow-xs ${isPunchedIn && !isPunchedOut
@@ -1134,6 +1344,10 @@ function UserDashboard() {
                 </div>
               </div>
 
+              {/* Each in/out pair for today. Hidden on a single-session day —
+                  the grid above already says it. */}
+              <TodaySessions sessions={todaySessions} />
+
               {/* Selfie previews of today's attendance */}
               {(todayLog?.punchInPhoto || todayLog?.punchOutPhoto) && (
                 <div className="flex items-center justify-start gap-3 p-2 bg-white/5 rounded-xl border border-white/5">
@@ -1164,18 +1378,36 @@ function UserDashboard() {
                 </div>
               )}
 
-              {/* Location indicator */}
+              {/* Location indicator.
+                  Three states, not two. Waiting is not failing — see
+                  locationProbed. And a timeout is not a block: telling someone
+                  to go and enable a permission they already granted sends them
+                  into Settings to change nothing. */}
               <div className="flex items-center justify-center gap-1.5 text-[9px] pt-0.5">
-                <MapPin className={`h-3 w-3 shrink-0 ${!location ? "text-red-400" : "text-white/80"}`} />
-                {!location ? (
-                  <button
-                    onClick={() => setShowLocationHelp(true)}
-                    className="font-semibold text-red-400 underline underline-offset-2 truncate"
-                  >
-                    Location blocked — tap to enable GPS
-                  </button>
+                {!location && (!locationProbed || locationLoading) ? (
+                  <>
+                    <Loader2 className="h-3 w-3 shrink-0 animate-spin text-white/70" />
+                    <span className="font-medium truncate text-white/70">Checking your location…</span>
+                  </>
+                ) : !location ? (
+                  <>
+                    <MapPin className="h-3 w-3 shrink-0 text-red-400" />
+                    <button
+                      onClick={() => (locationFailReason === "timeout" ? void refreshLocation() : setShowLocationHelp(true))}
+                      className="font-semibold text-red-400 underline underline-offset-2 truncate"
+                    >
+                      {locationFailReason === "timeout"
+                        ? "Couldn't get a fix — tap to retry"
+                        : locationFailReason === "unavailable"
+                          ? "GPS is off — tap to turn it on"
+                          : "Location blocked — tap to enable GPS"}
+                    </button>
+                  </>
                 ) : (
-                  <span className="font-medium truncate text-white/60">{address}</span>
+                  <>
+                    <MapPin className="h-3 w-3 shrink-0 text-white/80" />
+                    <span className="font-medium truncate text-white/60">{address}</span>
+                  </>
                 )}
               </div>
             </div>
@@ -1193,7 +1425,59 @@ function UserDashboard() {
                 PWA, or an APK predating the tracker plugin reports
                 applicable:false and punches in exactly as before, so shipping
                 this cannot lock out anyone already working. */}
-            {!isPunchedIn && trackingSetup.applicable && !trackingSetup.ready ? (
+            {/* Offline comes FIRST, ahead of every punch action.
+                A punch needs the server: it is timestamped there and checked
+                against the geofence there. Offline it cannot succeed, so
+                letting the button be pressed only produces a failure toast the
+                employee has to interpret. Saying why up front is the whole
+                difference between "the app is broken" and "I need signal".
+                Note this hides lunch and punch-out too, which is deliberate --
+                none of them can reach the server either. */}
+            {/* A build the publisher has declared unsafe for attendance. Sits
+                beside the offline case rather than anywhere else, because both
+                answer the same question -- can this person record a punch right
+                now -- and splitting that across two places is how one of them
+                ends up forgotten. The rest of the app stays open to them. */}
+            {apkBlocking ? (
+              <div className="w-full rounded-[16px] border border-destructive/20 bg-destructive/5 px-4 py-3.5 text-center">
+                <div className="mb-1 flex items-center justify-center gap-2">
+                  <ShieldAlert className="h-4 w-4 text-destructive" />
+                  <span className="text-[12px] font-bold text-destructive">App update required</span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-destructive/80">
+                  Punching is turned off until you install the latest app version. Open the update
+                  prompt to download it.
+                </p>
+              </div>
+            ) : !isOnline ? (
+              <div className="w-full rounded-[16px] border border-amber-200 bg-amber-50/80 px-4 py-3.5 text-center dark:border-amber-500/20 dark:bg-amber-500/10">
+                <div className="mb-1 flex items-center justify-center gap-2">
+                  <CloudOff className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                  <span className="text-[12px] font-bold text-amber-900 dark:text-amber-200">
+                    Connect to the internet
+                  </span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-amber-800/80 dark:text-amber-200/70">
+                  You need a connection to punch in or out. Your location is still being
+                  recorded and will upload by itself.
+                </p>
+              </div>
+            ) : !isPunchedIn && shiftIsOver ? (
+              // A greyed-out button explains nothing -- same reasoning as the
+              // session-limit panel further down. The employee's real question
+              // is "why can I not punch in", and the answer names the time and
+              // the way to fix it.
+              <div className="p-4 rounded-[18px] bg-slate-500/10 border border-slate-500/20 text-center space-y-1">
+                <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                  {profile?.shiftId?.name ? `${profile.shiftId.name} shift` : "Your shift"} ended at{" "}
+                  {formatShiftTime(profile?.shiftId?.endTime)}
+                </p>
+                <p className="text-[10px] leading-relaxed text-slate-600/80 dark:text-slate-400/80">
+                  Punch-in is closed for today. If you worked, ask your admin to add it
+                  through Attendance Regularization &mdash; your work still counts.
+                </p>
+              </div>
+            ) : !isPunchedIn && trackingSetup.applicable && !trackingSetup.ready ? (
               <TrackingSetupGate setup={trackingSetup} />
             ) : !isPunchedIn ? (
               // Not punched in: Primary "Punch In" button (opens location consent and map verification popup first)
@@ -1207,6 +1491,10 @@ function UserDashboard() {
                 className="w-full h-11 bg-gradient-to-r from-[#501537] to-[#7B2453] hover:from-[#6B1C4B] hover:to-[#912D64] text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-xs tracking-wider relative overflow-hidden group"
               >
                 <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                {/* iOS only, and only because a real finger must touch the
+                    control -- see components/shared/haptic-overlay.tsx. The tap
+                    bubbles on to this button's own onClick unchanged. */}
+                <HapticOverlay radius="16px" />
                 <Fingerprint className="h-4.5 w-4.5 text-white group-hover:scale-110 transition-transform duration-300" />
                 <span>Punch In</span>
               </Button>
@@ -1219,16 +1507,18 @@ function UserDashboard() {
                   <div className="grid grid-cols-2 gap-3">
                     <Button
                       onClick={() => beginPunch("punch-out")}
-                      className="h-11 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-700 hover:to-red-600 text-white font-semibold rounded-[16px] shadow-xs border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all text-xs tracking-wider"
+                      className="relative h-11 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-700 hover:to-red-600 text-white font-semibold rounded-[16px] shadow-xs border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all text-xs tracking-wider"
                     >
+                      <HapticOverlay radius="16px" />
                       <Fingerprint className="h-4 w-4 text-white" />
                       <span>Punch Out</span>
                     </Button>
                     <Button
                       onClick={() => lunchInMutation.mutate()}
                       disabled={lunchInMutation.isPending}
-                      className="h-11 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-semibold rounded-[16px] shadow-xs border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all text-xs tracking-wider"
+                      className="relative h-11 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-semibold rounded-[16px] shadow-xs border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all text-xs tracking-wider"
                     >
+                      <HapticOverlay radius="16px" />
                       {lunchInMutation.isPending ? (
                         <RefreshCw className="h-4 w-4 animate-spin" />
                       ) : (
@@ -1244,8 +1534,9 @@ function UserDashboard() {
                   <Button
                     onClick={() => lunchOutMutation.mutate()}
                     disabled={lunchOutMutation.isPending}
-                    className="w-full h-11 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-xs tracking-wider"
+                    className="relative w-full h-11 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-xs tracking-wider"
                   >
+                    <HapticOverlay radius="16px" />
                     {lunchOutMutation.isPending ? (
                       <RefreshCw className="h-4.5 w-4.5 animate-spin" />
                     ) : (
@@ -1259,8 +1550,9 @@ function UserDashboard() {
                   // Lunch completed: Only Punch Out button is available
                   <Button
                     onClick={() => beginPunch("punch-out")}
-                    className="w-full h-11 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-700 hover:to-red-600 text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-xs tracking-wider group"
+                    className="relative w-full h-11 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-700 hover:to-red-600 text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-xs tracking-wider group"
                   >
+                    <HapticOverlay radius="16px" />
                     <Fingerprint className="h-4.5 w-4.5 text-white group-hover:scale-110 transition-transform duration-300" />
                     <span>Punch Out</span>
                   </Button>
@@ -1315,23 +1607,48 @@ function UserDashboard() {
                   </span>
                 </div>
 
-                {profile?.allowMultiplePunches && (
+                {profile?.allowMultiplePunches && sessionsLeft <= 0 ? (
+                  // A greyed-out button explains nothing. The employee's actual
+                  // question is "why can I not punch in again", and only an
+                  // admin can resolve it, so say that instead of leaving a dead
+                  // control on screen.
+                  <div className="p-4 rounded-[18px] bg-amber-500/10 border border-amber-500/20 text-center space-y-1">
+                    <p className="text-[11px] font-bold text-amber-700 dark:text-amber-400">
+                      Daily limit of {maxSessions} sessions reached
+                    </p>
+                    <p className="text-[10px] leading-relaxed text-amber-700/80 dark:text-amber-400/80">
+                      Today's hours are still recorded in full. Ask your admin if you need another session.
+                    </p>
+                  </div>
+                ) : profile?.allowMultiplePunches && shiftIsOver ? (
+                  // Day already closed and the shift is over: no further
+                  // session can be opened, so say so rather than offering a
+                  // button the server will refuse.
+                  <div className="p-4 rounded-[18px] bg-slate-500/10 border border-slate-500/20 text-center space-y-1">
+                    <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                      Shift ended at {formatShiftTime(profile?.shiftId?.endTime)}
+                    </p>
+                    <p className="text-[10px] leading-relaxed text-slate-600/80 dark:text-slate-400/80">
+                      Today's hours are recorded in full. Ask your admin if you need another session.
+                    </p>
+                  </div>
+                ) : profile?.allowMultiplePunches ? (
                   <Button
-                    onClick={() => {
-                      if (!location) {
-                        refreshLocation();
-                      }
-                      setShowLocationVerification(true);
-                    }}
+                    onClick={() => setConfirmNewSession(true)}
                     className="w-full h-11 bg-gradient-to-r from-[#501537] to-[#7B2453] hover:from-[#6B1C4B] hover:to-[#912D64] text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-xs tracking-wider relative overflow-hidden group"
                   >
                     <Fingerprint className="h-4.5 w-4.5 text-white group-hover:scale-110 transition-transform duration-300" />
                     <span>Punch In For Next Shift</span>
                   </Button>
-                )}
+                ) : null}
               </div>
             )}
           </div>
+
+          {/* Every punch today, in order, with how far from the branch each one
+              was taken. The distance is what makes a disputed punch checkable
+              instead of a matter of recollection. */}
+          <TodayActivity sessions={todaySessions} branchName={profile?.branchId?.name} />
 
         </div>
 
@@ -1735,7 +2052,7 @@ function UserDashboard() {
                                 className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest text-white/70 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-full px-2.5 py-1 transition-colors"
                               >
                                 <ListChecks className="h-3 w-3" />
-                                Lens Info
+                                Session details
                                 <ChevronDown className={`h-3 w-3 transition-transform ${showSessionDetails ? "rotate-180" : ""}`} />
                               </button>
                             )}
@@ -2100,11 +2417,21 @@ function UserDashboard() {
                 ) : null}
 
                 {location ? (
-                  <UserLocationMap
-                    lat={location.lat}
-                    lng={location.lng}
-                    initials={initials}
-                  />
+                  <Suspense
+                    fallback={
+                      <div className="flex h-full w-full items-center justify-center bg-slate-100 dark:bg-white/5">
+                        <span className="text-[9.5px] font-semibold uppercase tracking-widest text-slate-400">
+                          Loading map…
+                        </span>
+                      </div>
+                    }
+                  >
+                    <UserLocationMap
+                      lat={location.lat}
+                      lng={location.lng}
+                      initials={initials}
+                    />
+                  </Suspense>
                 ) : (
                   <div className="flex flex-col items-center justify-center text-center p-4 text-slate-400 gap-2">
                     <MapPin className="h-8 w-8 text-rose-500 animate-bounce" />
@@ -2153,6 +2480,41 @@ function UserDashboard() {
                 )}
               </div>
 
+              {/* Work From Home.
+                  Hidden unless the server says this employee may use it
+                  (profile.canWorkFromHome, resolved with the same rule that
+                  accepts the punch), and hidden for branch-less employees who
+                  are already remote on every punch — for them it would be a
+                  control that changes nothing. */}
+              {profile?.canWorkFromHome && profile?.branchId && (
+                <div
+                  className={`w-full rounded-xl border p-3 text-left transition-colors ${
+                    wfhForThisPunch
+                      ? "border-indigo-400/50 bg-indigo-500/10"
+                      : "border-slate-200 dark:border-white/5 bg-slate-50 dark:bg-slate-950/40"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2">
+                      <Home className={`h-3.5 w-3.5 ${wfhForThisPunch ? "text-indigo-500" : "text-slate-400"}`} />
+                      <span className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                        Working from home today
+                      </span>
+                    </div>
+                    <Switch
+                      checked={wfhForThisPunch}
+                      onCheckedChange={setWfhForThisPunch}
+                      aria-label="Mark this punch as Work From Home"
+                    />
+                  </div>
+                  <p className="mt-1.5 text-[9.5px] leading-relaxed text-slate-500 dark:text-slate-400">
+                    {wfhForThisPunch
+                      ? "Office distance is not checked and you will not be punched out automatically for leaving the area. Your location is still recorded on the punch."
+                      : "Turn on if you are not coming to the office. Skips the branch distance check and auto punch-out for today."}
+                  </p>
+                </div>
+              )}
+
               {/* Action buttons */}
               <div className="w-full flex gap-3 mt-2">
                 <button
@@ -2165,7 +2527,10 @@ function UserDashboard() {
                 </button>
                 <Button
                   onClick={() => {
-                    if (profile?.branchId && !location) {
+                    // A WFH punch is never measured against a branch, so a
+                    // missing fix is not a blocker — sending them to the
+                    // location-help screen would be a dead end.
+                    if (profile?.branchId && !location && !wfhForThisPunch) {
                       setShowLocationHelp(true);
                       return;
                     }
@@ -2175,6 +2540,59 @@ function UserDashboard() {
                   className="flex-1 h-9 bg-gradient-to-r from-[#501537] to-[#7B2453] hover:from-[#6B1C4B] hover:to-[#912D64] text-white font-semibold rounded-xl shadow-xs border-none flex items-center justify-center cursor-pointer transition-all text-xs"
                 >
                   Confirm & Proceed
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Start-another-session confirmation. Deliberately plain: the employee
+          needs to know this opens a NEW stretch rather than editing the one
+          they just closed, and that they should be at work before they tap. */}
+      <AnimatePresence>
+        {confirmNewSession && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.93, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.93, y: 15 }}
+              className="bg-white dark:bg-slate-900 rounded-[28px] overflow-hidden max-w-sm w-full shadow-2xl border border-slate-100 dark:border-white/5 p-5 flex flex-col gap-4"
+            >
+              <div className="w-full text-center">
+                <div className="mx-auto mb-2 h-12 w-12 rounded-2xl bg-[#501537]/10 flex items-center justify-center">
+                  <Fingerprint className="h-6 w-6 text-[#8C2059]" />
+                </div>
+                <h4 className="text-sm font-semibold text-slate-800 dark:text-white">
+                  Start session {todaySessions.length + 1} of {maxSessions}?
+                </h4>
+                <p className="text-[10.5px] text-slate-500 mt-1.5 leading-relaxed">
+                  This opens a new punch-in for today; it does not change the
+                  {" "}{todaySessions.length === 1 ? "one" : todaySessions.length} you have already recorded.
+                  <span className="block mt-1 font-semibold text-slate-600 dark:text-slate-300">
+                    Make sure you are at your workplace.
+                  </span>
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                <Button
+                  onClick={() => {
+                    setConfirmNewSession(false);
+                    if (!location) refreshLocation();
+                    setShowLocationVerification(true);
+                  }}
+                  className="w-full h-11 bg-gradient-to-r from-[#501537] to-[#7B2453] hover:from-[#6B1C4B] hover:to-[#912D64] text-white font-semibold rounded-[16px] border-none text-xs tracking-wider flex items-center justify-center gap-2"
+                >
+                  <Fingerprint className="h-4 w-4" />
+                  Yes, punch in
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => setConfirmNewSession(false)}
+                  className="w-full h-10 rounded-[16px] text-xs font-semibold text-slate-500"
+                >
+                  Cancel
                 </Button>
               </div>
             </motion.div>

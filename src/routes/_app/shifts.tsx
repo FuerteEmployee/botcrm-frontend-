@@ -21,12 +21,151 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { DataTable, DataTableCell, DataTableRow } from "@/components/shared/data-table";
-import { useShiftService, type Shift as BackendShift } from "@/services/shift-service";
+import { useShiftService, type Shift as BackendShift, type ShiftLunch, type LunchMode } from "@/services/shift-service";
 import { useEmployeeService } from "@/services/employee-service";
 import { ViewToggle } from "@/components/shared/view-toggle";
 import { GridCard } from "@/components/shared/grid-card";
 import { FormInput } from "@/components/shared/form-input";
 import { FormSelect } from "@/components/shared/form-select";
+import { SettingsGuide, settingsGuideLines } from "@/components/settings/settings-guide";
+
+/**
+ * The five answers to "how much of this shift is unpaid break".
+ *
+ * `inherit` is first and is the default, so an existing shift that nobody
+ * touches keeps the behaviour it already had.
+ */
+const SECTION_LABEL = "text-[11px] font-black text-muted-foreground uppercase tracking-wider block";
+
+/** "9h 0m" / "45m" */
+function fmtMins(total: number): string {
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  if (h && m) return `${h}h ${m}m`;
+  if (h) return `${h}h`;
+  return `${m}m`;
+}
+
+const toMins = (hhmm: string): number => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || "");
+  return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
+};
+
+/**
+ * Plain-English account of what the configured shift will do.
+ *
+ * Presentation only: it restates the fields on screen, it never decides
+ * anything. The authority stays with the server (`resolveLunchPolicy` and
+ * `requiredWorkMs` in utils/shift_status.js) -- this exists so a
+ * misconfiguration is visible while the admin is still looking at it, rather
+ * than a month later on a payslip.
+ */
+function shiftSummary(f: {
+  startTime: string; endTime: string; is24Hours: boolean; workDays: string[];
+  halfDayLatePunchInMin: number; halfDayEarlyPunchOutMin: number;
+  lunch: { mode: LunchMode; startTime?: string | null; endTime?: string | null; durationMins?: number | null; minMins?: number | null; maxMins?: number | null };
+}): { text: string; tone: string }[] {
+  const start = toMins(f.startTime);
+  const end = toMins(f.endTime);
+  const span = end <= start ? end + 1440 - start : end - start;
+  const lines: { text: string; tone: string }[] = [];
+
+  lines.push({
+    tone: "bg-primary",
+    text: f.is24Hours
+      ? `Runs the full day, ${fmtMins(span)}, on ${f.workDays.length} day${f.workDays.length === 1 ? "" : "s"} a week.`
+      : `${to12hLabel(f.startTime)} to ${to12hLabel(f.endTime)} — ${fmtMins(span)} on `
+        + `${f.workDays.length} day${f.workDays.length === 1 ? "" : "s"} a week`
+        + `${end <= start ? ", crossing midnight" : ""}.`,
+  });
+
+  const L = f.lunch;
+  let lunchMins = 0;
+  if (L.mode === "inherit") {
+    lines.push({ tone: "bg-muted-foreground/50", text: "Lunch follows the company default in Settings > Attendance, which deducts the configured minimum from everyone." });
+  } else if (L.mode === "none") {
+    lines.push({ tone: "bg-success", text: "No lunch is deducted. Credited hours equal the time between punches." });
+  } else if (L.mode === "fixed_window") {
+    const w = Math.max(0, toMins(L.endTime || "") - toMins(L.startTime || ""));
+    lunchMins = w;
+    lines.push({ tone: "bg-warning", text: `Lunch ${to12hLabel(L.startTime || "")} to ${to12hLabel(L.endTime || "")} (${fmtMins(w)}). Only the part actually worked through is deducted — someone not at work then loses nothing.` });
+  } else if (L.mode === "fixed_duration") {
+    lunchMins = Number(L.durationMins) || 0;
+    lines.push({ tone: "bg-warning", text: `${fmtMins(lunchMins)} is deducted every working day, whether or not a break is punched.` });
+  } else {
+    const parts = [
+      L.minMins != null ? `counted as at least ${fmtMins(Number(L.minMins))}` : null,
+      L.maxMins != null ? `never more than ${fmtMins(Number(L.maxMins))}` : null,
+    ].filter(Boolean).join(", ");
+    lines.push({ tone: "bg-success", text: `Only a break that was actually punched is deducted${parts ? ` — ${parts}` : ""}. Nothing is docked if no lunch is punched.` });
+  }
+
+  // The Full Day bar, stated as a sum the admin can check against a payslip.
+  // Mirrors requiredWorkMs() in the backend: span - lunch - grace in - grace out.
+  // Shown with the grace values worked in, because a bar quoted "before grace"
+  // is not the number anyone is actually measured against.
+  const graceIn = Math.max(0, Number(f.halfDayLatePunchInMin) || 0);
+  const graceOut = Math.max(0, Number(f.halfDayEarlyPunchOutMin) || 0);
+  const hasOwnGrace = graceIn > 0 || graceOut > 0;
+
+  if (L.mode !== "inherit" || hasOwnGrace) {
+    const known = L.mode !== "inherit";
+    const bar = Math.max(0, span - lunchMins - graceIn - graceOut);
+    const sum = [
+      `${fmtMins(span)} shift`,
+      known ? `${fmtMins(lunchMins)} lunch` : null,
+      graceIn > 0 ? `${fmtMins(graceIn)} late grace` : null,
+      graceOut > 0 ? `${fmtMins(graceOut)} early grace` : null,
+    ].filter(Boolean).join(" − ");
+
+    lines.push({
+      tone: "bg-primary",
+      text: known
+        ? `A Full Day needs ${fmtMins(bar)} of credited work (${sum}). Anything less is a Half Day.`
+        : `A Full Day is ${sum}, minus whatever lunch the company default deducts.`,
+    });
+  }
+
+  if (hasOwnGrace) {
+    const bits = [
+      graceIn > 0 ? `up to ${fmtMins(graceIn)} late` : null,
+      graceOut > 0 ? `up to ${fmtMins(graceOut)} early` : null,
+    ].filter(Boolean).join(", and leaving ");
+    lines.push({ tone: "bg-success", text: `Arriving ${bits}, costs nothing on its own — only the hours decide.` });
+  } else {
+    lines.push({ tone: "bg-muted-foreground/50", text: "No shift-specific grace; the company values in Settings > Attendance apply, and the day is graded on hours worked." });
+  }
+
+  return lines;
+}
+
+/** "09:30" -> "9:30 AM" */
+function to12hLabel(hhmm: string): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm || "");
+  if (!m) return hhmm || "—";
+  const h = Number(m[1]);
+  const period = h >= 12 ? "PM" : "AM";
+  return `${h % 12 || 12}:${m[2]} ${period}`;
+}
+
+const LUNCH_MODES = [
+  { label: "Use company default", value: "inherit" },
+  { label: "No lunch deduction", value: "none" },
+  { label: "Fixed window (e.g. 1pm - 2pm)", value: "fixed_window" },
+  { label: "Fixed length (e.g. 1 hour)", value: "fixed_duration" },
+  { label: "Calculate from punches", value: "from_punches" },
+];
+
+const LUNCH_HELP: Record<string, string> = {
+  inherit:
+    "Follows Settings > Attendance > minimum lunch. That rule deducts the configured minimum from everyone, whether or not a break was punched.",
+  none: "Nothing is ever deducted. Worked hours equal the time between punches.",
+  fixed_window:
+    "Only the part of this window the employee actually worked through is deducted. Someone who was not at work then loses nothing.",
+  fixed_duration: "This exact length is deducted every working day, punched or not.",
+  from_punches:
+    "Deducts exactly the break that was punched, and nothing at all if none was. Use this when employees reliably punch their lunch.",
+};
 import { toast } from "sonner";
 import { cn, formatTime12h } from "@/lib/utils";
 import { ActionButton } from "@/components/shared/action-button";
@@ -128,7 +267,7 @@ function ShiftsPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<BackendShift | null>(null);
   const [globalWorkDays, setGlobalWorkDays] = useState<string[]>(["M", "T", "W", "Th", "F", "Sa"]);
-  const [form, setForm] = useState({ name: "", startTime: "09:00", endTime: "18:00", workDays: ["M", "T", "W", "Th", "F", "Sa"], is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0 });
+  const [form, setForm] = useState({ name: "", startTime: "09:00", endTime: "18:00", workDays: ["M", "T", "W", "Th", "F", "Sa"], is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, lunch: { mode: "inherit" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
@@ -219,14 +358,29 @@ function ShiftsPage() {
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ name: "", startTime: "09:00", endTime: "18:00", workDays: globalWorkDays, is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0 });
+    setForm({ name: "", startTime: "09:00", endTime: "18:00", workDays: globalWorkDays, is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, lunch: { mode: "inherit" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
     setOpen(true);
   };
 
   const openEdit = (s: BackendShift) => {
     setEditing(s);
     const is24 = s.startTime === "00:00" && s.endTime === "23:59";
-    setForm({ name: s.name, startTime: s.startTime, endTime: s.endTime, workDays: s.workDays || globalWorkDays, is24Hours: is24, halfDayLatePunchInMin: s.halfDayLatePunchInMin || 0, halfDayEarlyPunchOutMin: s.halfDayEarlyPunchOutMin || 0 });
+    setForm({
+      name: s.name, startTime: s.startTime, endTime: s.endTime,
+      workDays: s.workDays || globalWorkDays, is24Hours: is24,
+      halfDayLatePunchInMin: s.halfDayLatePunchInMin || 0,
+      halfDayEarlyPunchOutMin: s.halfDayEarlyPunchOutMin || 0,
+      lunch: {
+        mode: (s.lunch?.mode || "inherit") as LunchMode,
+        // Defaults for the inputs the SAVED mode does not use, so switching
+        // mode inside the dialog never presents an empty required field.
+        startTime: s.lunch?.startTime || "13:00",
+        endTime: s.lunch?.endTime || "14:00",
+        durationMins: s.lunch?.durationMins ?? 60,
+        minMins: s.lunch?.minMins ?? 30,
+        maxMins: s.lunch?.maxMins ?? 90,
+      },
+    });
     setOpen(true);
   };
 
@@ -239,15 +393,52 @@ function ShiftsPage() {
     }));
   };
 
+  /**
+   * Only the fields the chosen mode actually uses.
+   *
+   * Sending a duration alongside `fixed_window` stores a contradiction that
+   * reads fine today and surprises whoever changes the mode next month.
+   */
+  const lunchPayload = (): ShiftLunch => {
+    const L = form.lunch;
+    if (L.mode === "fixed_window") return { mode: L.mode, startTime: L.startTime, endTime: L.endTime };
+    if (L.mode === "fixed_duration") return { mode: L.mode, durationMins: Number(L.durationMins) || 0 };
+    if (L.mode === "from_punches") {
+      return {
+        mode: L.mode,
+        minMins: L.minMins === null || L.minMins === undefined ? null : Number(L.minMins),
+        maxMins: L.maxMins === null || L.maxMins === undefined ? null : Number(L.maxMins),
+      };
+    }
+    return { mode: L.mode };
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name.trim()) { toast.error("Shift name required"); return; }
-    
+
+    const L = form.lunch;
+    if (L.mode === "fixed_window" && (!L.startTime || !L.endTime)) {
+      toast.error("Set both a lunch start and end time"); return;
+    }
+    if (L.mode === "fixed_window" && L.startTime === L.endTime) {
+      toast.error("Lunch start and end cannot be the same time"); return;
+    }
+    if (L.mode === "fixed_duration" && !(Number(L.durationMins) > 0)) {
+      toast.error("Lunch duration must be more than 0 minutes"); return;
+    }
+    if (L.mode === "from_punches" && L.minMins != null && L.maxMins != null
+        && Number(L.maxMins) < Number(L.minMins)) {
+      toast.error("Maximum lunch cannot be less than the minimum"); return;
+    }
+
+    const payload = { ...form, lunch: lunchPayload() };
+
     try {
       if (editing) {
-        await updateShift({ id: editing._id, ...form });
+        await updateShift({ id: editing._id, ...payload });
       } else {
-        await createShift(form);
+        await createShift(payload);
       }
       setOpen(false);
     } catch (err) {
@@ -410,12 +601,12 @@ function ShiftsPage() {
                         </Badge>
                         {s.halfDayLatePunchInMin ? (
                           <Badge variant="secondary" className="text-[10px] font-medium px-2 py-0.5 bg-amber-500/10 text-amber-700 border-none">
-                            HD Late: {s.halfDayLatePunchInMin}m
+                            Late grace: {s.halfDayLatePunchInMin}m
                           </Badge>
                         ) : null}
                         {s.halfDayEarlyPunchOutMin ? (
                           <Badge variant="secondary" className="text-[10px] font-medium px-2 py-0.5 bg-orange-500/10 text-orange-700 border-none">
-                            HD Early: {s.halfDayEarlyPunchOutMin}m
+                            Early grace: {s.halfDayEarlyPunchOutMin}m
                           </Badge>
                         ) : null}
                       </div>
@@ -453,8 +644,8 @@ function ShiftsPage() {
                       {(s.halfDayLatePunchInMin || s.halfDayEarlyPunchOutMin) ? (
                         <div className="text-[10px] text-muted-foreground/60 pl-5">
                           HD: {[
-                            s.halfDayLatePunchInMin ? `Late > ${s.halfDayLatePunchInMin}m` : null,
-                            s.halfDayEarlyPunchOutMin ? `Early > ${s.halfDayEarlyPunchOutMin}m` : null
+                            s.halfDayLatePunchInMin ? `late grace ${s.halfDayLatePunchInMin}m` : null,
+                            s.halfDayEarlyPunchOutMin ? `early grace ${s.halfDayEarlyPunchOutMin}m` : null
                           ].filter(Boolean).join(" / ")}
                         </div>
                       ) : null}
@@ -510,17 +701,50 @@ function ShiftsPage() {
         </div>
       )}
 
+      {/* Same closing guide the Settings tabs carry, so "what is this for and
+          what is the default" is answered in the same place and the same
+          words everywhere. */}
+      <SettingsGuide
+        title="About shifts"
+        lines={settingsGuideLines("shifts", {
+          shiftCount: list.length,
+          branchCount: 0,
+          workDayCount: globalWorkDays.length,
+          requireLocation: false,
+          remotePunch: false,
+          payrollEnabled: false,
+          dailyRateBasis: "fixed30",
+          sandwichRuleEnabled: false,
+          roundingMode: "nearest",
+          roundingPrecision: 0,
+          templateCount: 0,
+          notifEmail: false,
+          notifPush: false,
+          notifWeekly: false,
+        })}
+      />
+
       {/* Create/Edit Shift Dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md rounded-xl">
-          <DialogHeader>
-            <div className="h-10 w-10 rounded-xl bg-linear-to-br from-primary/15 to-primary/5 text-primary grid place-items-center mb-2">
-              <Clock className="h-5 w-5" />
+        {/* Capped at 90vh with only the BODY scrolling, so the footer stays
+            reachable. The dialog previously grew with its content and pushed
+            Save off-screen once the lunch section opened. */}
+        <DialogContent className="sm:max-w-lg rounded-xl max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
+          <DialogHeader className="px-5 pt-5 pb-3 border-b border-border/40 space-y-0">
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 shrink-0 rounded-xl bg-linear-to-br from-primary/15 to-primary/5 text-primary grid place-items-center">
+                <Clock className="h-4 w-4" />
+              </div>
+              <div className="min-w-0">
+                <DialogTitle className="text-[15px] leading-tight">{editing ? "Edit Shift" : "New Shift"}</DialogTitle>
+                <DialogDescription className="text-[12px] leading-tight">
+                  Timings, working days, lunch and half-day rules.
+                </DialogDescription>
+              </div>
             </div>
-            <DialogTitle className="text-[16px]">{editing ? "Edit Shift" : "New Shift"}</DialogTitle>
-            <DialogDescription className="text-[13px]">Set the shift name and working hours.</DialogDescription>
           </DialogHeader>
-          <form onSubmit={submit} className="space-y-4 mt-2">
+          <form onSubmit={submit} className="flex flex-col min-h-0 flex-1">
+            <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3.5">
             <FormInput
               label="Shift Name"
               placeholder="e.g. Morning"
@@ -530,15 +754,17 @@ function ShiftsPage() {
               className="h-10"
               containerClassName="space-y-1"
             />
-            {/* 24 Hours Toggle */}
+
+            {/* 24h is a one-line switch rather than a card: it is a rare choice
+                and was taking as much height as the times it replaces. */}
             <div className={cn(
-              "flex items-center justify-between px-4 py-3 rounded-xl border transition-all",
+              "flex items-center justify-between gap-3 px-3 py-2 rounded-xl border transition-all",
               form.is24Hours ? "bg-primary/5 border-primary/40" : "bg-muted/20 border-border/40"
             )}>
-              <div className="space-y-0.5">
-                <p className="text-[13px] font-bold text-foreground">24 Hours Shift</p>
-                <p className="text-[11px] text-muted-foreground">Full day — 12:00 AM to 11:59 PM</p>
-              </div>
+              <p className="text-[12px] font-bold text-foreground">
+                24 Hours Shift
+                <span className="ml-1.5 font-normal text-muted-foreground">12:00 AM – 11:59 PM</span>
+              </p>
               <Switch
                 checked={form.is24Hours}
                 onCheckedChange={(v) => setForm(prev => ({
@@ -607,9 +833,9 @@ function ShiftsPage() {
             )}
 
             {/* Working Days */}
-            <div className="space-y-2">
-              <label className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider block">Working Days</label>
-              <div className="flex gap-2 flex-wrap">
+            <div className="space-y-1.5">
+              <label className={SECTION_LABEL}>Working Days</label>
+              <div className="flex gap-1.5 flex-wrap">
                 {ALL_DAYS.map((day) => {
                   const active = form.workDays.includes(day);
                   return (
@@ -631,13 +857,119 @@ function ShiftsPage() {
                 })}
               </div>
               <p className="text-[10px] text-muted-foreground">
-                Highlighted = work day. Non-highlighted = holiday. Pre-filled from global settings.
+                Highlighted = work day.
               </p>
+              <div className="rounded-lg border border-border/50 bg-muted/30 px-2.5 py-2 space-y-1">
+                <p className="text-[10px] font-bold text-foreground/70">Which setting actually wins</p>
+                <p className="text-[10px] text-muted-foreground leading-relaxed">
+                  An employee's own <b>Weekly Holidays</b> (on their profile) replaces this list
+                  entirely &mdash; not merged, replaced. Set them and this shift's days are ignored
+                  for that person. This list in turn overrides <b>Settings &rsaquo; Attendance &rsaquo;
+                  Active Work Days</b>.
+                </p>
+              </div>
+            </div>
+
+            {/* Lunch / unpaid break */}
+            <div className="space-y-2 border-t border-border/40 pt-3">
+              <label className={SECTION_LABEL}>Lunch Break</label>
+
+              <FormSelect
+                label=""
+                value={form.lunch.mode}
+                onValueChange={(v) => setForm({ ...form, lunch: { ...form.lunch, mode: v as LunchMode } })}
+                options={LUNCH_MODES}
+                containerClassName="space-y-1"
+                className="h-10"
+              />
+
+              <p className="text-[10px] text-muted-foreground leading-relaxed">
+                {LUNCH_HELP[form.lunch.mode]}
+              </p>
+
+              {form.lunch.mode === "fixed_window" && (
+                <div className="grid grid-cols-2 gap-3">
+                  <FormInput
+                    label="Lunch starts"
+                    type="time"
+                    value={form.lunch.startTime || ""}
+                    onChange={(e) => setForm({ ...form, lunch: { ...form.lunch, startTime: e.target.value } })}
+                    className="h-10"
+                    containerClassName="space-y-1"
+                  />
+                  <FormInput
+                    label="Lunch ends"
+                    type="time"
+                    value={form.lunch.endTime || ""}
+                    onChange={(e) => setForm({ ...form, lunch: { ...form.lunch, endTime: e.target.value } })}
+                    className="h-10"
+                    containerClassName="space-y-1"
+                  />
+                </div>
+              )}
+
+              {form.lunch.mode === "fixed_duration" && (
+                <div className="space-y-2">
+                  <div className="flex gap-2 flex-wrap">
+                    {[30, 45, 60, 90, 120].map((m) => (
+                      <button
+                        key={m}
+                        type="button"
+                        onClick={() => setForm({ ...form, lunch: { ...form.lunch, durationMins: m } })}
+                        className={cn(
+                          "h-9 px-3 rounded-xl text-[12px] font-bold transition-all border",
+                          Number(form.lunch.durationMins) === m
+                            ? "bg-primary text-white border-primary shadow-sm"
+                            : "bg-white text-muted-foreground border-border/50 hover:border-primary/40",
+                        )}
+                      >
+                        {m >= 60 && m % 60 === 0 ? `${m / 60} hour${m > 60 ? "s" : ""}` : `${m} min`}
+                      </button>
+                    ))}
+                  </div>
+                  <FormInput
+                    label="Or an exact number of minutes"
+                    type="number"
+                    value={form.lunch.durationMins ?? ""}
+                    onChange={(e) => setForm({ ...form, lunch: { ...form.lunch, durationMins: e.target.value ? Number(e.target.value) : 0 } })}
+                    className="h-10"
+                    containerClassName="space-y-1"
+                    min={0}
+                  />
+                </div>
+              )}
+
+              {form.lunch.mode === "from_punches" && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormInput
+                      label="Count at least (mins)"
+                      type="number"
+                      placeholder="e.g. 30"
+                      value={form.lunch.minMins ?? ""}
+                      onChange={(e) => setForm({ ...form, lunch: { ...form.lunch, minMins: e.target.value ? Number(e.target.value) : null } })}
+                      className="h-10"
+                      containerClassName="space-y-1"
+                      min={0}
+                    />
+                    <FormInput
+                      label="Never more than (mins)"
+                      type="number"
+                      placeholder="e.g. 90"
+                      value={form.lunch.maxMins ?? ""}
+                      onChange={(e) => setForm({ ...form, lunch: { ...form.lunch, maxMins: e.target.value ? Number(e.target.value) : null } })}
+                      className="h-10"
+                      containerClassName="space-y-1"
+                      min={0}
+                    />
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Half Day Settings */}
-            <div className="space-y-2.5 border-t border-border/40 pt-3">
-              <label className="text-[12px] font-bold text-muted-foreground uppercase tracking-wider block">Half Day Rules</label>
+            <div className="space-y-2 border-t border-border/40 pt-3">
+              <label className={SECTION_LABEL}>Half Day Rules</label>
               <div className="grid grid-cols-2 gap-3">
                 <FormInput
                   label="Late Punch In (mins)"
@@ -661,11 +993,41 @@ function ShiftsPage() {
                 />
               </div>
               <p className="text-[10px] text-muted-foreground">
-                Set limit in minutes. Punching in after or punching out before this duration will automatically mark attendance as "Half Day".
+                How much lateness and how early a finish this shift absorbs. Both are
+                subtracted from the hours needed for a Full Day. Leave both at 0 to use the
+                company grace values instead.
               </p>
+              {(form.halfDayLatePunchInMin > 0 || form.halfDayEarlyPunchOutMin > 0) && (
+                <div className="rounded-lg border border-warning/40 bg-warning/10 px-2.5 py-2 space-y-1">
+                  <p className="text-[10px] font-black uppercase tracking-wide text-warning-foreground">
+                    This switches the company half-day rules off
+                  </p>
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">
+                    Setting either box means <b>Settings &rsaquo; Attendance &rsaquo; Half Day Rules</b>
+                    &mdash; the late cut-off time, the minimum hours, and the method &mdash; stop
+                    applying to everyone on this shift. The day is judged on HOURS instead:
+                    shift length, minus lunch, minus both grace values above. Arriving late is
+                    not itself a half day &mdash; falling short of those hours is.
+                  </p>
+                </div>
+              )}
             </div>
 
-            <DialogFooter className="gap-2 pt-2 border-t border-border/40 mt-2">
+            {/* What this shift will actually DO, in the admin's own terms.
+                Every line is derived from the fields above, so a mistake shows
+                here before it shows on somebody's payslip. */}
+            <div className="rounded-xl border border-border/50 bg-muted/20 p-3 space-y-1.5">
+              <p className={SECTION_LABEL}>Rule Preview</p>
+              {shiftSummary(form).map((line, i) => (
+                <div key={i} className="flex items-start gap-2 text-[11px] leading-relaxed">
+                  <span className={cn("mt-1.5 h-1.5 w-1.5 rounded-full shrink-0", line.tone)} />
+                  <span className="text-foreground/80">{line.text}</span>
+                </div>
+              ))}
+            </div>
+            </div>
+
+            <DialogFooter className="gap-2 px-5 py-3 border-t border-border/40 bg-muted/10 shrink-0">
               <Button type="button" size="sm" variant="outline" onClick={() => setOpen(false)} className="rounded-lg" disabled={isCreating || isUpdating}>Cancel</Button>
               <Button type="submit" size="sm" className="bg-gradient-primary text-primary-foreground rounded-lg px-5 shadow-md hover:opacity-90" disabled={isCreating || isUpdating}>
                 {isCreating || isUpdating ? (

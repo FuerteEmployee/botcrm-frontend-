@@ -82,6 +82,8 @@ interface AttendanceSettings {
   lateGrace: number;
   earlyGrace: number;
   lunchGrace: number;
+  blockPunchInAfterShiftEnd: boolean;
+  punchInGraceAfterShiftEndMins: number;
   halfDayRules: {
     method: 'timeBased' | 'durationBased' | 'both';
     bothLogic: 'or' | 'and';
@@ -147,6 +149,8 @@ const DEFAULT_SETTINGS: AttendanceSettings = {
   lateGrace: 10,
   earlyGrace: 5,
   lunchGrace: 5,
+  blockPunchInAfterShiftEnd: true,
+  punchInGraceAfterShiftEndMins: 0,
   halfDayRules: {
     method: 'durationBased',
     bothLogic: 'or',
@@ -771,9 +775,9 @@ function AttendanceConfigPage() {
               </CardHeader>
               <CardContent className="p-0">
                 <div className="divide-y divide-border/30">
-                  <ConfigRow 
-                    label="Late Arrival Grace" 
-                    hint="Tolerance window after shift start"
+                  <ConfigRow
+                    label="Late Arrival Grace"
+                    hint="Tolerance after shift start. Widens the Full Day bar — a shift with its own Late Punch In value overrides this."
                     control={
                       <div className="w-[200px] flex items-center gap-4">
                         <Slider value={[settings.lateGrace]} max={60} onValueChange={([v]) => setSettings({...settings, lateGrace: v})} />
@@ -781,6 +785,38 @@ function AttendanceConfigPage() {
                       </div>
                     }
                   />
+                  <ConfigRow
+                    label="Early Departure Grace"
+                    hint="Tolerance before shift end. Subtracted from the Full Day bar alongside the arrival grace, so leaving a few minutes early costs nothing."
+                    control={
+                      <div className="w-[200px] flex items-center gap-4">
+                        <Slider value={[settings.earlyGrace]} max={60} onValueChange={([v]) => setSettings({...settings, earlyGrace: v})} />
+                        <span className="text-[13px] font-bold w-10 text-right">{settings.earlyGrace}m</span>
+                      </div>
+                    }
+                  />
+                  <ConfigRow
+                    label="Close Punch-In After Shift End"
+                    hint="Refuse a new punch-in once the shift is over. Punching OUT is never blocked. Turn off for 24/7 operations."
+                    control={
+                      <Switch
+                        checked={settings.blockPunchInAfterShiftEnd}
+                        onCheckedChange={(v) => setSettings({...settings, blockPunchInAfterShiftEnd: v})}
+                      />
+                    }
+                  />
+                  {settings.blockPunchInAfterShiftEnd && (
+                    <ConfigRow
+                      label="Late Punch-In Window"
+                      hint="Minutes past shift end during which a punch-in is still accepted."
+                      control={
+                        <div className="w-[200px] flex items-center gap-4">
+                          <Slider value={[settings.punchInGraceAfterShiftEndMins]} max={120} step={5} onValueChange={([v]) => setSettings({...settings, punchInGraceAfterShiftEndMins: v})} />
+                          <span className="text-[13px] font-bold w-10 text-right">{settings.punchInGraceAfterShiftEndMins}m</span>
+                        </div>
+                      }
+                    />
+                  )}
                   <ConfigRow 
                     label="Overtime Threshold" 
                     hint="Hours after which OT rate applies"

@@ -8,6 +8,10 @@ export interface Department {
   colorCode: string;
   employees?: number;
   createdAt: string;
+  /** Do employees in this department send background location while on duty? */
+  trackingEnabled?: boolean;
+  /** May the geofence engine actually close a day for this department? */
+  autoPunchOutEnabled?: boolean;
 }
 
 export function useDepartmentService() {

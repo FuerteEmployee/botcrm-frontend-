@@ -38,6 +38,24 @@ apiClient.interceptors.request.use(
     if (session?.token) {
       config.headers.Authorization = `Bearer ${session.token}`;
     }
+
+    // A FormData body has to set its own Content-Type.
+    //
+    // Only the browser knows the multipart boundary it generated, and the
+    // instance-level "application/json" above overrides the header axios would
+    // otherwise build for it. The server then receives a multipart body
+    // labelled as JSON, cannot find a boundary, and parses nothing — which
+    // surfaces at the far end as "no file was uploaded", with a file plainly
+    // attached in the UI. Dropping the header here lets the browser fill it in.
+    if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+      const headers = config.headers as unknown as {
+        delete?: (name: string) => void;
+        [key: string]: unknown;
+      };
+      if (typeof headers.delete === "function") headers.delete("Content-Type");
+      else delete headers["Content-Type"];
+    }
+
     return config;
   },
   (error) => {

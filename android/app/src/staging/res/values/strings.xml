@@ -1,0 +1,10 @@
+<?xml version='1.0' encoding='utf-8'?>
+<!-- Overrides for the staging variant only. A distinct app_name so the two
+     apps are tellable apart on the launcher, and a distinct custom_url_scheme
+     so the two installs do not both claim the same deep-link scheme. -->
+<resources>
+    <string name="app_name">BOT Staging</string>
+    <string name="title_activity_main">BOT Staging</string>
+    <string name="package_name">com.bot.admin.staging</string>
+    <string name="custom_url_scheme">com.bot.admin.staging</string>
+</resources>

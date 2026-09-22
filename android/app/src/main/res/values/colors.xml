@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      The status bar, tinted to match the app's own background so the screen
+      reads as one surface rather than "a grey system strip sitting on top of a
+      web page". Capacitor's default colorPrimaryDark is a neutral grey that
+      belongs to no app in particular, and that mismatch is one of the louder
+      tells that something is a WebView.
+
+      Matches the light background used by the employee and admin shells.
+    -->
+    <color name="statusBarBg">#FAF7F9</color>
+</resources>

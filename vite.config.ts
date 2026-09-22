@@ -15,6 +15,18 @@ export default defineConfig({
     TanStackRouterVite({
       routesDirectory: "./src/routes",
       generatedRouteTree: "./src/routeTree.gen.ts",
+      // Split every route's component into its own chunk, fetched when that
+      // route is first visited.
+      //
+      // Without this the generated route tree statically imports all 55 route
+      // modules, so everything landed in one 1.2 MB entry chunk: an employee
+      // whose whole job is tapping Punch In downloaded the admin panel, the
+      // super-admin console and every report screen first.
+      //
+      // Done with the plugin's own flag rather than by hand-writing 55
+      // `.lazy.tsx` files. Same result, and it cannot drift out of sync with
+      // the route definitions the way a hand-split tree does.
+      autoCodeSplitting: true,
     }),
     react(),
     tailwindcss(),
@@ -28,7 +40,36 @@ export default defineConfig({
       workbox: {
         // Increase max file size limit to 5 MB so precaching won't fail on large bundles
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,woff,woff2}"],
+        globPatterns: ["**/*.{css,html,ico,png,svg,woff,woff2}", "assets/index-*.js", "assets/vendor-react-*.js", "assets/vendor-tanstack-*.js"],
+        // Precache the SHELL, not the whole app.
+        //
+        // Every JS file used to be precached, so a first visit downloaded ~3.8
+        // MB before anything was usable — the Excel library, the map library
+        // and every admin screen included, for an employee who only punches in.
+        // It also silently defeated the dynamic import of xlsx: the code never
+        // executed, but the bytes were fetched anyway.
+        //
+        // Route chunks are content-hashed and immutable, so CacheFirst below
+        // keeps them permanently after their first use. The trade is that a
+        // route never visited before is unavailable offline — which costs
+        // nothing real, because every screen in this app renders from an API
+        // call that would fail offline regardless.
+        globIgnores: [
+          "**/node_modules/**",
+          "**/sw.js",
+          "**/workbox-*.js",
+          // 532 KB of decorative login background — larger than the app's own
+          // entry chunk. A returning user goes straight to their dashboard and
+          // never sees it, so precaching made every one of them pay for an
+          // image they will not look at. It still loads normally with the login
+          // route, and is cached by the asset rule below afterwards.
+          //
+          // It should also simply be smaller: re-exported as WebP at the size
+          // it is actually displayed, it would be well under 100 KB.
+          "assets/login-bg-*.png",
+          // A QA fixture that has no business in a production precache.
+          "__qa-super-session.html",
+        ],
         // Take over open pages immediately on a new deploy and purge stale
         // precaches — prevents an old service worker from serving a broken
         // cached bundle (e.g. one pointing at the wrong API URL).
@@ -36,6 +77,33 @@ export default defineConfig({
         clientsClaim: true,
         cleanupOutdatedCaches: true,
         runtimeCaching: [
+          {
+            // Route chunks and the heavy vendors, cached on first use.
+            //
+            // CacheFirst is correct here specifically because these filenames
+            // are content-hashed: a changed file is a different URL, so a
+            // cached entry can never be stale. A new deploy simply requests
+            // new names.
+            urlPattern: ({ url, request }) =>
+              url.origin === self.location.origin &&
+              url.pathname.startsWith("/assets/") &&
+              (request.destination === "script" ||
+                request.destination === "style" ||
+                request.destination === "image" ||
+                request.destination === "font"),
+            handler: "CacheFirst",
+            options: {
+              cacheName: "app-chunks",
+              expiration: {
+                // Comfortably more than one deploy's worth of chunks, so the
+                // previous build survives alongside the new one and a page
+                // open across a deploy can still fetch what it references.
+                maxEntries: 300,
+                maxAgeSeconds: 60 * 60 * 24 * 30,
+              },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
           {
             // Cache CARTO / OpenStreetMap map tiles with a network-first strategy
             urlPattern: /^https:\/\/(?:[a-z]\.)?basemaps\.cartocdn\.com\/.*/i,

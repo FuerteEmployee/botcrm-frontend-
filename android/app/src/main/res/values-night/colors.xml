@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The dark-mode shell background, so the tint follows the theme instead
+         of stranding a white strip above a dark app. -->
+    <color name="statusBarBg">#0D070B</color>
+</resources>

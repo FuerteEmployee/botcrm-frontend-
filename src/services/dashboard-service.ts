@@ -14,6 +14,8 @@ export interface DashboardSummary {
     presentToday: number;
     absentToday: number;
     halfDayToday: number;
+    /** Days with a real punch that could not be graded. NOT absence. */
+    needsReviewToday?: number;
     totalSalary: number;
     totalExpenses: number;
     totalLeads: number;

@@ -15,8 +15,8 @@ android {
         applicationId "com.bot.admin"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 3
-        versionName "1.2"
+        versionCode 12
+        versionName "1.9.2"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -38,6 +38,29 @@ android {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+
+        // Side-by-side staging build. Its own applicationId, so it installs
+        // NEXT TO the production app rather than replacing it and a tester can
+        // hold both at once. Points at the staging API, which is baked into the
+        // web bundle at build time, and at the staging OTA endpoint, which comes
+        // from capacitor.config.ts via `cap sync`.
+        //
+        // matchingFallbacks is required, not cosmetic: the Capacitor library
+        // modules define only debug and release, so without it Gradle cannot
+        // resolve their variants for this build type and the build fails.
+        staging {
+            initWith release
+            applicationIdSuffix ".staging"
+            versionNameSuffix "-staging"
+            signingConfig signingConfigs.release
+            matchingFallbacks = ['release']
+        }
+    }
+    // EventSyncer stamps each batch with BuildConfig.VERSION_NAME so an event
+    // stays interpretable after the device row is gone. AGP 8 defaults this
+    // off, and without it BuildConfig is simply not generated.
+    buildFeatures {
+        buildConfig true
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_21
@@ -56,6 +79,9 @@ repositories {
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
+    // WorkManager: the only restart path that survives the app PROCESS being
+    // killed by an OEM battery manager. See TrackerWatchdogWorker.
+    implementation "androidx.work:work-runtime-ktx:2.9.1"
     implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"

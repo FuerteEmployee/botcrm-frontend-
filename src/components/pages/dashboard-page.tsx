@@ -1,3 +1,18 @@
+/**
+ * DEAD CODE — DO NOT IMPORT. Safe to delete.
+ *
+ * This is an early mock of the admin dashboard. The live one is the local
+ * `DashboardPage` inside routes/_app/dashboard.tsx, which reads real figures
+ * from /api/dashboard/summary. Nothing imports this file (checked
+ * 2026-09-19); it survives only because it was never removed.
+ *
+ * It is dangerous to revive as-is: the three headline attendance numbers below
+ * are `Math.random()`, and every other figure comes from @/lib/mock-data. An
+ * admin cannot tell an invented attendance count from a real one by looking at
+ * it, and would make staffing and pay decisions on dice rolls.
+ *
+ * If you want something from here, take the LAYOUT and wire it to the service.
+ */
 import { useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'

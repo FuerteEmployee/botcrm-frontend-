@@ -6,6 +6,7 @@ import {
   Receipt,
   Bell,
   Fingerprint,
+  Smartphone,
   LogOut,
 } from "lucide-react";
 import { getSession } from "@/lib/auth";
@@ -21,6 +22,7 @@ const mainNav = [
 ];
 
 const subsNav = [
+  { to: "/super/releases", label: "App Releases", icon: Smartphone },
   { to: "/super/plans", label: "Plans", icon: Package },
   { to: "/super/billing", label: "Billing", icon: Receipt },
   { to: "/super/alerts", label: "Alerts", icon: Bell },

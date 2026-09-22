@@ -37,6 +37,13 @@ class BootReceiver : BroadcastReceiver() {
         }
 
         Log.i("BgTracker/Boot", "Boot — resuming tracking service.")
+
+        // Reaching this line proves the OEM autostart permission is granted:
+        // nothing else could have delivered BOOT_COMPLETED to us. Recorded both
+        // as a durable flag (so the permissions panel can stop guessing) and as
+        // a timeline event (so a reboot explains a gap).
+        Prefs.markBootRestart(context)
+        TrackerEventLog.record(context, TrackerEventLog.BOOT_RESTART)
         val svc = Intent(context, LocationTrackingService::class.java)
             .apply { this.action = LocationTrackingService.ACTION_START }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

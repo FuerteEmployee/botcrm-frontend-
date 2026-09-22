@@ -271,6 +271,74 @@
   body {
     font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
   }
+
+  /* ── Making a WebView stop behaving like a browser ────────────────────────
+   *
+   * None of this changes how the app looks in a screenshot, and all of it
+   * changes how it feels in the hand. The complaint it answers — "it feels
+   * like a website" — is almost never about visual design; it is about the
+   * handful of browser affordances that no native app has and that every user
+   * recognises instantly without being able to name:
+   *
+   *   · text turning blue and a Copy bubble appearing on a long press
+   *   · a grey rectangle flashing over whatever you tapped
+   *   · the page rubber-banding to reveal white above the header
+   *   · pinch and double-tap zoom
+   *
+   * Scoped rather than global where it matters: inputs stay selectable,
+   * because "I cannot select my own phone number to copy it" is a real
+   * complaint and a worse one than the feel. */
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-touch-callout: none;
+  }
+
+  html,
+  body {
+    /* Stops the whole page rubber-banding. Individual scroll areas keep their
+       own momentum; it is the OUTER bounce that reveals the background and
+       gives the game away. */
+    overscroll-behavior: none;
+    /* The WebView's own text-size adjustment on rotate is a browser tic. */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* Anything a person could legitimately want to copy or type into. */
+  input,
+  textarea,
+  select,
+  [contenteditable="true"],
+  [data-selectable="true"] {
+    user-select: text;
+    -webkit-user-select: text;
+    -webkit-touch-callout: default;
+  }
+
+  /* Touch devices hold :hover after a tap, so a hovered style sticks to the
+     last thing touched until something else is. Buttons get a pressed state
+     instead, which is what a native control does. */
+  @media (hover: none) {
+    button:active,
+    a:active,
+    [role="button"]:active {
+      transform: scale(0.985);
+    }
+  }
+
+  /* Long-press on an image offers "save"/"open in new tab" in a browser.
+     There is nowhere for either to go here. */
+  img {
+    -webkit-touch-callout: none;
+    -webkit-user-drag: none;
+    user-select: none;
+  }
 }
 
 @layer utilities {
@@ -320,6 +388,30 @@
   }
   .route-time-label::before {
     border-top-color: #93c5fd;
+  }
+
+  /* The auto punch-out pin. Deliberately the loudest thing on the map: it marks
+     a decision the system took on somebody's behalf, and it is the only marker
+     an admin is ever asked to defend. */
+  .auto-punchout-label {
+    font-size: 10px;
+    font-weight: 800;
+    padding: 2px 7px;
+    color: #ffffff;
+    background: #dc2626;
+    border: none;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(220, 38, 38, 0.4);
+    white-space: nowrap;
+  }
+  .auto-punchout-label::before {
+    border-top-color: #dc2626;
+  }
+
+  @keyframes apoPulse {
+    0% { transform: scale(0.8); opacity: 0.5; }
+    70% { transform: scale(2.1); opacity: 0; }
+    100% { transform: scale(2.1); opacity: 0; }
   }
 
   .text-gradient-primary {

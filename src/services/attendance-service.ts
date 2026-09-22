@@ -30,7 +30,10 @@ export interface AttendanceRecord {
   // over recomputing from punchIn/punchOut, which ignores the break and
   // multi-shift days.
   totalWorkMs?: number;
-  status: 'present' | 'absent' | 'half-day' | 'late' | 'wfh';
+  // 'needs_review' is stored by the server (a closed day carrying a real
+  // punch that computed to zero) and was missing here, so every consumer that
+  // switched on this union was told it could not occur.
+  status: 'present' | 'absent' | 'half-day' | 'late' | 'wfh' | 'needs_review';
   source?: 'app' | 'lens' | 'biometric';
   // True while `punchOut` was set by a device (Lens/biometric) tap and never
   // finalized by an explicit app punch-out — it may just be a lunch-out.
@@ -54,6 +57,12 @@ export interface AttendanceRecord {
 
   punchInAccuracy?: number | null;
   punchOutAccuracy?: number | null;
+  /**
+   * Day-level close position. Mirrors the open session's, and is what a
+   * single-session day (which keeps its close on the root and writes no
+   * shifts[] entry) has instead of a per-session pair.
+   */
+  punchOutCoordinates?: { lat?: number; lng?: number } | null;
   punchInFixAt?: string | null;
   punchOutFixAt?: string | null;
 }
@@ -63,8 +72,13 @@ export type PunchChannel = 'app' | 'lens' | 'biometric' | 'system' | 'admin';
 export interface AttendanceSession {
   punchIn?: string;
   punchOut?: string;
-  /** Why the session closed. `auto_geofence` is the engine, not the employee. */
-  closeReason?: 'manual' | 'auto_geofence' | 'shift_end' | 'admin' | 'device' | null;
+  /**
+   * Why the session closed. `auto_geofence` is the engine, not the employee;
+   * `shift_end` is the 04:00 job's fallback when nobody punched out at all, so
+   * the time is a guess rather than a measurement. `regularized` means an
+   * employee said what really happened and an admin approved it.
+   */
+  closeReason?: 'manual' | 'auto_geofence' | 'shift_end' | 'admin' | 'device' | 'regularized' | null;
   punchInSource?: PunchChannel | null;
   punchOutSource?: PunchChannel | null;
   punchInLocation?: string | null;
@@ -77,12 +91,20 @@ export interface AttendanceSession {
   punchOutDistance?: number | null;
   /** Gross worked ms for this session, clamped to the shift window. */
   workMs?: number | null;
+  /**
+   * Raw out-minus-in, with no shift clamp. Never used for pay — it exists so a
+   * session lying outside the shift window (which credits zero) still shows the
+   * time it represents instead of vanishing.
+   */
+  grossMs?: number | null;
 }
 
 export interface AttendanceStats {
   date: string;
   presentToday: number;
   halfDayToday: number;
+  /** Days carrying a real punch that could not be measured. Not absence. */
+  needsReviewToday: number;
   lateArrivals: number;
   missingPunch: number;
   absentToday: number;

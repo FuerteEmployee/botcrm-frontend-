@@ -3,7 +3,7 @@ import { useMemo, useState, useEffect } from "react";
 import { z } from "zod";
 import { useQuery } from "@tanstack/react-query";
 import { GridCard } from "@/components/shared/grid-card";
-import { Check, X, Clock as ClockIcon, MessageSquare, Pencil, CalendarDays, Search, MapPin, MoreVertical, Download, Plus, ChevronLeft, ChevronRight, Users, UserCheck, UserX, Phone, ClipboardList, ShieldAlert, Layers, ScanFace, Fingerprint, Smartphone, ListChecks, ChevronDown } from "lucide-react";
+import { Check, X, Clock as ClockIcon, MessageSquare, Pencil, CalendarDays, Search, MapPin, MoreVertical, Download, Plus, ChevronLeft, ChevronRight, Users, UserCheck, UserX, Phone, ClipboardList, ShieldAlert, Layers, ScanFace, Fingerprint, Smartphone, ListChecks, ChevronDown, AlertCircle, Home } from "lucide-react";
 import { ActionButton } from "@/components/shared/action-button";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/shared/page-header";
@@ -11,6 +11,7 @@ import { ViewToggle } from "@/components/shared/view-toggle";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { FormInput } from "@/components/shared/form-input";
 import { FormSelect } from "@/components/shared/form-select";
@@ -27,6 +28,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
+import { statusLabel, statusClass } from "@/lib/attendance-status";
 import { useAttendanceService, useAttendanceStats, useAbsentToday, usePunchLog, type AttendanceRecord, type AttendanceSession, type PunchLogTap } from "@/services/attendance-service";
 import { useGeofenceMode } from "@/services/geofence-service";
 import {
@@ -210,6 +212,40 @@ function Pagination({
 }
 
 // ─── Today's Record Mini-Card ────────────────────────────────────────────────
+/**
+ * "Worked remotely" marker for one day.
+ *
+ * Driven by `isWFH` — the record's own flag — and NOT by `status`, because the
+ * status badge loses the signal in both directions:
+ *
+ *   · While the day is open, getDisplayStatus() reports "On Duty", so a remote
+ *     employee currently working is indistinguishable from one at their desk.
+ *   · A remote day that falls short of the hours bar grades `half-day`, since
+ *     determineHalfDayStatus tests hours before it ever considers WFH. The
+ *     `wfh` status only survives on a remote day that made full hours.
+ *
+ * So the only reliable answer to "was this person in the office" is the flag,
+ * and it matters: a WFH day is exempt from the branch fence and from auto
+ * punch-out, and an admin reviewing a day with no distance on it needs to know
+ * that was intended rather than a tracking failure.
+ */
+function WfhMark({ record, size = "sm" }: { record: { isWFH?: boolean }; size?: "sm" | "md" }) {
+  if (!record?.isWFH) return null;
+  return (
+    <Badge
+      variant="outline"
+      title="Worked from home — branch distance not checked, and exempt from auto punch-out for this day."
+      className={cn(
+        "border-transparent bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold rounded-full inline-flex items-center gap-1",
+        size === "md" ? "text-[10px] px-2.5 py-1" : "text-[9px] px-1.5 py-0"
+      )}
+    >
+      <Home className={size === "md" ? "h-3 w-3" : "h-2.5 w-2.5"} />
+      WFH
+    </Badge>
+  );
+}
+
 function TodayRecordCard({ t, getDisplayStatus, canEdit, setModifyForm, setModifyOpen, setRemarkOpenId, setRemarkText }: {
   t: AttendanceRecord;
   getDisplayStatus: (t: AttendanceRecord) => string;
@@ -264,6 +300,7 @@ function TodayRecordCard({ t, getDisplayStatus, canEdit, setModifyForm, setModif
             <span className={cn("h-1.5 w-1.5 rounded-full mr-1 inline-block", dotStyle)} />
             {status === "on-duty" ? "On Duty" : t.status}
           </Badge>
+          <WfhMark record={t} />
           {canEdit && (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -279,7 +316,8 @@ function TodayRecordCard({ t, getDisplayStatus, canEdit, setModifyForm, setModif
                     punchOut: t.punchOut ? toDatetimeLocalValue(t.punchOut) : "",
                     lunchInTime: t.lunchInTime ? toDatetimeLocalValue(t.lunchInTime) : "",
                     lunchOutTime: t.lunchOutTime ? toDatetimeLocalValue(t.lunchOutTime) : "",
-                    status: t.status
+                    status: t.status,
+                    isWFH: !!t.isWFH,
                   });
                   setModifyOpen(true);
                 }}>Edit Punch</DropdownMenuItem>
@@ -371,7 +409,10 @@ function AttendancePage() {
     punchOut: "",
     lunchInTime: "",
     lunchOutTime: "",
-    status: "present" as any
+    status: "present" as any,
+    // Tracked separately from `status` because they are separate facts: a
+    // remote day short of the hours bar grades 'half-day' and is still remote.
+    isWFH: false,
   });
 
   // Default date filter = today (IST — matches how the backend keys each
@@ -397,7 +438,7 @@ function AttendancePage() {
   // Lens/biometric devices only send a generic punch-in/punch-out toggle —
   // they can't tell a lunch break from the real end of day, so today's
   // `punchOut` may just be the most recent lunch-out. Only trust it once the
-  // day is over. Use "Lens Info" (below) to see every raw event for today
+  // day is over. Use "Session details" (below) to see every raw event for today
   // regardless.
 
 
@@ -418,6 +459,38 @@ function AttendancePage() {
   const getDisplayLunchIn = (t: AttendanceRecord) => t.lunchInTime;
 
   const getDisplayLunchOut = (t: AttendanceRecord) => t.lunchOutTime;
+
+  // Who ended the day: the employee, or us on their behalf?
+  //
+  // A punch-out the 04:00 job invented at shift end renders as an ordinary time
+  // and reads exactly like one somebody actually tapped — which is how a day
+  // nobody measured gets paid as a full day without anyone noticing. The detail
+  // drawer has always labelled it; the list, where an admin actually scans for
+  // problems, did not. Timestamp order, never array position: shifts[] is not
+  // stored chronologically.
+  const CLOSE_META: Record<string, { label: string; className: string }> = {
+    shift_end: {
+      label: "Auto · unverified",
+      className: "border-warning/30 bg-warning/10 text-warning-foreground",
+    },
+    auto_geofence: {
+      label: "Auto exit",
+      className: "border-info/30 bg-info/10 text-info",
+    },
+    regularized: {
+      label: "Corrected",
+      className: "border-success/30 bg-success/10 text-success",
+    },
+  };
+
+  const getCloseMeta = (t: AttendanceRecord) => {
+    const closed = (t.shifts || []).filter((s) => s?.punchOut);
+    if (!closed.length) return null;
+    const final = [...closed].sort(
+      (a, b) => +new Date(b.punchOut!) - +new Date(a.punchOut!),
+    )[0];
+    return final?.closeReason ? CLOSE_META[final.closeReason] ?? null : null;
+  };
 
   const SOURCE_META: Record<string, { icon: typeof ScanFace; label: string }> = {
     lens: { icon: ScanFace, label: "Lens (camera)" },
@@ -505,6 +578,9 @@ function AttendancePage() {
         "Punch Out": getDisplayPunchOut(t) ? formatTime12h(getDisplayPunchOut(t)!) : "",
         "Total Hrs": workedHours(t) || "",
         Status: getDisplayStatus(t) === "on-duty" ? "On Duty" : t.status,
+        // Its own column rather than folded into Status, which cannot carry it:
+        // a remote day reads "On Duty" while open and "half-day" if short.
+        WFH: t.isWFH ? "Yes" : "",
         Source: t.source || "app",
         Remarks: t.remarks || "",
       }));
@@ -532,8 +608,16 @@ function AttendancePage() {
     });
   }, [list, search, dateFilter, shiftFilter, branchFilter]);
 
-  const matchesStatus = (t: AttendanceRecord, status: string) =>
-    status === "all" || getDisplayStatus(t) === status || t.status === status;
+  const matchesStatus = (t: AttendanceRecord, status: string) => {
+    if (status === "all") return true;
+    // WFH is a flag on the record, not a grade, and the two disagree often
+    // enough to matter: an open remote day displays as "on-duty", and a remote
+    // day short of the hours bar is stored as 'half-day'. Matching on status
+    // alone hid both from this chip -- which is the one an admin clicks to ask
+    // "who worked remotely today".
+    if (status === "wfh") return !!t.isWFH;
+    return getDisplayStatus(t) === status || t.status === status;
+  };
 
   const filtered = useMemo(
     () => scopeList.filter((t) => matchesStatus(t, tab)),
@@ -593,6 +677,10 @@ function AttendancePage() {
   // Everything the detail sheet derives from the open record. Declared here,
   // beside detailRecord, so the blocks below can never reference it earlier
   // than it exists.
+  // Which session's auto punch-out is expanded in the detail sheet. Null means
+  // none picked yet; a single-exit day ignores it and stays open.
+  const [focusedExit, setFocusedExit] = useState<number | null>(null);
+
   const detail = useMemo(() => {
     if (!detailRecord) return null;
 
@@ -637,7 +725,15 @@ function AttendancePage() {
 
   const handleMarkAbsent = async (employeeId: string, date: string) => {
     try {
-      await markAbsent({ employeeId, date: date.slice(0, 10) });
+      // toISTDateKey, NOT date.slice(0, 10).
+      //
+      // An attendance `date` is an IST-midnight instant, so the IST day of
+      // 17 Sep is stored as "2026-09-16T18:30:00.000Z" — every row's UTC date
+      // is one day behind the day it represents. Slicing the ISO string sent
+      // the previous day, the server resolved that to a different row, and
+      // "Mark Absent" therefore marked the WRONG DAY absent while creating a
+      // fresh row for it and leaving the day the admin clicked untouched.
+      await markAbsent({ employeeId, date: toISTDateKey(date) });
     } catch { }
   };
 
@@ -715,7 +811,14 @@ function AttendancePage() {
         <StatCard label="Present Today" value={stats?.presentToday ?? counts.present} icon={Check} accent="success" delay={0} />
         <StatCard label="Late Arrivals" value={stats?.lateArrivals ?? counts.late} icon={ClockIcon} accent="warning" delay={0.04} />
         <StatCard label="Half Day Today" value={stats?.halfDayToday ?? counts.halfDay} icon={ClockIcon} accent="warning" delay={0.08} />
-        <StatCard label="On Leave" value={onLeaveCount} icon={CalendarDays} accent="info" delay={0.12} />
+        {/* Only takes a slot when there is something to act on. A day that
+            could not be graded needs a human, and it used to appear in no card
+            at all -- counted as Absent on the dashboard and nowhere here. */}
+        {(stats?.needsReviewToday ?? 0) > 0 ? (
+          <StatCard label="Needs Review" value={stats?.needsReviewToday ?? 0} icon={AlertCircle} accent="warning" delay={0.12} />
+        ) : (
+          <StatCard label="On Leave" value={onLeaveCount} icon={CalendarDays} accent="info" delay={0.12} />
+        )}
         <div onClick={() => setAbsentSheetOpen(true)} className="cursor-pointer">
           <StatCard label="Absent Today" value={stats?.absentToday ?? counts.absent} icon={UserX} accent="destructive" delay={0.16} />
         </div>
@@ -892,13 +995,10 @@ function AttendancePage() {
                       className={cn(
                         "capitalize text-[10px] font-bold px-2 py-0 border-transparent rounded-full",
                         getDisplayStatus(t) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
-                          t.status === "present" ? "bg-success/10 text-success" :
-                            t.status === "late" ? "bg-warning/15 text-warning-foreground" :
-                              t.status === "half-day" ? "bg-warning/15 text-warning-foreground" :
-                                t.status === "wfh" ? "bg-info/15 text-info" :
-                                  "bg-destructive/10 text-destructive"
+                          statusClass(t.status)
                       )}
-                    >{getDisplayStatus(t) === "on-duty" ? "On Duty" : t.status}</Badge>
+                    >{getDisplayStatus(t) === "on-duty" ? "On Duty" : statusLabel(t.status)}</Badge>
+                    <WfhMark record={t} />
                     {(() => {
                       const { icon: SourceIcon, label } = getSourceMeta(t);
                       return (
@@ -926,7 +1026,8 @@ function AttendancePage() {
                           punchOut: t.punchOut ? toDatetimeLocalValue(t.punchOut) : "",
                           lunchInTime: t.lunchInTime ? toDatetimeLocalValue(t.lunchInTime) : "",
                           lunchOutTime: t.lunchOutTime ? toDatetimeLocalValue(t.lunchOutTime) : "",
-                          status: t.status
+                          status: t.status,
+                    isWFH: !!t.isWFH,
                         });
                         setModifyOpen(true);
                       }}>Edit Punch</DropdownMenuItem>
@@ -1042,6 +1143,19 @@ function AttendancePage() {
                   </DataTableCell>
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
                     {getDisplayPunchOut(t) ? new Date(getDisplayPunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
+                    {(() => {
+                      const meta = getCloseMeta(t);
+                      return meta ? (
+                        <span
+                          className={cn(
+                            "mt-0.5 block w-fit rounded border px-1 py-px font-sans text-[8px] font-black uppercase tracking-wide",
+                            meta.className,
+                          )}
+                        >
+                          {meta.label}
+                        </span>
+                      ) : null;
+                    })()}
                   </DataTableCell>
                   <DataTableCell>
                     <div className="flex items-center gap-1.5">
@@ -1079,13 +1193,10 @@ function AttendancePage() {
                         className={cn(
                           "capitalize text-[10px] font-bold px-2 py-0.5 border-transparent",
                           getDisplayStatus(t) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
-                            t.status === "present" ? "bg-success/10 text-success" :
-                              t.status === "late" ? "bg-warning/15 text-warning-foreground" :
-                                t.status === "half-day" ? "bg-warning/15 text-warning-foreground" :
-                                  t.status === "wfh" ? "bg-info/15 text-info" :
-                                    "bg-destructive/10 text-destructive"
+                            statusClass(t.status)
                         )}
-                      >{getDisplayStatus(t) === "on-duty" ? "On Duty" : t.status}</Badge>
+                      >{getDisplayStatus(t) === "on-duty" ? "On Duty" : statusLabel(t.status)}</Badge>
+                    <WfhMark record={t} />
                       {(() => {
                         const { icon: SourceIcon, label } = getSourceMeta(t);
                         return (
@@ -1114,7 +1225,8 @@ function AttendancePage() {
                             punchOut: t.punchOut ? toDatetimeLocalValue(t.punchOut) : "",
                             lunchInTime: t.lunchInTime ? toDatetimeLocalValue(t.lunchInTime) : "",
                             lunchOutTime: t.lunchOutTime ? toDatetimeLocalValue(t.lunchOutTime) : "",
-                            status: t.status
+                            status: t.status,
+                    isWFH: !!t.isWFH,
                           });
                           setModifyOpen(true);
                         }}
@@ -1190,7 +1302,8 @@ function AttendancePage() {
                   punchOut: modifyForm.punchOut,
                   lunchInTime: modifyForm.lunchInTime,
                   lunchOutTime: modifyForm.lunchOutTime,
-                  status: modifyForm.status
+                  status: modifyForm.status,
+                  isWFH: modifyForm.isWFH
                 }
               });
               setModifyOpen(false);
@@ -1239,9 +1352,38 @@ function AttendancePage() {
                 { label: "Half Day", value: "half-day" },
                 { label: "WFH", value: "wfh" },
                 { label: "Absent", value: "absent" },
+                { label: "Needs review", value: "needs_review" },
               ]}
               containerClassName="space-y-1"
             />
+
+            {/* Its own control, not folded into Status.
+                A remote day that fell short of the hours bar is graded
+                'half-day' and is still remote, so the two cannot share one
+                field. Setting Status to "WFH" turns this on by itself
+                (server-side too), but the reverse is not implied. */}
+            <div className={cn(
+              "flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 transition-colors",
+              modifyForm.isWFH
+                ? "border-indigo-400/50 bg-indigo-500/10"
+                : "border-border/60 bg-muted/20"
+            )}>
+              <div className="space-y-0.5">
+                <p className="text-[12px] font-bold flex items-center gap-1.5">
+                  <Home className={cn("h-3.5 w-3.5", modifyForm.isWFH ? "text-indigo-500" : "text-muted-foreground")} />
+                  Worked from home
+                </p>
+                <p className="text-[10px] text-muted-foreground leading-relaxed">
+                  Marks the day remote. Branch distance is not checked and auto punch-out is skipped.
+                </p>
+              </div>
+              <Switch
+                checked={modifyForm.isWFH}
+                onCheckedChange={(v) => setModifyForm({ ...modifyForm, isWFH: v })}
+                className="scale-90"
+              />
+            </div>
+
              <DialogFooter className="gap-2 pt-1">
                <Button type="button" size="sm" variant="outline" onClick={() => setModifyOpen(false)} className="rounded-xl">Cancel</Button>
                <ActionButton
@@ -1518,15 +1660,12 @@ function AttendancePage() {
                       className={cn(
                         "capitalize text-[10px] font-black px-3 py-1 rounded-full border-transparent",
                         getDisplayStatus(detailRecord) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
-                          detailRecord.status === "present" ? "bg-success/10 text-success" :
-                            detailRecord.status === "late" ? "bg-warning/15 text-warning-foreground" :
-                              detailRecord.status === "half-day" ? "bg-warning/15 text-warning-foreground" :
-                                detailRecord.status === "wfh" ? "bg-info/15 text-info" :
-                                  "bg-destructive/10 text-destructive"
+                          statusClass(detailRecord.status)
                       )}
                     >
-                      {getDisplayStatus(detailRecord) === "on-duty" ? "On Duty" : detailRecord.status}
+                      {getDisplayStatus(detailRecord) === "on-duty" ? "On Duty" : statusLabel(detailRecord.status)}
                     </Badge>
+                    <WfhMark record={detailRecord} size="md" />
                     {(() => {
                       const { icon: SourceIcon, label } = getSourceMeta(detailRecord);
                       return (
@@ -1628,7 +1767,21 @@ function AttendancePage() {
                 {/* Every session, each END tagged with the channel that
                     reported it -- in on the phone, out on the machine. */}
                 {detail && detail.sessions.length > 0 && (
-                  <SessionTimeline sessions={detail.sessions} />
+                  <SessionTimeline
+                    sessions={detail.sessions}
+                    totalWorkMs={detailRecord.totalWorkMs}
+                    onAutoExitClick={(i) => {
+                      setFocusedExit(i);
+                      // The card can sit below the fold on a long day, so
+                      // opening it is not enough -- it has to be brought into
+                      // view or the click looks like it did nothing.
+                      requestAnimationFrame(() => {
+                        document
+                          .getElementById(`auto-exit-${i}`)
+                          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      });
+                    }}
+                  />
                 )}
 
                 {showAllSessions && detailTaps.length > 0 && (
@@ -1642,7 +1795,12 @@ function AttendancePage() {
                     disagreed with the figure payroll actually pays. */}
                 <DayStatsRow record={detailRecord} displayStatus={getDisplayStatus(detailRecord)} />
 
-                <AutoPunchOutCard record={detailRecord} onRevert={() => setRevertTarget(detailRecord)} />
+                <AutoPunchOutCard
+                  record={detailRecord}
+                  onRevert={() => setRevertTarget(detailRecord)}
+                  focusIndex={focusedExit}
+                  onFocusChange={setFocusedExit}
+                />
 
                 {detail && (
                   <>

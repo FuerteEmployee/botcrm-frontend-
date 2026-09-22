@@ -11,8 +11,36 @@
 
     <!-- Background GPS tracker additions -->
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
+    <!-- Activity Recognition: reads the accelerometer to tell a phone that is
+         standing still from one whose GPS is merely drifting. Without it the
+         tracker falls back to inferring motion from GPS speed, which on a
+         stationary handset is computed from the very drift it is meant to
+         explain. Runtime permission on Android 10+; the GMS one covers 9 and
+         below, where no prompt exists. -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+    <uses-permission android:name="com.google.android.gms.permission.ACTIVITY_RECOGNITION" />
+    <!-- Restarting the tracker one second after the app is swiped away needs
+         an EXACT alarm; an inexact one is deferred by Doze and may never fire.
+         USE_EXACT_ALARM is granted at install for this use; SCHEDULE_EXACT_ALARM
+         is the pre-Android-13 form and the user can revoke it, which the code
+         handles by falling back to an inexact alarm. -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+
+    <!--
+        Lets the app hand a downloaded APK to Android's package installer.
+
+        Without this the app can only send people to the browser to download a
+        build, which is the one thing it cannot do for the release that
+        introduces the permission itself. Declaring it now means THIS build is
+        the last one anyone installs by hand; every later update can be applied
+        from inside the app. The FileProvider below is already declared and is
+        what the installer reads the file through.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- The 45s sync coroutine can be suspended during Doze without this. -->

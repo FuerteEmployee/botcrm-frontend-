@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
 import { Outlet, useNavigate, Link, useLocation, createFileRoute, redirect } from "@tanstack/react-router";
+import { UpdatePrompt } from "@/components/shared/app-update";
+import { MissedPunchOutPrompt } from "@/components/user/missed-punch-out-prompt";
+import { OfflineBanner } from "@/components/user/offline-banner";
+import { ApkUpdatePrompt } from "@/components/shared/apk-update-prompt";
+import { hapticSelection } from "@/lib/haptics";
 import { useAuth } from "@/hooks/use-auth";
 import { useDeveloperOptionsGate } from "@/hooks/use-developer-options-gate";
 import { DeveloperOptionsBlock } from "@/components/attendance/developer-options-block";
@@ -107,7 +112,23 @@ function UserLayout() {
     { to: "/user/profile", label: "Quick Action", icon: Zap, hash: "quick-actions" },
   ];
 
-  const bottomNavItems = navItems;
+  /**
+   * The phone gets four, the sidebar gets everything.
+   *
+   * Six items across a phone bottom bar left every label truncated — "MY
+   * REQUES...", "QUICK ACTI..." — which is the point at which a nav stops being
+   * scannable and people just tap around. Four fit at full width.
+   *
+   * Chosen by how often an employee actually needs them: Home is the punch
+   * screen and the reason the app exists, Leaves and My Requests are the
+   * everyday self-service, and Quick Action is the way to everything else.
+   * Holidays and Tickets are occasional, so they live in Quick Actions rather
+   * than costing a permanent slot.
+   */
+  const BOTTOM_NAV_PATHS = ["/user", "/user/leaves", "/user/advance-salary", "/user/profile"];
+  const bottomNavItems = BOTTOM_NAV_PATHS
+    .map((path) => navItems.find((i) => i.to === path))
+    .filter((i): i is (typeof navItems)[number] => !!i);
   const isProfileActive = location.pathname === "/user/account";
 
   const initials = (session?.name ?? "User").split(" ").map(s => s[0]).slice(0, 2).join("");
@@ -198,7 +219,19 @@ function UserLayout() {
       </aside>
 
       {/* ─── MAIN CONTENT CONTAINER ────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-clip z-10 relative">
+      {/* min-w-0 is load-bearing, not cosmetic.
+          This is a flex ITEM of the row above, and a flex item defaults to
+          min-width:auto — it refuses to shrink below the min-content width of
+          whatever it contains. One nowrap row anywhere in the portal (the
+          Helpdesk filter chips are ~500px) therefore widened this whole column
+          past the phone's viewport, and overflow-clip then CLIPPED the result
+          instead of preventing it: every page rendered with its right-hand side
+          cut off and no way to scroll to it.
+          With min-w-0 the column shrinks to the screen and each page's own
+          overflow-x-auto does the scrolling, which is what they were written to
+          do. The admin layout has carried this class from the start, which is
+          why only the employee portal was affected. */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-clip z-10 relative">
         {/* Mobile Glass Header */}
         <header className="md:hidden sticky top-0 z-30 bg-white/70 dark:bg-slate-900/60 backdrop-blur-xl border-b border-[#501537]/10 dark:border-white/5 px-4 sm:px-6 py-3 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
@@ -264,7 +297,24 @@ function UserLayout() {
         {/* Scrollable view container */}
         <main className="flex-1 overflow-y-auto pb-28 md:pb-8 scrollbar-thin">
           <div className="max-w-[1440px] mx-auto px-4 sm:px-8 lg:px-10 py-6 w-full">
+            {/* Above the outlet, not over it: losing the network is worth
+                saying plainly on every page, but it is not worth taking the
+                screen away from someone who may be trying to read something
+                they already loaded. */}
+            <OfflineBanner />
             <Outlet />
+            {/* Offers a waiting update once, a few seconds after the portal
+                settles. Renders nothing at all in a browser or on an APK too
+                old to carry the updater plugin. */}
+            <UpdatePrompt />
+            {/* Asks for the real leaving time on a day the 04:00 job closed at
+                shift end. Mounted in the shell rather than on Home so a deep
+                link into any employee page still surfaces it. Renders nothing
+                when there is no unconfirmed day. */}
+            <MissedPunchOutPrompt />
+            {/* Native updates, which OTA cannot deliver. Checks later than the
+                bundle prompt so the quick update goes first when both wait. */}
+            <ApkUpdatePrompt />
           </div>
         </main>
       </div>
@@ -280,6 +330,12 @@ function UserLayout() {
               key={`${item.to}-${item.label}`}
               to={item.to}
               hash={item.hash}
+              // A tick on every nav tap. This is the single highest-value place
+              // for one: it is the control used most often, and a tab bar that
+              // responds only visually is one of the clearest differences
+              // between an app and a page. Selection-weight, not impact —
+              // navigation is not a commitment and should not feel like one.
+              onClick={() => { void hapticSelection(); }}
               className={`flex flex-1 min-w-0 flex-col items-center gap-0.5 px-0.5 py-1.5 rounded-xl transition-all duration-300 relative ${
                 isActive
                   ? "text-[#501537] dark:text-white font-bold"

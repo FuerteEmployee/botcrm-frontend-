@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
+import { UpdatePrompt } from "@/components/shared/app-update";
 import { AppSidebar } from "./app-sidebar";
 import { AppHeader } from "./app-header";
 import { SubscriptionGate } from "./subscription-gate";
@@ -57,6 +58,9 @@ export function AppLayout() {
           <div className="px-5 sm:px-6 pt-5 sm:pt-6 pb-24 sm:pb-8 max-w-[1440px] w-full mx-auto">
             <SubscriptionGate>
               <Outlet />
+              {/* Admins run the same web bundle as employees and fall just as
+                  far behind without being told. */}
+              <UpdatePrompt />
             </SubscriptionGate>
           </div>
         </main>

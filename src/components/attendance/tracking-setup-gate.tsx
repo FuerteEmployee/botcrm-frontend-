@@ -10,9 +10,12 @@ import {
   Power,
   RefreshCw,
   ShieldCheck,
+  Smartphone,
+  Footprints,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { batteryStepsFor } from "@/lib/oem-battery-steps";
 import {
   openAppSettings,
   openAutostartSettings,
@@ -39,6 +42,7 @@ const ICONS: Record<StepId, typeof MapPin> = {
   precise: Crosshair,
   background: MapPin,
   notifications: Bell,
+  activity: Footprints,
   battery: BatteryCharging,
   autostart: Power,
 };
@@ -53,6 +57,7 @@ export function TrackingSetupGate({ setup }: { setup: TrackingSetup }) {
         case "precise":
         case "background":
         case "notifications":
+        case "activity":
           // The native side owns the ORDER. Android only offers background
           // location once foreground is already granted, and asking in the
           // wrong order fails silently -- it returns denied without ever
@@ -106,6 +111,14 @@ export function TrackingSetupGate({ setup }: { setup: TrackingSetup }) {
             {doneCount}/{total}
           </span>
         </div>
+
+        {setup.deviceIdentity && (
+          <div className="mt-2.5 flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground/80">
+            <Smartphone className="h-3 w-3 shrink-0" />
+            {[setup.deviceIdentity.manufacturer, setup.deviceIdentity.model].filter(Boolean).join(" ")}
+            {setup.deviceIdentity.osVersion && ` · Android ${setup.deviceIdentity.osVersion}`}
+          </div>
+        )}
       </div>
 
       <div className="space-y-2">
@@ -141,6 +154,46 @@ export function TrackingSetupGate({ setup }: { setup: TrackingSetup }) {
                   <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
                     {step.detail}
                   </p>
+
+                  {/* Where the setting ACTUALLY is on this phone.
+                      The standard Allow dialog is intercepted by most Chinese
+                      skins, which drop the employee on a vendor battery page
+                      with no control that satisfies the check -- so "Open
+                      settings" alone leads somewhere that cannot work. Only
+                      shown for skins known to do this; stock Android gets the
+                      one-tap dialog and needs no wall of text. */}
+                  {!step.done && step.id === "battery" && (() => {
+                    const oem = batteryStepsFor(setup.deviceIdentity?.manufacturer);
+                    if (!oem) return null;
+                    return (
+                      <div className="mt-2.5 rounded-xl border border-border/50 bg-muted/30 p-2.5 space-y-2">
+                        <p className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+                          On your phone ({oem.skin})
+                        </p>
+                        <ol className="space-y-1">
+                          {oem.whitelist.map((line, i) => (
+                            <li key={i} className="flex gap-1.5 text-[11px] leading-relaxed text-foreground/80">
+                              <span className="shrink-0 font-black text-primary">{i + 1}.</span>
+                              <span>{line}</span>
+                            </li>
+                          ))}
+                        </ol>
+                        {oem.vendor.length > 0 && (
+                          <div className="border-t border-border/40 pt-2 space-y-1">
+                            <p className="text-[10px] font-bold text-muted-foreground">
+                              Also do these — we cannot check them, but without them your phone
+                              stops recording anyway:
+                            </p>
+                            {oem.vendor.map((line, i) => (
+                              <p key={i} className="text-[11px] leading-relaxed text-foreground/70">
+                                • {line}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {!step.done && (
                     <div className="mt-2.5 flex flex-wrap gap-2">

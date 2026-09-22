@@ -17,6 +17,8 @@ object Prefs {
     private const val KEY_EMPLOYEE_ID = "employeeId"
     private const val KEY_ACTIVE      = "trackingActive"
     private const val KEY_LAST_FIX_AT = "lastFixAt"
+    private const val KEY_INSTALL_ID  = "installId"
+    private const val KEY_BOOT_PROOF  = "bootRestartAt"
 
     private fun sp(ctx: Context) =
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -26,15 +28,33 @@ object Prefs {
         token: String,
         apiBase: String,
         sessionId: String,
-        employeeId: String
+        employeeId: String,
+        installId: String = ""
     ) {
-        sp(ctx).edit()
+        val e = sp(ctx).edit()
             .putString(KEY_TOKEN, token)
             .putString(KEY_API_BASE, apiBase)
             .putString(KEY_SESSION_ID, sessionId)
             .putString(KEY_EMPLOYEE_ID, employeeId)
             .putBoolean(KEY_ACTIVE, true)
-            .apply()
+        // Only overwrite when the caller actually knows it. An older web bundle
+        // does not send installId, and blanking a known one would orphan the
+        // device's whole event timeline.
+        if (installId.isNotBlank()) e.putString(KEY_INSTALL_ID, installId)
+        e.apply()
+    }
+
+    /**
+     * Remember that BootReceiver successfully resumed tracking after a reboot.
+     *
+     * This is the ONLY hard evidence that the OEM autostart permission is
+     * granted. No Android API exposes that setting, so the alternative is asking
+     * the employee and believing the answer — which is how an admin ends up
+     * looking at "Auto-start: granted" for a phone that has never once come back
+     * from a reboot. A timestamp here means we watched it happen.
+     */
+    fun markBootRestart(ctx: Context) {
+        sp(ctx).edit().putLong(KEY_BOOT_PROOF, System.currentTimeMillis()).apply()
     }
 
     fun clearActive(ctx: Context) {
@@ -51,5 +71,8 @@ object Prefs {
     fun employeeId(ctx: Context): String = sp(ctx).getString(KEY_EMPLOYEE_ID, "") ?: ""
     fun isActive(ctx: Context): Boolean  = sp(ctx).getBoolean(KEY_ACTIVE, false)
     fun lastFixAt(ctx: Context): Long    = sp(ctx).getLong(KEY_LAST_FIX_AT, 0L)
+    fun installId(ctx: Context): String  = sp(ctx).getString(KEY_INSTALL_ID, "") ?: ""
+    /** 0 when we have never observed a successful restart after a reboot. */
+    fun bootRestartAt(ctx: Context): Long = sp(ctx).getLong(KEY_BOOT_PROOF, 0L)
 }
 

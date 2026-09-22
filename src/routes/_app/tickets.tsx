@@ -24,6 +24,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { StatCard } from "@/components/shared/stat-card";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { AttendanceCorrectionsPanel } from "@/components/attendance/attendance-corrections-panel";
 import { useLayoutSettings } from "@/hooks/use-layout-settings";
 import { usePermission } from "@/hooks/use-permission";
 import { useEffect } from "react";
@@ -35,6 +36,7 @@ export const Route = createFileRoute("/_app/tickets")({
 function TicketsPage() {
   const { tickets, isLoading, updateTicketStatus, deleteTicket, isUpdating, isDeleting } = useTicketService();
   const [tab, setTab] = useState<string>("all");
+  const [section, setSection] = useState<"helpdesk" | "corrections">("helpdesk");
   const [search, setSearch] = useState("");
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
   const [remarkText, setRemarkText] = useState("");
@@ -91,6 +93,32 @@ function TicketsPage() {
         description="Manage employee queries, complaints, and requests."
       />
 
+      {/* Attendance corrections are a different record type (Regularization),
+          not a Ticket — approving one rewrites a punch-out and re-runs payroll.
+          They live here because this is where an admin already comes to answer
+          employee requests, but they keep their own model and their own queue. */}
+      <div className="flex items-center gap-1 rounded-xl border border-border/50 bg-muted/30 p-1 w-fit">
+        {([["helpdesk", "Helpdesk"], ["corrections", "Attendance Corrections"]] as const).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setSection(key)}
+            className={cn(
+              "rounded-lg px-3.5 py-1.5 text-[12px] font-semibold transition-all",
+              section === key
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {section === "corrections" ? (
+        <AttendanceCorrectionsPanel />
+      ) : (
+      <>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <StatCard label="Pending Review" value={counts.pending} icon={Clock} accent="warning" delay={0} />
         <StatCard label="Resolved" value={counts.approved} icon={Check} accent="success" delay={0.05} />
@@ -315,6 +343,8 @@ function TicketsPage() {
           )}
         </DialogContent>
       </Dialog>
+      </>
+      )}
     </div>
   );
 }

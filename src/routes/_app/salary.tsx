@@ -30,6 +30,15 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useDepartmentService } from "@/services/department-service";
 import { useBranchService } from "@/services/branch-service";
 import { DeleteDialog } from "@/components/shared/delete-dialog";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export const Route = createFileRoute("/_app/salary")({
   component: SalaryPage,
@@ -67,6 +76,7 @@ function SalaryPage() {
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
   const [view, setView] = useState<"grid" | "list">(defaultLayout);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [generateOpen, setGenerateOpen] = useState(false);
   const { can } = usePermission();
   const canCreate = can("salary", "create");
   const canEdit = can("salary", "edit");
@@ -113,9 +123,18 @@ function SalaryPage() {
     } catch (err) { }
   };
 
+  // Regeneration rewrites every active employee's record for the selected
+  // month, so the admin is told which month and how many paid payslips are in
+  // it before it runs. Counted from `list` (the whole month) rather than
+  // `filtered`, because generation ignores the on-screen filters entirely.
+  const paidCount = list.filter((r) => r.status === "paid").length;
+  const selectedMonthLabel = MONTHS.find((item) => `${item.m}-${item.y}` === selectedMonth)?.label
+    ?? selectedMonth;
+
   const handleGenerate = async () => {
     try {
       await generateSalaries({ month: m, year: y });
+      setGenerateOpen(false);
     } catch (err) { }
   };
 
@@ -202,7 +221,7 @@ function SalaryPage() {
               <Button
                 size="sm"
                 className="h-9 text-[13px] bg-gradient-primary text-primary-foreground hover:shadow-md rounded-xl transition-all font-bold gap-2"
-                onClick={handleGenerate}
+                onClick={() => setGenerateOpen(true)}
                 disabled={isGenerating}
               >
                 {isGenerating ? (
@@ -689,6 +708,47 @@ function SalaryPage() {
         description="Are you sure you want to delete this salary record? This action cannot be undone."
         isLoading={isDeleting}
       />
+
+      {/* Generate Payroll confirmation.
+          This used to fire straight from the button. It rewrites the record of
+          EVERY active employee for the selected month, ignoring the filters on
+          screen, so it names the month and the number of paid payslips it is
+          about to recompute rather than leaving the admin to infer both. */}
+      <AlertDialog open={generateOpen} onOpenChange={setGenerateOpen}>
+        <AlertDialogContent className="rounded-2xl border-primary/20 shadow-2xl">
+          <AlertDialogHeader>
+            <div className="h-12 w-12 rounded-2xl bg-primary/10 text-primary grid place-items-center mb-2">
+              <Sparkles className="h-6 w-6" />
+            </div>
+            <AlertDialogTitle className="text-[18px] font-black tracking-tight">
+              Generate payroll for {selectedMonthLabel}?
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-[14px] text-muted-foreground">
+              This recalculates {selectedMonthLabel} for every active employee and replaces the
+              existing figures for that month.
+              {paidCount > 0 && (
+                <span className="mt-2 block font-semibold text-foreground">
+                  {paidCount} payslip{paidCount === 1 ? " is" : "s are"} already marked paid.
+                  {paidCount === 1 ? " It keeps" : " They keep"} the paid status and payment date —
+                  only the calculated amounts are refreshed.
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 mt-4">
+            <AlertDialogCancel className="rounded-xl border-border/60">Cancel</AlertDialogCancel>
+            <ActionButton
+              variant="add"
+              icon={Sparkles}
+              showLabel
+              label="Generate payroll"
+              loading={isGenerating}
+              onClick={handleGenerate}
+              disabled={isGenerating}
+            />
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Users, UserCheck, UserX, Clock, Wallet, TrendingUp, BadgeDollarSign, CalendarRange, CalendarDays } from "lucide-react";
+import { Users, UserCheck, UserX, Clock, Wallet, TrendingUp, BadgeDollarSign, CalendarRange, CalendarDays, AlertTriangle } from "lucide-react";
 import {
   ResponsiveContainer,
   BarChart,
@@ -24,7 +24,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useDashboardService } from "@/services/dashboard-service";
-import { cn } from "@/lib/utils";
+import { cn, toISTDateKey } from "@/lib/utils";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 
 const MONTH_OPTIONS = Array.from({ length: 12 }).map((_, i) => {
@@ -75,8 +75,16 @@ function SectionTitle({ title, subtitle }: { title: string; subtitle?: string })
   );
 }
 
+/**
+ * Today, as an IST calendar day.
+ *
+ * This was `new Date().toISOString().slice(0, 10)`, which is the UTC date. IST
+ * runs 5h30m ahead, so between midnight and 05:30 in India that returns
+ * YESTERDAY — the date picker defaulted to the wrong day, and because the same
+ * value is the input's `max`, today could not even be selected.
+ */
 function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return toISTDateKey(new Date());
 }
 
 function DashboardPage() {
@@ -216,15 +224,31 @@ function DashboardPage() {
           to="/attendance"
           search={{ status: "absent" }}
         />
-        <StatCard
-          label={`Half Day ${dayLabel}`}
-          value={stats.halfDayToday}
-          icon={Clock}
-          accent="warning"
-          delay={0.15}
-          to="/attendance"
-          search={{ status: "half-day" }}
-        />
+        {/* Takes the Half Day slot only when there is something to act on.
+            A `needs_review` day carries a real punch that could not be
+            measured; until it was counted here it was silently folded into
+            Absent, so nobody was ever told one existed. */}
+        {(stats.needsReviewToday ?? 0) > 0 ? (
+          <StatCard
+            label={`Needs Review ${dayLabel}`}
+            value={stats.needsReviewToday ?? 0}
+            icon={AlertTriangle}
+            accent="warning"
+            delay={0.15}
+            to="/attendance"
+            search={{ status: "needs_review" }}
+          />
+        ) : (
+          <StatCard
+            label={`Half Day ${dayLabel}`}
+            value={stats.halfDayToday}
+            icon={Clock}
+            accent="warning"
+            delay={0.15}
+            to="/attendance"
+            search={{ status: "half-day" }}
+          />
+        )}
       </div>
 
       {/* Stat cards — row 2 */}

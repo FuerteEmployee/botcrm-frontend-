@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useState, useEffect} from "react";
 import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import {
@@ -7,7 +7,7 @@ import {
   Settings, CreditCard, Briefcase, Calendar, HeartPulse,
   Clock, Receipt, Contact2, ChevronRight, IndianRupee,
   Landmark, IdCard, FileText, Megaphone
-} from "lucide-react";
+, Gift, Ticket } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -66,6 +66,24 @@ function UserProfilePage() {
       return data;
     }
   });
+
+  // Scroll to Quick Actions once the page actually has a Quick Actions section.
+  //
+  // The bottom bar's Quick Action tab navigates to /user/profile#quick-actions,
+  // but the router scrolls once on render and the loading skeleton below has no
+  // such element — so on a cold tap the scroll silently no-ops and the employee
+  // lands at the top of an unfamiliar profile page. That matters more than it
+  // sounds: Holidays and Tickets were moved out of the bottom bar into this
+  // grid, so on a phone this hash IS their only route to them.
+  useEffect(() => {
+    if (isLoading) return;
+    if (typeof window === "undefined" || window.location.hash !== "#quick-actions") return;
+    // A frame after paint, so the element exists and layout has settled.
+    const id = window.requestAnimationFrame(() => {
+      document.getElementById("quick-actions")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [isLoading]);
 
   if (isLoading) {
     return (
@@ -146,7 +164,7 @@ function UserProfilePage() {
       {/* Quick Actions */}
       <div id="quick-actions" className="space-y-3 scroll-mt-24">
         <h4 className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500 px-1">Quick Actions</h4>
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <button
             onClick={() => setNewExpenseOpen(true)}
             className="text-left p-4 rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer relative"
@@ -194,6 +212,31 @@ function UserProfilePage() {
             </div>
             <p className="text-sm font-bold">Announcements</p>
             <p className="text-xs text-white/80 flex items-center gap-1 mt-0.5">View Details <ChevronRight className="h-3 w-3" /></p>
+          </button>
+
+          {/* Both of these used to sit in the phone's bottom bar. They are
+              occasional rather than daily, so they moved here to give the four
+              everyday destinations room for their full labels. */}
+          <button
+            onClick={() => navigate({ to: "/user/holidays" })}
+            className="text-left p-4 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+          >
+            <div className="h-9 w-9 rounded-xl bg-white/20 flex items-center justify-center mb-3">
+              <Gift className="h-4.5 w-4.5" />
+            </div>
+            <p className="text-sm font-bold">Holidays</p>
+            <p className="text-xs text-white/80 flex items-center gap-1 mt-0.5">View Calendar <ChevronRight className="h-3 w-3" /></p>
+          </button>
+
+          <button
+            onClick={() => navigate({ to: "/user/tickets" })}
+            className="text-left p-4 rounded-2xl bg-gradient-to-br from-slate-600 to-slate-800 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+          >
+            <div className="h-9 w-9 rounded-xl bg-white/20 flex items-center justify-center mb-3">
+              <Ticket className="h-4.5 w-4.5" />
+            </div>
+            <p className="text-sm font-bold">Tickets</p>
+            <p className="text-xs text-white/80 flex items-center gap-1 mt-0.5">Get Help <ChevronRight className="h-3 w-3" /></p>
           </button>
         </div>
       </div>

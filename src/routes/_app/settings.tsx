@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { AppVersionCard } from "@/components/shared/app-update";
 import { useState, useEffect, useMemo } from "react";
-import { LogOut, Bell, Lock, Building2, Palette, AlertCircle, Mail, Phone, MapPin, Camera, User, LayoutGrid, List, CheckCircle2, ShieldCheck, Globe, Trash2, Edit2, Loader2, Clock, CalendarDays, Plus, X, GitBranch, Receipt, Search, LogIn, Copy, Check, Banknote } from "lucide-react";
+import { LogOut, Bell, Lock, Building2, Palette, AlertCircle, Mail, Phone, MapPin, Camera, User, LayoutGrid, List, CheckCircle2, ShieldCheck, Globe, Trash2, Edit2, Loader2, Clock, CalendarDays, Plus, X, GitBranch, Receipt, Search, LogIn, Copy, Check, Banknote, Smartphone } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,6 +26,7 @@ import { ActionButton } from "@/components/shared/action-button";
 import { DeleteDialog } from "@/components/shared/delete-dialog";
 import { useShiftService } from "@/services/shift-service";
 import { useBranchService } from "@/services/branch-service";
+import { SettingsGuide, settingsGuideLines } from "@/components/settings/settings-guide";
 import { usePermission } from "@/hooks/use-permission";
 
 export const Route = createFileRoute("/_app/settings")({
@@ -86,9 +88,10 @@ function SettingsPage() {
     { id: "salary_templates", label: "Pay Templates", icon: Receipt },
     { id: "preferences", label: "Prefs", icon: Bell },
     { id: "security", label: "Security", icon: Lock },
+    { id: "about", label: "About", icon: Smartphone },
   ] as const;
 
-  const [activeTab, setActiveTab] = useState<"general" | "branches" | "attendance" | "payroll" | "salary_templates" | "preferences" | "security">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "branches" | "attendance" | "payroll" | "salary_templates" | "preferences" | "security" | "about">("general");
   const [loading, setLoading] = useState(false);
   const [isProfileLoading, setIsProfileLoading] = useState(true);
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
@@ -1123,6 +1126,41 @@ function SettingsPage() {
               </div>
             </div>
           )}
+
+          {activeTab === "about" && (
+            <div className="space-y-6 max-w-2xl">
+              <AppVersionCard />
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                Screens and fixes arrive over the air and need no reinstall. Anything that changes what
+                the phone itself can do — background location, notifications, crash reporting — lives in
+                the app version and needs a new APK.
+              </p>
+            </div>
+          )}
+          {/* Closes every tab: what the controls above actually do, and
+              what they are currently set to. Rendered once, inside the tab
+              animation, so it can never fall out of step with the tab it
+              describes. */}
+          <SettingsGuide
+            lines={settingsGuideLines(activeTab, {
+              shiftName: shifts.find((s) => s._id === attendance.defaultShiftId)?.name || null,
+              shiftCount: shifts.length,
+              branchCount: branchList?.length || 0,
+              workDayCount: attendance.workDays.length,
+              requireLocation: attendance.requireLocation,
+              remotePunch: attendance.remotePunch,
+              payrollEnabled: payroll.enabled,
+              dailyRateBasis: payroll.dailyRateBasis,
+              sandwichRuleEnabled: payroll.sandwichRuleEnabled,
+              roundingMode: payroll.rounding.mode,
+              roundingPrecision: payroll.rounding.precision,
+              templateCount: salaryTemplates.length,
+              notifEmail: notif.email,
+              notifPush: notif.push,
+              notifWeekly: notif.weekly,
+              companyName: company.name || null,
+            })}
+          />
         </motion.div>
       </AnimatePresence>
 

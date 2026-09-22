@@ -50,6 +50,11 @@ export interface ClientInfo {
     batteryUnrestricted: PermissionState;
     autoStart: PermissionState;
   };
+  /**
+   * Auto-start was observed working, not merely claimed. Sits outside
+   * `permissions` because it qualifies one of them rather than being one.
+   */
+  autoStartProven?: boolean;
   trackingSetupComplete?: boolean;
 }
 
@@ -107,7 +112,30 @@ async function readCameraPermission(): Promise<PermissionState> {
   }
 }
 
-function readNotificationPermission(): PermissionState {
+/**
+ * Notification permission, preferring the NATIVE grant.
+ *
+ * The web Notification API does not exist in the Capacitor WebView, so this
+ * used to return "unavailable" on every Android install — including devices
+ * where POST_NOTIFICATIONS was plainly granted, which is what the admin panel
+ * then displayed. The APK has always requested and read that permission; the
+ * value simply never reached here.
+ *
+ * Worth being exact about, because Android will stop a foreground service whose
+ * notification is blocked. "Unavailable" reads as "nothing to worry about" and
+ * hid a setting that can genuinely end someone's tracking.
+ */
+async function readNotificationPermission(): Promise<PermissionState> {
+  try {
+    const { checkAllPermissions, available } = await import("@/plugins/background-tracker");
+    if (available()) {
+      const r = await checkAllPermissions();
+      if (r) return r.notifications ? "granted" : "denied";
+    }
+  } catch {
+    /* fall through to the web reading */
+  }
+
   try {
     if (typeof Notification === "undefined") return "unavailable";
     if (Notification.permission === "default") return "prompt";
@@ -146,7 +174,19 @@ export async function collectClientInfo(): Promise<ClientInfo> {
     /* ignore */
   }
 
-  const [loc, camera] = await Promise.all([readLocationPermissions(), readCameraPermission()]);
+  // In parallel: each of these is an independent read and two of them now go
+  // over the Capacitor bridge, so serialising them would add latency to every
+  // app resume for no reason.
+  const [loc, camera, notifications, readiness] = await Promise.all([
+    readLocationPermissions(),
+    readCameraPermission(),
+    readNotificationPermission(),
+    readTrackerReadiness(),
+  ]);
+
+  // Split out because it is a qualifier on autoStart, not a permission of its
+  // own, and `permissions` maps one-to-one onto the schema's sub-document.
+  const { autoStartProven, ...trackerPermissions } = readiness;
 
   return {
     installId: getInstallId(),
@@ -161,9 +201,10 @@ export async function collectClientInfo(): Promise<ClientInfo> {
       location: loc.location,
       coarseLocation: loc.coarseLocation,
       camera,
-      notifications: readNotificationPermission(),
-      ...(await readTrackerReadiness()),
+      notifications,
+      ...trackerPermissions,
     },
+    autoStartProven,
     trackingSetupComplete: readAutostartConfirmed() && (await isTrackerReady()),
   };
 }
@@ -191,6 +232,7 @@ async function readTrackerReadiness(): Promise<{
   preciseLocation: PermissionState;
   batteryUnrestricted: PermissionState;
   autoStart: PermissionState;
+  autoStartProven?: boolean;
 }> {
   const unknown = {
     backgroundLocation: "unknown" as PermissionState,
@@ -208,14 +250,30 @@ async function readTrackerReadiness(): Promise<{
       backgroundLocation: state(r.background),
       preciseLocation: state(r.precise),
       batteryUnrestricted: state(r.batteryUnrestricted),
-      // Unreadable by any API. Report the employee's own confirmation, and only
-      // as "unknown" when they have not confirmed -- never "denied", which
-      // would assert something we did not observe.
-      autoStart: readAutostartConfirmed()
+      // Three tiers, strongest first:
+      //
+      //  1. PROVEN  -- BootReceiver actually resumed tracking after a reboot.
+      //     Nothing else could have delivered BOOT_COMPLETED to us, so this is
+      //     an observation rather than a claim.
+      //  2. CLAIMED -- the employee ticked the setup box. Believed, but the UI
+      //     labels it self-reported.
+      //  3. UNKNOWN -- neither. Never "denied": we did not observe a refusal,
+      //     we observed nothing, and those are different things to tell an
+      //     admin who is deciding whether to chase someone.
+      //
+      // Tier 1 exists because tier 2 was the only tier, and an employee who
+      // enabled auto-start in the phone's own settings -- rather than through
+      // our setup flow -- showed as "unknown" forever.
+      autoStart: r.autostartProven
         ? "granted"
-        : r.hasAutostartScreen
-          ? "unknown"
-          : "unavailable",
+        : readAutostartConfirmed()
+          ? "granted"
+          : r.hasAutostartScreen
+            ? "unknown"
+            : "unavailable",
+      // Carried separately so the admin UI can say "verified after a reboot"
+      // rather than the weaker "self-reported".
+      autoStartProven: r.autostartProven === true,
     };
   } catch {
     return unknown;
@@ -309,6 +367,32 @@ export async function reportClientError(err: ReportedError): Promise<void> {
   }
 }
 
+/**
+ * Upload the previous run's fatal native crash, if there was one.
+ *
+ * Reported as kind "unhandled" with a [native] prefix rather than a new kind,
+ * so no backend schema change is needed to receive it — which matters because
+ * the crash it was built for can only be fixed by shipping a new APK, and an
+ * APK that needs a matching backend deploy to be useful is one more thing to
+ * get wrong.
+ */
+async function reportNativeCrash(): Promise<void> {
+  try {
+    const { getLastNativeCrash } = await import("@/plugins/background-tracker");
+    const crash = await getLastNativeCrash();
+    if (!crash) return;
+
+    await reportClientError({
+      message: `[native] ${crash.type}: ${crash.message || "(no message)"}`,
+      kind: "unhandled",
+      stack: `thread=${crash.thread} at=${new Date(crash.at).toISOString()}\n${crash.stack}`,
+      route: "native",
+    });
+  } catch {
+    /* never let crash reporting be the thing that breaks startup */
+  }
+}
+
 let initialised = false;
 
 /**
@@ -319,6 +403,12 @@ let initialised = false;
 export function initClientTelemetry(): void {
   if (initialised || typeof window === "undefined") return;
   initialised = true;
+
+  // Did the previous run die natively? Deferred rather than awaited: there is
+  // no session token yet at first call, and the auth-change listener below runs
+  // this again once there is.
+  void reportNativeCrash();
+  window.addEventListener("bot-auth-change", () => { void reportNativeCrash(); });
 
   // Failed API calls, reported from the axios interceptor via this callback.
   setNetworkErrorReporter(({ message, requestUrl, statusCode }) => {

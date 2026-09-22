@@ -158,6 +158,10 @@ function AddEmployeePage() {
       requireLocation: false,
       remotePunch: true,
     },
+    // Top-level on the User, NOT inside attendanceExceptions — it is read by
+    // the geofence engine (isFieldRole) regardless of whether the exceptions
+    // block is switched on.
+    geofenceExempt: false,
     leadDeletionPermission: false,
     salaryComponents: {
       tds: { enabled: false, percentage: 0, amount: 0, type: 'percentage', includeInTotal: true },
@@ -328,6 +332,7 @@ function AddEmployeePage() {
             nameAsPerBank: "",
           },
           leadDeletionPermission: (emp as any).leadDeletionPermission || false,
+          geofenceExempt: (emp as any).geofenceExempt || false,
           attendanceExceptions: (emp as any).attendanceExceptions || {
             overrideGlobal: false,
             requireLocation: false,
@@ -756,6 +761,20 @@ function AddEmployeePage() {
                     <span className="text-muted-foreground ml-2">(Overrides apply below)</span>
                   </div>
                 )}
+                {/* This is the STRONGEST of the three places working days are set,
+                    and the least obvious. Saying so here is the only chance an
+                    admin gets before it silently beats the other two. */}
+                <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2.5 space-y-1">
+                  <p className="text-[11px] font-black uppercase tracking-wide text-warning-foreground">
+                    This beats the shift and the company setting
+                  </p>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Ticking <b>any</b> day here replaces this employee's whole week. Their shift's
+                    Working Days and Settings &rsaquo; Attendance &rsaquo; Active Work Days are then
+                    ignored for them &mdash; the days are not combined. Leave every day unticked to
+                    let the shift decide instead.
+                  </p>
+                </div>
                 <div className="grid grid-cols-1 gap-3">
                   {DAYS.map((day) => {
                     const holiday = form.weeklyHolidays.find(h => h.day === day);
@@ -839,7 +858,14 @@ function AddEmployeePage() {
                     <div className="flex items-center justify-between">
                       <div className="space-y-0.5">
                         <Label className="text-[12px] font-bold">Remote Punch</Label>
-                        <p className="text-[10px] text-muted-foreground">Allow clock-in from any location.</p>
+                        <p className="text-[10px] text-muted-foreground">
+                          Allow clock-in from any location, and offer the Work From Home
+                          toggle in the app.
+                          <span className="block mt-0.5 text-warning-foreground font-semibold">
+                            Also exempts this employee from auto punch-out on every day,
+                            including office days.
+                          </span>
+                        </p>
                       </div>
                       <Switch
                         checked={form.attendanceExceptions.remotePunch}
@@ -852,6 +878,32 @@ function AddEmployeePage() {
                     </div>
                   </div>
                 )}
+
+                {/* Deliberately OUTSIDE the Attendance Exceptions switch.
+                    `geofenceExempt` is a top-level field on the employee and the
+                    geofence engine reads it whether or not the exceptions block
+                    is enabled — nesting it here would imply otherwise.
+
+                    It exists precisely so auto punch-out can be waived WITHOUT
+                    granting remote punch. Until now it had no control anywhere
+                    in the product, so the only way to exempt somebody was to
+                    switch on Remote Punch, which is why that option quietly
+                    carries a second meaning. */}
+                <div className="flex items-center justify-between p-4 rounded-xl border border-border/50 bg-muted/20">
+                  <div className="space-y-0.5">
+                    <Label className="text-[12px] font-bold">Exempt From Auto Punch-Out</Label>
+                    <p className="text-[10px] text-muted-foreground">
+                      Never end this employee&rsquo;s day automatically for leaving the branch
+                      area. For field staff &mdash; sales, delivery, site engineers &mdash; whose
+                      job is to be away from the office.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={form.geofenceExempt}
+                    onCheckedChange={(v) => setForm(prev => ({ ...prev, geofenceExempt: v }))}
+                    className="scale-90"
+                  />
+                </div>
               </div>
             </div>
           </Card>

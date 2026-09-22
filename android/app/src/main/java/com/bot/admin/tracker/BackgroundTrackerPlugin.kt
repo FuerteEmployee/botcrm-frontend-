@@ -53,6 +53,13 @@ import kotlinx.coroutines.launch
         Permission(
             alias = "notifications",
             strings = [Manifest.permission.POST_NOTIFICATIONS]
+        ),
+        // Lets the tracker tell a phone that is standing still from one whose
+        // GPS is drifting. Asked for LAST and never blocking: refusing it costs
+        // route smoothing, not attendance.
+        Permission(
+            alias = "activity",
+            strings = [Manifest.permission.ACTIVITY_RECOGNITION]
         )
     ]
 )
@@ -73,13 +80,16 @@ class BackgroundTrackerPlugin : Plugin() {
         val apiBase    = call.getString("apiBase") ?: ""
         val employeeId = call.getString("employeeId") ?: ""
         val sessionId  = call.getString("sessionId") ?: ""
+        // Ties the native event log to the same install the web layer reports
+        // under, so the Device tab can show one timeline per device.
+        val installId  = call.getString("installId") ?: ""
 
         if (token.isBlank() || apiBase.isBlank()) {
             call.reject("token and apiBase are required")
             return
         }
 
-        Prefs.save(context, token, apiBase, sessionId, employeeId)
+        Prefs.save(context, token, apiBase, sessionId, employeeId, installId)
 
         val intent = Intent(context, LocationTrackingService::class.java)
             .apply { action = LocationTrackingService.ACTION_START }
@@ -148,6 +158,33 @@ class BackgroundTrackerPlugin : Plugin() {
 
     // ── requestPermissions ────────────────────────────────────────────────────
 
+    // ── getLastCrash ─────────────────────────────────────────
+    //
+    // Reported through the web layer rather than uploaded natively because that
+    // is where a valid session token lives. The trade is that a device which
+    // crashes and is never opened again keeps its crash to itself — acceptable,
+    // since a phone nobody opens is not one anybody is waiting on a fix for.
+    //
+    // Reading CLEARS the stored crash, so each one is reported exactly once even
+    // if the app is reopened repeatedly.
+    @PluginMethod
+    fun getLastCrash(call: PluginCall) {
+        val out = JSObject()
+        val raw = CrashReporter.takeLast(context)
+        if (raw == null) {
+            out.put("crash", null as String?)
+        } else {
+            try {
+                out.put("crash", JSObject(raw))
+            } catch (t: Throwable) {
+                // Corrupt record. Losing it is fine; failing the call is not,
+                // because this runs on every launch.
+                out.put("crash", null as String?)
+            }
+        }
+        call.resolve(out)
+    }
+
     @PluginMethod(returnType = PluginMethod.RETURN_PROMISE)
     override fun requestPermissions(call: PluginCall) {
         // Request fine location first (must be held before requesting background).
@@ -170,12 +207,27 @@ class BackgroundTrackerPlugin : Plugin() {
         if (Build.VERSION.SDK_INT >= 33) {
             requestPermissionForAlias("notifications", call, "afterNotifPerm")
         } else {
-            call.resolve(buildPermResult())
+            afterNotifPerm(call)
         }
     }
 
     @PermissionCallback
     private fun afterNotifPerm(call: PluginCall) {
+        // Activity recognition last, because it is the only one the product can
+        // do without. Asking for it before background location would spend the
+        // employee's patience on the least important prompt.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            requestPermissionForAlias("activity", call, "afterActivityPerm")
+        } else {
+            call.resolve(buildPermResult())
+        }
+    }
+
+    @PermissionCallback
+    private fun afterActivityPerm(call: PluginCall) {
+        // Granted or not, start it: start() checks for itself and no-ops when
+        // the permission is missing, so this needs no branch of its own.
+        runCatching { ActivityRecognitionTracker.start(context) }
         call.resolve(buildPermResult())
     }
 
@@ -191,10 +243,16 @@ class BackgroundTrackerPlugin : Plugin() {
                     PackageManager.PERMISSION_GRANTED
         } else true
 
+        val activity = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            context.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) ==
+                    PackageManager.PERMISSION_GRANTED
+        } else true
+
         return JSObject()
             .put("fine",          fine)
             .put("background",    background)
             .put("notifications", notifications)
+            .put("activity",      activity)
     }
 
     private fun buildPermissionState(): String {
@@ -259,12 +317,19 @@ class BackgroundTrackerPlugin : Plugin() {
                     .put("background",          background)
                     .put("notifications",       notifications)
                     .put("batteryUnrestricted", batteryUnrestricted)
+                    .put("activityRecognition", ActivityRecognitionTracker.hasPermission(context))
                     .put("locationState",       buildPermissionState())
                     .put("manufacturer",        Build.MANUFACTURER ?: "")
                     // Whether an OEM autostart screen exists to send the user to.
                     // Autostart itself cannot be READ -- no public API exposes it --
                     // so the setup flow can only take the user there and ask.
                     .put("hasAutostartScreen",  resolveAutostartIntent() != null)
+                    // ...but it CAN be observed. If BootReceiver has ever
+                    // resumed tracking after a reboot then autostart demonstrably
+                    // works on this handset, whatever anyone claims. This is the
+                    // difference between a reported permission and a proven one.
+                    .put("autostartProven",     Prefs.bootRestartAt(context) > 0L)
+                    .put("lastBootRestartAt",   Prefs.bootRestartAt(context))
             )
         } catch (e: Exception) {
             Log.e(TAG, "checkAllPermissions failed: ${e.message}", e)

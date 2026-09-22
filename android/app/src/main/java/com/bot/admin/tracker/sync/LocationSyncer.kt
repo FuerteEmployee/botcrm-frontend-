@@ -100,6 +100,10 @@ object LocationSyncer {
                     put("speed",        loc.speed.toDouble())
                     put("batteryLevel", loc.batteryLevel)
                     put("activityType", loc.activityType)
+                    // How the label was obtained, so the server can trust a
+                    // sensor reading and discount a speed-derived guess.
+                    put("activitySource",     loc.activitySource)
+                    put("activityConfidence", loc.activityConfidence)
                     put("sessionId",    loc.sessionId ?: JSONObject.NULL)
                 })
             }

@@ -24,6 +24,7 @@ import { Route as UserAnnouncementsRouteImport } from './routes/user/announcemen
 import { Route as UserAdvanceSalaryRouteImport } from './routes/user/advance-salary'
 import { Route as UserAccountRouteImport } from './routes/user/account'
 import { Route as SuperTenantsRouteImport } from './routes/super/tenants'
+import { Route as SuperReleasesRouteImport } from './routes/super/releases'
 import { Route as SuperPlansRouteImport } from './routes/super/plans'
 import { Route as SuperOverviewRouteImport } from './routes/super/overview'
 import { Route as SuperDevicesRouteImport } from './routes/super/devices'
@@ -135,6 +136,11 @@ const UserAccountRoute = UserAccountRouteImport.update({
 const SuperTenantsRoute = SuperTenantsRouteImport.update({
   id: '/tenants',
   path: '/tenants',
+  getParentRoute: () => SuperRoute,
+} as any)
+const SuperReleasesRoute = SuperReleasesRouteImport.update({
+  id: '/releases',
+  path: '/releases',
   getParentRoute: () => SuperRoute,
 } as any)
 const SuperPlansRoute = SuperPlansRouteImport.update({
@@ -366,6 +372,7 @@ export interface FileRoutesByFullPath {
   '/super/devices': typeof SuperDevicesRoute
   '/super/overview': typeof SuperOverviewRoute
   '/super/plans': typeof SuperPlansRoute
+  '/super/releases': typeof SuperReleasesRoute
   '/super/tenants': typeof SuperTenantsRoute
   '/user/account': typeof UserAccountRoute
   '/user/advance-salary': typeof UserAdvanceSalaryRoute
@@ -417,6 +424,7 @@ export interface FileRoutesByTo {
   '/super/devices': typeof SuperDevicesRoute
   '/super/overview': typeof SuperOverviewRoute
   '/super/plans': typeof SuperPlansRoute
+  '/super/releases': typeof SuperReleasesRoute
   '/super/tenants': typeof SuperTenantsRoute
   '/user/account': typeof UserAccountRoute
   '/user/advance-salary': typeof UserAdvanceSalaryRoute
@@ -473,6 +481,7 @@ export interface FileRoutesById {
   '/super/devices': typeof SuperDevicesRoute
   '/super/overview': typeof SuperOverviewRoute
   '/super/plans': typeof SuperPlansRoute
+  '/super/releases': typeof SuperReleasesRoute
   '/super/tenants': typeof SuperTenantsRoute
   '/user/account': typeof UserAccountRoute
   '/user/advance-salary': typeof UserAdvanceSalaryRoute
@@ -529,6 +538,7 @@ export interface FileRouteTypes {
     | '/super/devices'
     | '/super/overview'
     | '/super/plans'
+    | '/super/releases'
     | '/super/tenants'
     | '/user/account'
     | '/user/advance-salary'
@@ -580,6 +590,7 @@ export interface FileRouteTypes {
     | '/super/devices'
     | '/super/overview'
     | '/super/plans'
+    | '/super/releases'
     | '/super/tenants'
     | '/user/account'
     | '/user/advance-salary'
@@ -635,6 +646,7 @@ export interface FileRouteTypes {
     | '/super/devices'
     | '/super/overview'
     | '/super/plans'
+    | '/super/releases'
     | '/super/tenants'
     | '/user/account'
     | '/user/advance-salary'
@@ -765,6 +777,13 @@ declare module '@tanstack/react-router' {
       path: '/tenants'
       fullPath: '/super/tenants'
       preLoaderRoute: typeof SuperTenantsRouteImport
+      parentRoute: typeof SuperRoute
+    }
+    '/super/releases': {
+      id: '/super/releases'
+      path: '/releases'
+      fullPath: '/super/releases'
+      preLoaderRoute: typeof SuperReleasesRouteImport
       parentRoute: typeof SuperRoute
     }
     '/super/plans': {
@@ -1136,6 +1155,7 @@ interface SuperRouteChildren {
   SuperDevicesRoute: typeof SuperDevicesRoute
   SuperOverviewRoute: typeof SuperOverviewRoute
   SuperPlansRoute: typeof SuperPlansRoute
+  SuperReleasesRoute: typeof SuperReleasesRoute
   SuperTenantsRoute: typeof SuperTenantsRoute
 }
 
@@ -1145,6 +1165,7 @@ const SuperRouteChildren: SuperRouteChildren = {
   SuperDevicesRoute: SuperDevicesRoute,
   SuperOverviewRoute: SuperOverviewRoute,
   SuperPlansRoute: SuperPlansRoute,
+  SuperReleasesRoute: SuperReleasesRoute,
   SuperTenantsRoute: SuperTenantsRoute,
 }
 
