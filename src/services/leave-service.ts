@@ -2,6 +2,32 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
 
+/** Compact duration label: "Half Day", "1 Day", "3 Days". */
+export function formatLeaveDuration(leave: Pick<Leave, 'duration' | 'dayPortion'>): string {
+  if (leave.dayPortion && leave.dayPortion !== 'full') return 'Half Day';
+  return `${leave.duration} Day${leave.duration > 1 ? 's' : ''}`;
+}
+
+/**
+ * How a leave reads to a human: "10 Aug 2026 · Half day (first half)" rather
+ * than "10/08/2026 to 10/08/2026 · 0.5 days".
+ *
+ * Defined once and used by both the admin list and the employee's own list, so
+ * the two cannot drift into describing the same row differently.
+ */
+export function formatLeaveSpan(leave: Pick<Leave, 'startDate' | 'endDate' | 'duration' | 'dayPortion'>): string {
+  const fmt = (d: string) =>
+    new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+
+  if (leave.dayPortion && leave.dayPortion !== 'full') {
+    const which = leave.dayPortion === 'first_half' ? 'first half' : 'second half';
+    return `${fmt(leave.startDate)} · Half day (${which})`;
+  }
+  const sameDay = new Date(leave.startDate).toDateString() === new Date(leave.endDate).toDateString();
+  if (sameDay) return `${fmt(leave.startDate)} · 1 day`;
+  return `${fmt(leave.startDate)} → ${fmt(leave.endDate)} · ${leave.duration} days`;
+}
+
 export interface Leave {
   _id: string;
   employeeId: {
@@ -23,6 +49,11 @@ export interface Leave {
   // Business days (weekends/holidays excluded) — computed server-side, not
   // user-editable, so it always matches what payroll actually charges.
   duration: number;
+  /**
+   * Which part of the day is taken off. Absent on every row written before
+   * half-days existed, so treat undefined as "full".
+   */
+  dayPortion?: 'full' | 'first_half' | 'second_half';
   reason: string;
   status: "pending" | "approved" | "rejected";
   adminRemark?: string;
@@ -44,7 +75,7 @@ export function useLeaveService() {
   });
 
   const createMutation = useMutation({
-    mutationFn: async (payload: { employeeId?: string; leaveTypeId: string; startDate: string; endDate: string; reason: string }) => {
+    mutationFn: async (payload: { employeeId?: string; leaveTypeId: string; startDate: string; endDate: string; reason: string; dayPortion?: 'full' | 'first_half' | 'second_half' }) => {
       const { data } = await apiClient.post("/leaves", payload);
       return data;
     },

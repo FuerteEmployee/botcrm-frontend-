@@ -26,7 +26,7 @@ import { Card } from "@/components/ui/card";
 import { DataTable, DataTableCell, DataTableRow } from "@/components/shared/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { useLeaveService, type Leave } from "@/services/leave-service";
+import { useLeaveService, formatLeaveSpan, formatLeaveDuration, type Leave } from "@/services/leave-service";
 import { useLeaveTypeService } from "@/services/leave-type-service";
 import { useEmployeeService } from "@/services/employee-service";
 import { toast } from "sonner";
@@ -146,11 +146,17 @@ function LeavesPage() {
   const [hrFormLeaveTypeId, setHrFormLeaveTypeId] = useState("");
   const [hrFormStartDate, setHrFormStartDate] = useState("");
   const [hrFormEndDate, setHrFormEndDate] = useState("");
+  // Half day / one day / date range. Only a range uses hrFormEndDate; the other
+  // two are a single date, and the server refuses a half day whose start and
+  // end differ.
+  const [hrFormMode, setHrFormMode] = useState<"half" | "single" | "range">("single");
+  const [hrFormHalfPortion, setHrFormHalfPortion] = useState<"first_half" | "second_half">("first_half");
   const [hrFormReason, setHrFormReason] = useState("");
 
   const handleHrApplySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!hrFormEmployeeId || !hrFormLeaveTypeId || !hrFormStartDate || !hrFormEndDate) {
+    if (!hrFormEmployeeId || !hrFormLeaveTypeId || !hrFormStartDate
+        || (hrFormMode === "range" && !hrFormEndDate)) {
       toast.error("Please fill in all required fields.");
       return;
     }
@@ -159,14 +165,17 @@ function LeavesPage() {
         employeeId: hrFormEmployeeId,
         leaveTypeId: hrFormLeaveTypeId,
         startDate: hrFormStartDate,
-        endDate: hrFormEndDate,
+        endDate: hrFormMode === "range" ? hrFormEndDate : hrFormStartDate,
         reason: hrFormReason,
+        dayPortion: hrFormMode === "half" ? hrFormHalfPortion : "full",
       });
       setHrApplyOpen(false);
       setHrFormEmployeeId("");
       setHrFormLeaveTypeId("");
       setHrFormStartDate("");
       setHrFormEndDate("");
+      setHrFormMode("single");
+      setHrFormHalfPortion("first_half");
       setHrFormReason("");
     } catch {
       // toast already shown by the service
@@ -203,7 +212,7 @@ function LeavesPage() {
       />
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         <StatCard label="Pending Requests" value={pendingCount} icon={Clock} accent="warning" delay={0} />
         <StatCard label="Approved Leaves" value={approvedCount} icon={CheckCircle2} accent="success" delay={0.05} />
         <StatCard label="Total Requests" value={leaves.length} icon={CalendarDays} accent="primary" delay={0.1} />
@@ -301,14 +310,14 @@ function LeavesPage() {
                 }
                 statusNode={<Badge variant="outline" className={statusBadgeClass(leave.status)}>{leave.status}</Badge>}
                 metaLeft={{ icon: Layers, label: leave.leaveTypeId?.leaveName || "Leave" }}
-                metaRight={{ icon: Calendar, label: `${leave.duration} Day${leave.duration > 1 ? "s" : ""}` }}
+                metaRight={{ icon: Calendar, label: formatLeaveDuration(leave) }}
               >
                 <div className="relative">
                   <div className="text-[12px] text-muted-foreground/80 line-clamp-2 italic mt-1 mb-3">"{leave.reason}"</div>
                   <div className="flex items-center justify-between pt-3 border-t border-border/40">
                     <div className="flex items-center gap-2 text-[11px] text-muted-foreground font-medium">
                       <Clock className="h-3 w-3" />
-                      {new Date(leave.startDate).toLocaleDateString()} — {new Date(leave.endDate).toLocaleDateString()}
+                      {formatLeaveSpan(leave)}
                     </div>
                     <div className="flex items-center gap-1">
                       {leave.status === "pending" && canEdit && (
@@ -366,9 +375,9 @@ function LeavesPage() {
                     </div>
                   </DataTableCell>
                   <DataTableCell>
-                    <div className="text-[13px] font-bold text-primary">{leave.duration} Day{leave.duration > 1 ? "s" : ""}</div>
+                    <div className="text-[13px] font-bold text-primary">{formatLeaveDuration(leave)}</div>
                     <div className="text-[11px] text-muted-foreground font-medium">
-                      {new Date(leave.startDate).toLocaleDateString()} to {new Date(leave.endDate).toLocaleDateString()}
+                      {formatLeaveSpan(leave)}
                     </div>
                   </DataTableCell>
                   <DataTableCell className="text-[12px] text-muted-foreground max-w-[180px] truncate italic">"{leave.reason}"</DataTableCell>
@@ -434,7 +443,7 @@ function LeavesPage() {
                     <div className="space-y-1">
                       <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Duration</span>
                       <div className="font-bold text-primary flex items-center gap-1">
-                        <Calendar className="h-4 w-4" /> {selectedLeave.duration} Days
+                        <Calendar className="h-4 w-4" /> {formatLeaveDuration(selectedLeave)}
                       </div>
                     </div>
                     <div className="col-span-2 pt-2 border-t border-border/40 mt-2">
@@ -537,15 +546,70 @@ function LeavesPage() {
                 </Select>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Duration</label>
+                <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-muted">
+                  {([
+                    { key: "half", label: "Half Day" },
+                    { key: "single", label: "One Day" },
+                    { key: "range", label: "Date Range" },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setHrFormMode(opt.key)}
+                      className={cn(
+                        "h-9 rounded-lg text-[12px] font-bold transition-all",
+                        hrFormMode === opt.key
+                          ? "bg-background text-primary shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {hrFormMode === "half" && (
                 <div className="space-y-2">
-                  <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Start Date</label>
+                  <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Which Half</label>
+                  <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-muted">
+                    {([
+                      { key: "first_half", label: "First Half" },
+                      { key: "second_half", label: "Second Half" },
+                    ] as const).map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => setHrFormHalfPortion(opt.key)}
+                        className={cn(
+                          "h-9 rounded-lg text-[12px] font-bold transition-all",
+                          hrFormHalfPortion === opt.key
+                            ? "bg-background text-primary shadow-sm"
+                            : "text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className={cn("gap-4", hrFormMode === "range" ? "grid grid-cols-2" : "grid grid-cols-1")}>
+                <div className="space-y-2">
+                  <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">
+                    {hrFormMode === "range" ? "Start Date" : "Date"}
+                  </label>
                   <FormInput type="date" className="h-12 rounded-xl" value={hrFormStartDate} onChange={(e) => setHrFormStartDate(e.target.value)} />
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">End Date</label>
-                  <FormInput type="date" className="h-12 rounded-xl" value={hrFormEndDate} onChange={(e) => setHrFormEndDate(e.target.value)} />
-                </div>
+                {hrFormMode === "range" && (
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">End Date</label>
+                    <FormInput type="date" className="h-12 rounded-xl" value={hrFormEndDate} onChange={(e) => setHrFormEndDate(e.target.value)} />
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
