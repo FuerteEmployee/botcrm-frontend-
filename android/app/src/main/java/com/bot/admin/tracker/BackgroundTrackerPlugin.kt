@@ -67,6 +67,10 @@ class BackgroundTrackerPlugin : Plugin() {
 
     companion object {
         private const val TAG = "BgTracker/Plugin"
+
+        /** How long to wait for the service to report itself up before calling it a failure. */
+        private const val CONFIRM_TIMEOUT_MS = 6_000L
+        private const val CONFIRM_POLL_MS = 200L
     }
 
     // Coroutine scope for off-thread DB access (count query for getStatus).
@@ -93,17 +97,78 @@ class BackgroundTrackerPlugin : Plugin() {
 
         val intent = Intent(context, LocationTrackingService::class.java)
             .apply { action = LocationTrackingService.ACTION_START }
+
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
             }
-            Log.i(TAG, "start() dispatched (session=$sessionId)")
-            call.resolve(JSObject().put("started", true))
         } catch (e: Exception) {
-            Log.e(TAG, "start() failed: ${e.message}")
-            call.reject("Failed to start tracking service: ${e.message}")
+            // The synchronous refusal: ForegroundServiceStartNotAllowedException
+            // and friends. Recorded, not just logged -- see below.
+            Log.e(TAG, "start() dispatch failed: ${e.javaClass.simpleName}: ${e.message}")
+            TrackerEventLog.record(
+                context, TrackerEventLog.START_FAILED,
+                mapOf("stage" to "dispatch", "error" to e.javaClass.simpleName),
+            )
+            scheduleImmediateRetry()
+            call.resolve(JSObject().put("started", false))
+            return
+        }
+
+        // CONFIRM, do not assume.
+        //
+        // startForegroundService() returns the moment the start is DISPATCHED.
+        // It says nothing about whether the service came up: Android kills a
+        // service that has not called startForeground() within ~5 s, and
+        // delivers that failure asynchronously, so it can never reach the catch
+        // above. Resolving `started: true` here was therefore a claim the code
+        // had no evidence for -- and the web layer reads it to decide whether
+        // to run its own fallback, so a false positive means NEITHER tracker is
+        // running and nothing anywhere says so.
+        //
+        // Brij Fuerte, 2026-09-22: punched in at 13:37, the service never came
+        // up, and the next background fix was at 15:14 when the watchdog
+        // happened to run. An hour out of the office went unrecorded.
+        //
+        // So wait for the service to actually report itself alive. This runs on
+        // a coroutine rather than blocking the bridge thread (constraint #10).
+        pluginScope.launch {
+            var up = false
+            val deadline = System.currentTimeMillis() + CONFIRM_TIMEOUT_MS
+            while (System.currentTimeMillis() < deadline) {
+                if (LocationTrackingService.isRunning) { up = true; break }
+                kotlinx.coroutines.delay(CONFIRM_POLL_MS)
+            }
+
+            if (!up) {
+                Log.e(TAG, "start() dispatched but service never came up")
+                TrackerEventLog.record(
+                    context, TrackerEventLog.START_FAILED,
+                    mapOf("stage" to "confirm", "waitedMs" to CONFIRM_TIMEOUT_MS),
+                )
+                scheduleImmediateRetry()
+            } else {
+                Log.i(TAG, "start() confirmed up (session=$sessionId)")
+            }
+            call.resolve(JSObject().put("started", up))
+        }
+    }
+
+    /**
+     * Ask the watchdog to try again NOW rather than at its next periodic slot.
+     *
+     * The periodic job floors at 15 minutes and is deferred further in Doze --
+     * observed at 97 minutes on the failure this was written for. An expedited
+     * one-off runs as soon as the system will allow, and the periodic job stays
+     * as the backstop behind it.
+     */
+    private fun scheduleImmediateRetry() {
+        try {
+            TrackerWatchdogWorker.scheduleImmediate(context)
+        } catch (e: Throwable) {
+            Log.w(TAG, "could not schedule immediate retry: ${e.message}")
         }
     }
 

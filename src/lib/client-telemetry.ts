@@ -322,7 +322,7 @@ let reportingError = false;
 
 export interface ReportedError {
   message: string;
-  kind?: "ui" | "network" | "unhandled";
+  kind?: "ui" | "network" | "unhandled" | "tracker";
   stack?: string | null;
   route?: string | null;
   requestUrl?: string | null;

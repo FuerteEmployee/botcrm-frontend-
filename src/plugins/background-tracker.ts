@@ -149,11 +149,43 @@ export async function startBackgroundTracking(opts: StartOptions): Promise<boole
   if (!available()) return false;
   try {
     const res = await Native.start(opts);
-    return !!res?.started;
+    // `started` now means the service CONFIRMED it is up, not merely that the
+    // start was dispatched -- see BackgroundTrackerPlugin.start(). A false here
+    // is a real failure on a build that has the plugin, and the caller must
+    // treat it as "not tracking" rather than as "use the web fallback and carry
+    // on", because the web tracker stops the moment the WebView is suspended.
+    const started = !!res?.started;
+    if (!started) {
+      console.warn("[bg-tracker] native service did not come up");
+      reportTrackerIssue("native background tracker did not start");
+    }
+    return started;
   } catch (err) {
     console.warn("[bg-tracker] start failed:", err);
+    reportTrackerIssue(`native background tracker threw: ${String((err as Error)?.message || err)}`);
     return false;
   }
+}
+
+/**
+ * Surface a tracker start failure where somebody will actually see it.
+ *
+ * The native side records its own `start_failed` event, but that only reaches
+ * the server when the service is alive enough to flush its queue -- which is
+ * exactly what is in doubt here. This is the independent path: it goes through
+ * the ordinary client-error channel, so a device that cannot track still says
+ * so from the web layer.
+ *
+ * Imported lazily because client-telemetry pulls in apiClient, and this module
+ * is imported by the punch screen at load; a static import would drag the axios
+ * instance into that chunk for a path that almost never runs.
+ */
+function reportTrackerIssue(message: string) {
+  void import("@/lib/client-telemetry")
+    .then((m) => m.reportClientError?.({ kind: "tracker", message }))
+    .catch(() => {
+      /* telemetry must never break a punch */
+    });
 }
 
 export async function stopBackgroundTracking(): Promise<void> {
