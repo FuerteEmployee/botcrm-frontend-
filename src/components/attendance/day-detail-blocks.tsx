@@ -94,6 +94,27 @@ function actualOrConfiguredLunchMins(record: AttendanceRecord, lunchMins: number
 }
 
 /**
+ * Live worked ms for someone still on duty right now, correctly handling
+ * where they are relative to lunch — NOT a blanket "elapsed minus configured
+ * lunch", which would wrongly dock a person 30 minutes of lunch they haven't
+ * taken yet (showing "2 min worked" 32 minutes into their shift).
+ *
+ * - Not yet at lunch: count everything from punch-in to now.
+ * - Currently on lunch break (lunch-in set, no lunch-out yet): the clock
+ *   pauses — count only up to when lunch started.
+ * - Back from lunch: count elapsed time minus the actual lunch gap.
+ */
+function liveWorkedMs(record: AttendanceRecord): number {
+  const punchInMs = new Date(record.punchIn!).getTime();
+  const lunchInMs = record.lunchInTime ? new Date(record.lunchInTime).getTime() : null;
+  const lunchOutMs = record.lunchOutTime ? new Date(record.lunchOutTime).getTime() : null;
+
+  if (lunchInMs && !lunchOutMs) return Math.max(0, lunchInMs - punchInMs);
+  if (lunchInMs && lunchOutMs) return Math.max(0, Date.now() - punchInMs - (lunchOutMs - lunchInMs));
+  return Math.max(0, Date.now() - punchInMs);
+}
+
+/**
  * Worked time for display, falling back to a clearly-flagged estimate only
  * when the stored `totalWorkMs` is missing/wrong in a known way. Never writes
  * anything, never changes `record.status` — see the file header comment.
@@ -116,9 +137,7 @@ export function getWorkedEstimate(
   }
 
   if (isRecordToday) {
-    const rawMs = Date.now() - new Date(record.punchIn).getTime();
-    const ms = Math.max(0, rawMs - actualOrConfiguredLunchMins(record, lunchMins) * 60000);
-    return { ms, estimated: true, reason: "live" };
+    return { ms: liveWorkedMs(record), estimated: true, reason: "live" };
   }
 
   if (!shift?.endTime) return null;

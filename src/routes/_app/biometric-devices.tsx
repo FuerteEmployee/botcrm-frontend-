@@ -309,7 +309,7 @@ function BiometricDevicesPage() {
 
       {/* ── PUNCH RULES ── */}
       <Card className="border-none shadow-sm bg-white rounded-2xl overflow-hidden">
-        <CardHeader className="border-b border-border/40 px-6 py-4 flex flex-row items-center justify-between">
+        <CardHeader className="border-b border-border/40 px-6 py-4 flex items-center justify-between gap-4 flex-wrap">
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center">
               <ListOrdered className="h-4 w-4 text-primary" />

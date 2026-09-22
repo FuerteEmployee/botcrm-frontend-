@@ -85,7 +85,7 @@ function HrPolicyPage() {
       <PageHeader
         title="HR Policies"
         description="Manage all hr policies records"
-        action={canCreate && (
+        actions={canCreate && (
           <Button onClick={openCreate} size="sm">
             <Plus className="h-4 w-4 mr-2" />Add New
           </Button>
@@ -109,7 +109,7 @@ function HrPolicyPage() {
       {/* ── Content ── */}
       <AnimatePresence mode="wait">
         {view === "list" ? (
-          <DataTable columns={["Policy Title", "Category", "Effective Date", "Actions"]}>
+          <DataTable headers={["Policy Title", "Category", "Effective Date", "Actions"]}>
             {filtered.map((item: any) => (
               <DataTableRow key={item._id}>
                 <DataTableCell>{(item as any).title}</DataTableCell>

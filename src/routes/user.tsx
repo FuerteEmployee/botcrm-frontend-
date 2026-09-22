@@ -198,7 +198,7 @@ function UserLayout() {
       </aside>
 
       {/* ─── MAIN CONTENT CONTAINER ────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-clip z-10 relative">
+      <div className="flex-1 flex flex-col overflow-clip z-10 relative min-w-0">
         {/* Mobile Glass Header */}
         <header className="md:hidden sticky top-0 z-30 bg-white/70 dark:bg-slate-900/60 backdrop-blur-xl border-b border-[#501537]/10 dark:border-white/5 px-4 sm:px-6 py-3 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
@@ -294,7 +294,7 @@ function UserLayout() {
                 />
               )}
               <IconComponent className={`h-[18px] w-[18px] shrink-0 relative z-10 ${isActive ? "stroke-[2.5px] text-[#501537] dark:text-white" : "stroke-[2px]"}`} />
-              <span className="w-full text-center text-[8px] tracking-tight font-semibold uppercase leading-none mt-0.5 relative z-10 truncate px-0.5">{item.label}</span>
+              <span className="w-full text-center text-[8px] tracking-tight font-semibold uppercase leading-tight mt-0.5 relative z-10 whitespace-normal px-0.5">{item.label}</span>
             </Link>
           );
         })}

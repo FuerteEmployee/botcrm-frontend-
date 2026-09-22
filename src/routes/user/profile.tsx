@@ -200,10 +200,10 @@ function UserProfilePage() {
 
       {/* Tabs: Personal Info / Bank Info / Other Info */}
       <Tabs defaultValue="personal" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 bg-slate-100 dark:bg-slate-800">
-          <TabsTrigger value="personal">Personal Info</TabsTrigger>
-          <TabsTrigger value="bank">Bank Info</TabsTrigger>
-          <TabsTrigger value="other">Other Info</TabsTrigger>
+        <TabsList className="grid w-full grid-cols-3 h-auto bg-slate-100 dark:bg-slate-800">
+          <TabsTrigger value="personal" className="whitespace-normal text-center leading-tight py-2 px-2">Personal Info</TabsTrigger>
+          <TabsTrigger value="bank" className="whitespace-normal text-center leading-tight py-2 px-2">Bank Info</TabsTrigger>
+          <TabsTrigger value="other" className="whitespace-normal text-center leading-tight py-2 px-2">Other Info</TabsTrigger>
         </TabsList>
 
         {/* Personal Info */}

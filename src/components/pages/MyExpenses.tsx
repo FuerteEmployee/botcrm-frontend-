@@ -16,6 +16,7 @@ import { useExpenseService, type Expense } from '@/services/expense-service';
 import { EXPENSE_CATEGORIES } from '@/lib/expense-categories';
 import { NewExpenseModal } from './NewExpenseModal';
 import { ViewExpenseModal } from './ViewExpenseModal';
+import { formatINR } from '@/lib/format';
 
 const RUPEE_FORMATTER = new Intl.NumberFormat('en-IN', {
   style: 'currency',
@@ -34,7 +35,11 @@ export function MyExpenses() {
   const summary = useMemo(() => {
     const totals: Record<"pending" | "approved" | "rejected", number> = { pending: 0, approved: 0, rejected: 0 };
     for (const exp of expenses) {
-      if (exp.status in totals) totals[exp.status as "pending" | "approved" | "rejected"] += exp.amount;
+      // Coerce to Number — some responses carry `amount` as a string, and
+      // `total += "1100"` is string concatenation in JS, not addition, which
+      // corrupts every total after the first expense into a garbled,
+      // ever-growing digit string.
+      if (exp.status in totals) totals[exp.status as "pending" | "approved" | "rejected"] += Number(exp.amount) || 0;
     }
     return totals;
   }, [expenses]);
@@ -91,7 +96,7 @@ export function MyExpenses() {
     <div className="w-full">
       {/* Header */}
       <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-4xl font-bold text-slate-900 dark:text-white mb-2">Expenses</h1>
             <p className="text-slate-600 dark:text-slate-400">View and submit your expense claims</p>

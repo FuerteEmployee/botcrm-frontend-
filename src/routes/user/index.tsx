@@ -1838,7 +1838,7 @@ function UserDashboard() {
           <div className={`col-span-1 ${activeTab === "calendar" ? "lg:col-span-8 order-1 lg:order-2" : "lg:col-span-12"} space-y-6`}>
 
             {activeTab === "calendar" ? (
-              <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-[28px] overflow-hidden p-6">
+              <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-[28px] overflow-hidden p-4 sm:p-6">
                 <div className="grid grid-cols-7 gap-2.5 text-center mb-3">
                   {weekdays.map(d => (
                     <span key={d} className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block py-1">

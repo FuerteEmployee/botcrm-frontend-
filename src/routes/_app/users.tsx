@@ -115,7 +115,7 @@ function UsersPage() {
       </div>
 
       {/* Table */}
-      <div className="border rounded-xl overflow-hidden bg-card">
+      <div className="border rounded-xl overflow-x-auto bg-card">
         <table className="w-full text-sm min-w-[640px]">
           <thead>
             <tr className="border-b bg-muted/40">
@@ -391,7 +391,7 @@ function UserFormDialog({
               </div>
             </div>
 
-            <div className="border rounded-lg overflow-hidden">
+            <div className="border rounded-lg overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-muted/50 border-b">

@@ -547,7 +547,7 @@ function AddEmployeePage() {
               {/* Employment Type */}
               <div className="col-span-1 md:col-span-2 space-y-2 pb-6 border-b border-border/40 mb-2">
                 <Label className="text-[12px] font-bold text-muted-foreground tracking-wider">Employment & Pay Type</Label>
-                <div className="grid grid-cols-3 gap-4 mt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-2">
                   {[
                     { id: 'monthly', label: 'Monthly', icon: CalendarCheck, desc: 'Fixed monthly' },
                     { id: 'daily', label: 'Daily', icon: Banknote, desc: 'Daily wage' },

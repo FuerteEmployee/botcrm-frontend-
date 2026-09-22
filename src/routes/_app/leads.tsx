@@ -472,7 +472,7 @@ function LeadsPage() {
         title="Lead Management"
         description={`${leads.length} total leads tracked from various sources`}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <Button
               variant="outline"
               size="sm"
@@ -1132,7 +1132,7 @@ function LeadsPage() {
                     </p>
                   )}
                 </div>
-                <div className="rounded-xl border border-border/40 overflow-hidden">
+                <div className="rounded-xl border border-border/40 overflow-x-auto">
                   <table className="w-full text-[11px]">
                     <thead className="bg-muted/30 text-muted-foreground font-bold uppercase tracking-wide">
                       <tr>

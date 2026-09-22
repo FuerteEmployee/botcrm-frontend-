@@ -15,6 +15,7 @@ import { motion } from 'framer-motion';
 import { Search, Clock, CheckCircle, XCircle, RotateCcw, Loader2, Plus } from 'lucide-react';
 import { useAdvanceSalaryService } from '@/services/advance-salary-service';
 import { NewRequestModal } from './NewRequestModal';
+import { formatINR } from '@/lib/format';
 
 const RUPEE_FORMATTER = new Intl.NumberFormat('en-IN', {
   style: 'currency',
@@ -44,7 +45,11 @@ export function MyAdvanceSalary({ onOpenNewRequest }: MyAdvanceSalaryProps) {
   const summary = useMemo(() => {
     const totals = { pending: 0, approved: 0, rejected: 0, repaid: 0 };
     for (const req of requests) {
-      const value = req.status === 'approved' ? (req.approvedAmount ?? req.amount) : req.amount;
+      // Coerce to Number — some responses carry amount/approvedAmount as a
+      // string, and `total += "1100"` is string concatenation in JS, not
+      // addition, which corrupts every total after the first request into a
+      // garbled, ever-growing digit string.
+      const value = Number(req.status === 'approved' ? (req.approvedAmount ?? req.amount) : req.amount) || 0;
       if (req.status in totals) totals[req.status] += value;
     }
     return totals;
@@ -121,7 +126,7 @@ export function MyAdvanceSalary({ onOpenNewRequest }: MyAdvanceSalaryProps) {
     <div className="w-full">
       {/* Header */}
       <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h1 className="text-4xl font-bold text-slate-900 dark:text-white mb-2">
               My Requests
@@ -157,7 +162,7 @@ export function MyAdvanceSalary({ onOpenNewRequest }: MyAdvanceSalaryProps) {
                   {stat.label}
                 </p>
                 <p className={`text-3xl font-bold ${stat.textColor}`}>
-                  {RUPEE_FORMATTER.format(stat.value)}
+                  {formatINR(stat.value)}
                 </p>
               </CardContent>
             </Card>

@@ -85,7 +85,7 @@ function ProjectPage() {
       <PageHeader
         title="Projects"
         description="Manage all projects records"
-        action={canCreate && (
+        actions={canCreate && (
           <Button onClick={openCreate} size="sm">
             <Plus className="h-4 w-4 mr-2" />Add New
           </Button>
@@ -109,7 +109,7 @@ function ProjectPage() {
       {/* ── Content ── */}
       <AnimatePresence mode="wait">
         {view === "list" ? (
-          <DataTable columns={["Project Name", "Client", "Deadline", "Status", "Actions"]}>
+          <DataTable headers={["Project Name", "Client", "Deadline", "Status", "Actions"]}>
             {filtered.map((item: any) => (
               <DataTableRow key={item._id}>
                 <DataTableCell>{(item as any).name}</DataTableCell>

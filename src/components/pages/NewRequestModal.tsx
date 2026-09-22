@@ -11,6 +11,14 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
 import { Loader2 } from 'lucide-react';
+import { toast } from 'sonner';
+
+// A sane ceiling on a single advance-salary/loan request. Without one, a typo
+// or a pasted value (a "1" key held down, an accidental paste) saves straight
+// through — no HTML number input enforces a digit limit on its own, and nothing
+// server-side checked either, which is exactly how a request for ₹1.11e+23 once
+// ended up in the database.
+const MAX_AMOUNT = 10_000_000; // ₹1 crore
 
 interface NewRequestModalProps {
   open: boolean;
@@ -39,11 +47,17 @@ export function NewRequestModal({
 
   const handleSubmit = async () => {
     if (!isFormValid) return;
-    
+
+    const parsedAmount = parseFloat(amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount > MAX_AMOUNT) {
+      toast.error(`Amount can't exceed ₹${MAX_AMOUNT.toLocaleString('en-IN')}.`);
+      return;
+    }
+
     try {
       await onSubmit({
         type: requestType,
-        amount: parseFloat(amount),
+        amount: parsedAmount,
         reason: reason.trim(),
         notes: notes.trim() || undefined,
       });
@@ -112,6 +126,7 @@ export function NewRequestModal({
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
                 min="1"
+                max={MAX_AMOUNT}
                 className="pl-8 text-base font-medium rounded-lg h-10 border-slate-200 dark:border-slate-700"
               />
             </div>

@@ -823,7 +823,7 @@ function EmployeeDetailsPage() {
                   </CardHeader>
                   <CardContent className="p-0">
                     <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
+                      <table className="w-full text-sm min-w-[720px]">
                         <thead className="bg-muted/30 text-muted-foreground font-medium text-xs uppercase tracking-wider">
                           <tr>
                             <th className="px-6 py-4 text-left">Date</th>

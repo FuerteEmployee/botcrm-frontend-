@@ -85,7 +85,7 @@ function TrainingPage() {
       <PageHeader
         title="Training & Development"
         description="Manage all training & development records"
-        action={canCreate && (
+        actions={canCreate && (
           <Button onClick={openCreate} size="sm">
             <Plus className="h-4 w-4 mr-2" />Add New
           </Button>
@@ -109,7 +109,7 @@ function TrainingPage() {
       {/* ── Content ── */}
       <AnimatePresence mode="wait">
         {view === "list" ? (
-          <DataTable columns={["Training Title", "Trainer", "Start Date", "Status", "Actions"]}>
+          <DataTable headers={["Training Title", "Trainer", "Start Date", "Status", "Actions"]}>
             {filtered.map((item: any) => (
               <DataTableRow key={item._id}>
                 <DataTableCell>{(item as any).title}</DataTableCell>

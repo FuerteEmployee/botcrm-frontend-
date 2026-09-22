@@ -545,7 +545,7 @@ function LoginPage() {
                     </AnimatePresence>
 
                     <div
-                      className="flex justify-center gap-2 sm:gap-3"
+                      className="flex justify-center gap-1.5 sm:gap-3"
                       role="group"
                       aria-label="6-digit verification code"
                     >

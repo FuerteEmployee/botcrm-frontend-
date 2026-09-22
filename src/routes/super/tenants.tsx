@@ -136,8 +136,8 @@ function TenantsPage() {
 
       <div className="p-6 space-y-4">
         {/* Filters */}
-        <div className="flex items-center gap-3">
-          <div className="flex border rounded-lg p-0.5 bg-muted/30">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="flex border rounded-lg p-0.5 bg-muted/30 shrink-0">
             {["all", "active", "trial", "expired"].map((f) => (
               <button
                 key={f}
@@ -152,7 +152,7 @@ function TenantsPage() {
               </button>
             ))}
           </div>
-          <div className="relative flex-1 max-w-xs">
+          <div className="relative flex-1 w-full sm:max-w-xs">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
               placeholder="Search company..."

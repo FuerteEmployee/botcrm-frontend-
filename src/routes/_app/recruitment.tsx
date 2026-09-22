@@ -85,7 +85,7 @@ function JobPostingPage() {
       <PageHeader
         title="Recruitment"
         description="Manage all recruitment records"
-        action={canCreate && (
+        actions={canCreate && (
           <Button onClick={openCreate} size="sm">
             <Plus className="h-4 w-4 mr-2" />Add New
           </Button>
@@ -109,7 +109,7 @@ function JobPostingPage() {
       {/* ── Content ── */}
       <AnimatePresence mode="wait">
         {view === "list" ? (
-          <DataTable columns={["Job Title", "Department", "Openings", "Status", "Actions"]}>
+          <DataTable headers={["Job Title", "Department", "Openings", "Status", "Actions"]}>
             {filtered.map((item: any) => (
               <DataTableRow key={item._id}>
                 <DataTableCell>{(item as any).title}</DataTableCell>

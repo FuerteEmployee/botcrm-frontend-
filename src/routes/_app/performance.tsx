@@ -85,7 +85,7 @@ function PerformanceReviewPage() {
       <PageHeader
         title="Performance Reviews"
         description="Manage all performance reviews records"
-        action={canCreate && (
+        actions={canCreate && (
           <Button onClick={openCreate} size="sm">
             <Plus className="h-4 w-4 mr-2" />Add New
           </Button>
@@ -109,7 +109,7 @@ function PerformanceReviewPage() {
       {/* ── Content ── */}
       <AnimatePresence mode="wait">
         {view === "list" ? (
-          <DataTable columns={["Review Period", "Rating (1-5)", "Comments", "Status", "Actions"]}>
+          <DataTable headers={["Review Period", "Rating (1-5)", "Comments", "Status", "Actions"]}>
             {filtered.map((item: any) => (
               <DataTableRow key={item._id}>
                 <DataTableCell>{(item as any).period}</DataTableCell>
