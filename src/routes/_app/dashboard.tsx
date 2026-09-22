@@ -197,8 +197,14 @@ function DashboardPage() {
       )}
 
       {/* Stat cards — row 1 */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      {/* Swipeable on phones, a grid from sm up.
+          Seven stat cards stacked 2-up and 1-up ran to roughly 700px before any
+          real content -- the whole dashboard was below the fold. One scrollable
+          strip per row costs about 140px and shows two and a bit cards, so the
+          cut edge advertises that there are more. */}
+      <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:overflow-visible sm:grid sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
+            className="shrink-0 w-[44%] snap-start sm:w-auto sm:shrink"
           label="Total Employees"
           value={stats.totalEmployees}
           icon={Users}
@@ -207,6 +213,7 @@ function DashboardPage() {
           to="/employees"
         />
         <StatCard
+            className="shrink-0 w-[44%] snap-start sm:w-auto sm:shrink"
           label={`Present ${dayLabel}`}
           value={stats.presentToday}
           icon={UserCheck}
@@ -216,6 +223,7 @@ function DashboardPage() {
           search={{ status: "present" }}
         />
         <StatCard
+            className="shrink-0 w-[44%] snap-start sm:w-auto sm:shrink"
           label={`Absent ${dayLabel}`}
           value={stats.absentToday}
           icon={UserX}
@@ -230,6 +238,7 @@ function DashboardPage() {
             Absent, so nobody was ever told one existed. */}
         {(stats.needsReviewToday ?? 0) > 0 ? (
           <StatCard
+            className="shrink-0 w-[44%] snap-start sm:w-auto sm:shrink"
             label={`Needs Review ${dayLabel}`}
             value={stats.needsReviewToday ?? 0}
             icon={AlertTriangle}
@@ -240,6 +249,7 @@ function DashboardPage() {
           />
         ) : (
           <StatCard
+            className="shrink-0 w-[44%] snap-start sm:w-auto sm:shrink"
             label={`Half Day ${dayLabel}`}
             value={stats.halfDayToday}
             icon={Clock}
@@ -252,8 +262,9 @@ function DashboardPage() {
       </div>
 
       {/* Stat cards — row 2 */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:overflow-visible sm:grid sm:grid-cols-3">
         <StatCard
+            className="shrink-0 w-[44%] snap-start sm:w-auto sm:shrink"
           label="Monthly Salary"
           value={fmtINR(stats.totalSalary)}
           icon={Wallet}
@@ -262,6 +273,7 @@ function DashboardPage() {
           to="/salary"
         />
         <StatCard
+            className="shrink-0 w-[44%] snap-start sm:w-auto sm:shrink"
           label="Total Expense"
           value={fmtINR(stats.totalExpenses)}
           icon={BadgeDollarSign}
@@ -270,6 +282,7 @@ function DashboardPage() {
           to="/expenses"
         />
         <StatCard
+            className="shrink-0 w-[44%] snap-start sm:w-auto sm:shrink"
           label="Total Leads"
           value={stats.totalLeads}
           icon={TrendingUp}
@@ -288,7 +301,7 @@ function DashboardPage() {
             transition={{ delay: 0.25 }}
             className="lg:col-span-2"
           >
-            <Card className="p-5 border border-border/60 bg-white rounded-xl shadow-sm h-full">
+            <Card className="p-4 sm:p-5 border border-border/60 bg-white rounded-xl shadow-sm h-full">
               <div className="flex items-center justify-between mb-4">
                 <SectionTitle
                   title="Attendance Performance"
@@ -309,7 +322,7 @@ function DashboardPage() {
                   </Badge>
                 </div>
               </div>
-              <div className="h-[260px] min-h-[260px]">
+              <div className="h-[190px] min-h-[190px] sm:h-[260px] sm:min-h-[260px]">
                 {!hasTrendData ? (
                   <div className="h-full flex items-center justify-center text-[13px] text-muted-foreground">
                     No attendance recorded in the last 7 days
@@ -372,9 +385,9 @@ function DashboardPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3 }}
           >
-            <Card className="p-5 border border-border/60 bg-white rounded-xl shadow-sm h-full">
+            <Card className="p-4 sm:p-5 border border-border/60 bg-white rounded-xl shadow-sm h-full">
               <SectionTitle title="Budget Allocation" subtitle="By department" />
-              <div className="h-[260px] min-h-[260px]">
+              <div className="h-[190px] min-h-[190px] sm:h-[260px] sm:min-h-[260px]">
                 {!hasSalaryData ? (
                   <div className="h-full flex items-center justify-center text-[13px] text-muted-foreground">
                     No payroll generated for this month yet
@@ -423,14 +436,14 @@ function DashboardPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.35 }}
           >
-            <Card className="p-5 border border-border/60 bg-white rounded-xl shadow-sm h-full">
+            <Card className="p-4 sm:p-5 border border-border/60 bg-white rounded-xl shadow-sm h-full">
               <div className="flex items-center justify-between">
                 <SectionTitle title="Team Strength" />
                 <Badge variant="secondary" className="text-[11px] font-medium mb-4 px-2 py-0.5">
                   Live
                 </Badge>
               </div>
-              <div className="h-[220px] min-h-[220px]">
+              <div className="h-[165px] min-h-[165px] sm:h-[220px] sm:min-h-[220px]">
                 {!hasHeadcountData ? (
                   <div className="h-full flex items-center justify-center text-[13px] text-muted-foreground">
                     No departments assigned yet
@@ -490,7 +503,7 @@ function DashboardPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.4 }}
           >
-            <Card className="p-5 border border-border/60 bg-white rounded-xl shadow-sm h-full">
+            <Card className="p-4 sm:p-5 border border-border/60 bg-white rounded-xl shadow-sm h-full">
               <SectionTitle title="Recent Acquisitions" subtitle="Latest employee additions" />
               <ul className="space-y-2">
                 {(recentEmployees as RecentEmployee[]).map((e) => (
@@ -538,7 +551,7 @@ function DashboardPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.45 }}
           >
-            <Card className="p-5 border border-border/60 bg-white rounded-xl shadow-sm h-full">
+            <Card className="p-4 sm:p-5 border border-border/60 bg-white rounded-xl shadow-sm h-full">
               <SectionTitle
                 title="Pending Tickets"
                 subtitle="Attendance requests awaiting review"

@@ -255,7 +255,9 @@ function BranchesPage() {
       />
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      {/* Three across on every width. Stacked they ran to about 390px before
+          the branch list even started; in one row that is roughly 120px. */}
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         <StatCard label="Total Branches" value={list.length} icon={MapPin} accent="primary" delay={0} />
         <StatCard label="Total Staff" value={totalEmployees} icon={Users} accent="success" delay={0.05} />
         <StatCard label="Cities Covered" value={uniqueCities} icon={Globe} accent="info" delay={0.1} />

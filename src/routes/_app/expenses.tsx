@@ -158,8 +158,8 @@ function ExpensesPage() {
         }
       />
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <StatCard label="Total Portfolio" value={`₹${totalAmount.toLocaleString()}`} icon={Wallet} accent="primary" delay={0} />
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3 lg:gap-4">
+        <StatCard label="Total Portfolio" value={`₹${totalAmount.toLocaleString()}`} icon={Wallet} accent="primary" delay={0}  className="col-span-2 sm:col-span-1" />
         <StatCard label="Awaiting Approval" value={pendingCount} icon={Clock} accent="warning" delay={0.05} />
         <StatCard label="Active Employees" value={groupedByEmployee.length} icon={UserCheck} accent="info" delay={0.1} />
       </div>

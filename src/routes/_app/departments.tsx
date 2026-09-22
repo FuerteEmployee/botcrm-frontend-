@@ -121,7 +121,7 @@ function DepartmentsPage() {
       />
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-2 sm:gap-3">
         <StatCard label="Total Departments" value={list.length} icon={Building2} accent="primary" delay={0} />
         <StatCard label="Total Employees" value={totalEmployees} icon={Users} accent="success" delay={0.05} />
       </div>

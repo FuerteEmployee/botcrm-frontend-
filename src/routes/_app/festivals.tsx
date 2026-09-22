@@ -193,7 +193,7 @@ function FestivalsPage() {
       />
 
       {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-2 sm:gap-4">
         <StatCard label="Total Holidays" value={list.length} icon={CalendarDays} accent="primary" delay={0} />
         <StatCard label="Mandatory" value={mandatoryCount} icon={CalendarHeart} accent="success" delay={0.05} />
         <StatCard label="Upcoming" value={upcomingCount} icon={Gift} accent="warning" delay={0.1} />

@@ -115,7 +115,12 @@ function UsersPage() {
       </div>
 
       {/* Table */}
-      <div className="border rounded-xl overflow-hidden bg-card">
+      {/* overflow-x-AUTO, not hidden. The table declares min-w-[640px]; inside a
+          clipping wrapper that meant the right-hand columns simply could not be
+          reached on a phone, with nothing to indicate they existed. Every other
+          raw table in the app (super/tenants, super/billing, machines-manager,
+          ...) already scrolls; this one was the outlier. */}
+      <div className="border rounded-xl overflow-x-auto bg-card">
         <table className="w-full text-sm min-w-[640px]">
           <thead>
             <tr className="border-b bg-muted/40">
