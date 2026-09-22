@@ -36,6 +36,7 @@ import {
   acquirePosition,
   openLocationSettings,
   getPlatform,
+  isNativeApp,
   type LocationFailureReason,
 } from "@/lib/geolocation";
 // Lazy: Leaflet is ~148 KB and is only needed once the location-consent modal
@@ -436,6 +437,34 @@ function UserDashboard() {
   const trackingSetup = useTrackingSetup();
   const isOnline = useOnlineStatus();
 
+  /**
+   * Does this employee's punch need a GPS fix at all?
+   *
+   * Having a branch is the same test `beginPunch` already uses to decide
+   * whether to demand one, so field and branch-less staff keep punching exactly
+   * as they do now. Inventing a second rule here is how the client would start
+   * refusing punches the server would have accepted.
+   */
+  const locationRequired = !!profile?.branchId;
+
+  /**
+   * Location is BLOCKED — as opposed to merely not known yet.
+   *
+   * Only the reasons the employee can actually act on count. A `timeout` is
+   * deliberately excluded: the permission is granted and location services are
+   * on, the phone simply has not seen a satellite yet, and disabling the
+   * buttons then would strand somebody indoors with no way forward and send
+   * them into Settings to change nothing. `locationProbed` keeps "still
+   * checking" from reading as "broken" during the first seconds after load.
+   */
+  const locationBlocked =
+    locationRequired &&
+    locationProbed &&
+    !location &&
+    (locationFailReason === "denied" ||
+      locationFailReason === "unavailable" ||
+      locationFailReason === "unsupported");
+
   // Mandatory-update gate. Defaults to false and only ever becomes true after
   // a successful check against a real installed versionCode, so a failed or
   // unreadable check leaves punching exactly as it was.
@@ -520,6 +549,22 @@ function UserDashboard() {
       // Run the in-app tracker only when the native service did NOT take over.
       // Running both would double every fix, and duplicated points bias a
       // geofence decision toward wherever the phone was reporting most often.
+      //
+      // On a build WITH the plugin, `started: false` now means the service was
+      // asked for and did not come up -- not "this APK is too old". The web
+      // tracker is still started, because one fix is better than none and the
+      // employee is standing there punching in, but it is not a substitute:
+      // Android suspends WebView timers within seconds of the screen locking,
+      // so it goes quiet exactly when somebody walks out of the building.
+      //
+      // Brij Fuerte, 2026-09-22: exactly this. One `source: "app"` fix at
+      // 13:37, then nothing until the watchdog revived the service at 15:14 --
+      // the hour he was out of the office simply is not in the record.
+      //
+      // Retrying is already covered twice over and needs nothing here: the
+      // native side now enqueues an expedited watchdog run the moment a start
+      // fails (which survives this WebView going away), and the JS watchdog
+      // below re-attempts every 60 s for as long as the app is open.
       if (!started) startTracking(profile._id);
     })();
 
@@ -620,28 +665,73 @@ function UserDashboard() {
     return fallback;
   };
 
-  // Passive location fetch on load — only if permission is ALREADY granted.
-  // Never auto-prompts; tapping Punch In / Punch Out is the intentional trigger.
+  // Passive location fetch — only if permission is ALREADY granted. Never
+  // auto-prompts; tapping Punch In / Punch Out is the intentional trigger.
+  //
+  // Re-run whenever the app comes back to the foreground, because the punch
+  // controls are now gated on the outcome. Turning GPS on means leaving for
+  // Settings and coming back, and without a re-probe the employee would return
+  // to the very panel that had just sent them there, with no way to clear it.
+  // It closes the other direction too: GPS switched off while the app was in
+  // the background is noticed on return rather than at the next punch attempt.
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+
+    const probe = async () => {
       const result = await acquirePosition({ silent: true });
       if (cancelled) return;
       if (result.ok) {
         setLocation({ lat: result.coords.lat, lng: result.coords.lng });
         setLocationAccuracy(result.coords.accuracy);
+        setLocationFailReason(null);
         setLocationProbed(true);
         const addr = await resolveAddress(result.coords.lat, result.coords.lng);
         if (!cancelled) setAddress(addr);
       } else {
         // Only NOW is it fair to say something is wrong.
+        //
+        // The previously-known position is dropped on a hard failure: a fix
+        // from before GPS was switched off is not where the employee is now,
+        // and leaving it in place would keep the buttons live and let the punch
+        // be recorded against a stale location. A timeout keeps it -- nothing
+        // was turned off, the phone just has not re-fixed yet.
+        if (result.reason !== "timeout") {
+          setLocation(null);
+          setLocationAccuracy(null);
+        }
         setLocationFailReason(result.reason);
         setLocationProbed(true);
         setAddress("GPS permissions needed");
       }
-    })();
+    };
+
+    void probe();
+
+    // Both signals, as use-tracking-setup does, and for the same reason: the
+    // employee is sent to a SYSTEM screen to fix this, so returning is the only
+    // moment the new state can be observed. If `visibilitychange` does not fire
+    // in the WebView, the panel that sent them to Settings would still be there
+    // when they came back, with its only button sending them there again.
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void probe();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    let removeAppListener: (() => void) | undefined;
+    if (isNativeApp()) {
+      import("@capacitor/app")
+        .then(({ App }) => {
+          App.addListener("appStateChange", ({ isActive }) => { if (isActive) void probe(); })
+            .then((h) => { removeAppListener = () => void h.remove(); })
+            .catch(() => {});
+        })
+        .catch(() => {});
+    }
+
     return () => {
       cancelled = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      removeAppListener?.();
     };
   }, []);
 
@@ -697,6 +787,94 @@ function UserDashboard() {
     }
     setIsScanning(false);
   };
+
+  /**
+   * Close whatever part of the punch flow is open, and say why.
+   *
+   * Every piece of it is torn down together: the camera keeps running and the
+   * torch stays lit if `stopScannerCamera` is skipped, and a `scanType` left
+   * set re-renders the scanner over the top of the home screen.
+   */
+  const abortPunchFlow = (message: string) => {
+    stopScannerCamera();
+    setScanType(null);
+    setCapturedSelfie(null);
+    setScanLoading(false);
+    setShowLocationVerification(false);
+    setPendingPunch(null);
+    toast.error(message);
+  };
+
+  /**
+   * Leave the punch flow if the conditions that let it open stop being true.
+   *
+   * Checking once, at the moment Punch In is pressed, is not enough: location
+   * can be switched off in the notification shade while the map sheet or the
+   * selfie camera is still on screen, and the punch would then be recorded from
+   * whatever stale fix was captured before. This re-checks for as long as the
+   * flow is open and backs out the moment it cannot be satisfied.
+   *
+   * A `timeout` is NOT a reason to back out, for the same reason it is not a
+   * reason to disable the buttons: it means the phone has not got a fix yet,
+   * not that anything was turned off. Backing out on one would throw people out
+   * of the camera every time they stepped indoors.
+   *
+   * Only runs while something is open, so there is no polling on the idle home
+   * screen and no battery cost outside the few seconds a punch takes.
+   */
+  const punchFlowOpen = showLocationVerification || !!scanType;
+  useEffect(() => {
+    if (!punchFlowOpen) return;
+
+    // Network first: it needs no permission and no fix, and the punch request
+    // itself cannot succeed without it.
+    if (!isOnline) {
+      abortPunchFlow("You went offline, so the punch was cancelled. Reconnect and try again.");
+      return;
+    }
+
+    if (!locationRequired) return;
+
+    let cancelled = false;
+    let inFlight = false;
+
+    const check = async () => {
+      // A high-accuracy fix can take longer than the interval; overlapping
+      // requests would queue up behind each other and report stale outcomes.
+      if (inFlight || cancelled) return;
+      inFlight = true;
+      try {
+        const result = await acquirePosition({ silent: true });
+        if (cancelled || result.ok) return;
+        if (result.reason === "timeout") return;
+
+        // Record the failure as well as backing out. Closing the sheet alone
+        // would leave the buttons live against the fix captured before GPS was
+        // switched off, so the employee could reopen the flow immediately and
+        // punch from a stale position -- which is the thing being prevented.
+        setLocation(null);
+        setLocationAccuracy(null);
+        setLocationFailReason(result.reason);
+        setLocationProbed(true);
+        setAddress("GPS permissions needed");
+
+        abortPunchFlow(
+          result.reason === "unavailable"
+            ? "GPS was turned off, so the punch was cancelled. Turn location on and try again."
+            : "Location access was withdrawn, so the punch was cancelled.",
+        );
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    const id = window.setInterval(check, 6000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [punchFlowOpen, isOnline, locationRequired]);
 
   // A punch request can error on the client (dropped connection, a 500 while
   // the response was serialized, etc.) even though the backend already wrote
@@ -1461,6 +1639,43 @@ function UserDashboard() {
                   You need a connection to punch in or out. Your location is still being
                   recorded and will upload by itself.
                 </p>
+              </div>
+            ) : locationBlocked ? (
+              // Gates ALL FOUR actions -- punch in, punch out, start and end
+              // lunch -- because every one of them is geofenced server-side and
+              // would be refused anyway. Better to say so here than to let
+              // someone tap, wait, and read a rejection.
+              //
+              // A panel rather than disabled buttons, for the reason given on
+              // the shift-ended branch below: a greyed-out control explains
+              // nothing, and the employee's real question is "why can I not
+              // punch". This names the cause and opens the fix.
+              <div className="p-4 rounded-[18px] bg-red-500/10 border border-red-500/20 text-center space-y-2.5">
+                <div className="flex items-center justify-center gap-2">
+                  <MapPin className="h-4 w-4 text-red-600 dark:text-red-400" />
+                  <span className="text-[12px] font-bold text-red-900 dark:text-red-200">
+                    {locationFailReason === "unavailable"
+                      ? "Turn on GPS to punch"
+                      : locationFailReason === "unsupported"
+                        ? "This device cannot share location"
+                        : "Allow location to punch"}
+                  </span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-red-800/80 dark:text-red-200/70">
+                  {locationFailReason === "unavailable"
+                    ? "Your attendance is recorded against your branch, so location has to be on before you can punch in or out."
+                    : locationFailReason === "unsupported"
+                      ? "Ask your admin to record today through Attendance Regularization — your work still counts."
+                      : "Location permission is off for this app, so punches cannot be verified against your branch."}
+                </p>
+                {locationFailReason !== "unsupported" && (
+                  <Button
+                    onClick={() => setShowLocationHelp(true)}
+                    className="w-full h-10 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-[14px] border-none text-xs tracking-wider"
+                  >
+                    {locationFailReason === "unavailable" ? "Turn on location" : "Enable location"}
+                  </Button>
+                )}
               </div>
             ) : !isPunchedIn && shiftIsOver ? (
               // A greyed-out button explains nothing -- same reasoning as the
