@@ -57,6 +57,7 @@ function EmployeesPage() {
   const [hasMounted, setHasMounted] = useState(false);
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState<string>(departmentId || "all");
+  const [branchFilter, setBranchFilter] = useState<string>("all");
   const [shiftFilter, setShiftFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
 
@@ -94,6 +95,7 @@ function EmployeesPage() {
     limit: PAGE_SIZE,
     search,
     departmentId: deptFilter,
+    branchId: branchFilter,
     shiftId: shiftFilter,
     status: statusFilter
   });
@@ -199,6 +201,19 @@ function EmployeesPage() {
                 <SelectItem value="all">All Departments</SelectItem>
                 {departments.map((d: any) => (
                   <SelectItem key={d._id} value={d._id}>{d.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={branchFilter} onValueChange={(v) => { setBranchFilter(v); setPage(1); }}>
+              <SelectTrigger className="w-full md:w-[170px] h-10 border border-info/20 bg-info/5 text-info hover:bg-info/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
+                <MapPin className="h-3.5 w-3.5" />
+                <SelectValue placeholder="Branch" />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-border/60">
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((b: any) => (
+                  <SelectItem key={b._id} value={b._id}>{b.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

@@ -38,6 +38,7 @@ export interface Employee {
   email?: string;
   departmentId?: string;
   branchId?: string;
+  branchIds?: string[]; // all branches assigned; branchId is kept as the primary one, and is just branchIds[0]
   shiftId?: string;
   shiftIds?: string[]; // all shifts assigned; shiftId is kept as the primary one for attendance timing
   salary: number;
@@ -100,22 +101,24 @@ interface EmployeeParams {
   limit?: number;
   search?: string;
   departmentId?: string;
+  branchId?: string;
   shiftId?: string;
   status?: string;
 }
 
 export function useEmployeeService(params: EmployeeParams = {}) {
   const queryClient = useQueryClient();
-  const { page = 1, limit = 10, search = "", departmentId = "all", shiftId = "all", status = "active" } = params;
+  const { page = 1, limit = 10, search = "", departmentId = "all", branchId = "all", shiftId = "all", status = "active" } = params;
 
   const { data, isLoading, isFetching } = useQuery<EmployeeResponse>({
-    queryKey: ["employees", page, limit, search, departmentId, shiftId, status],
+    queryKey: ["employees", page, limit, search, departmentId, branchId, shiftId, status],
     queryFn: async () => {
       const qp = new URLSearchParams();
       qp.append("page", page.toString());
       qp.append("limit", limit.toString());
       if (search) qp.append("search", search);
       if (departmentId && departmentId !== "all") qp.append("departmentId", departmentId);
+      if (branchId && branchId !== "all") qp.append("branchId", branchId);
       if (shiftId && shiftId !== "all") qp.append("shiftId", shiftId);
       if (status && status !== "all") qp.append("status", status);
 
@@ -130,12 +133,21 @@ export function useEmployeeService(params: EmployeeParams = {}) {
             e.name?.toLowerCase().includes(search.toLowerCase()) ||
             e.phone?.includes(search);
           const matchesDept = departmentId === "all" || e.departmentId === departmentId || (e.departmentId as any)?._id === departmentId;
+          // Match the PRIMARY branch or any of the additional ones. An employee
+          // assigned through branchIds alone would otherwise be missing from
+          // their own branch's list -- createUser keeps branchId as merely the
+          // first entry of branchIds, so neither field is authoritative by
+          // itself. Same shape as the shift check below, for the same reason.
+          const matchesBranch = branchId === "all" ||
+            e.branchId === branchId ||
+            (e.branchId as any)?._id === branchId ||
+            (e.branchIds || []).some((b: any) => (b?._id || b) === branchId);
           const matchesShift = shiftId === "all" ||
             e.shiftId === shiftId ||
             (e.shiftId as any)?._id === shiftId ||
             (e.shiftIds || []).some((s: any) => (s?._id || s) === shiftId);
           const matchesStatus = status === "all" || e.status === status;
-          return matchesSearch && matchesDept && matchesShift && matchesStatus;
+          return matchesSearch && matchesDept && matchesBranch && matchesShift && matchesStatus;
         });
 
         const start = (page - 1) * limit;
