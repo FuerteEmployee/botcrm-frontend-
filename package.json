@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite dev",
-    "build": "vite build",
+    "build": "vite build && node scripts/verify-build-target.js production",
     "build:dev": "vite build --mode development",
+    "build:staging": "vite build --mode staging && node scripts/verify-build-target.js staging",
     "preview": "vite preview",
     "lint": "eslint .",
     "format": "prettier --write ."

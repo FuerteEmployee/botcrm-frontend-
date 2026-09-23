@@ -25,6 +25,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useDashboardService } from "@/services/dashboard-service";
 import { cn, toISTDateKey } from "@/lib/utils";
+import { formatINR } from "@/lib/format";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 
 const MONTH_OPTIONS = Array.from({ length: 12 }).map((_, i) => {
@@ -45,10 +46,6 @@ const PIE_COLORS = [
   "oklch(0.78 0.16 75)",
   "oklch(0.62 0.18 240)",
 ];
-
-function fmtINR(n: number) {
-  return "₹" + n.toLocaleString("en-IN");
-}
 
 interface RecentEmployee {
   _id: string;
@@ -255,7 +252,7 @@ function DashboardPage() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <StatCard
           label="Monthly Salary"
-          value={fmtINR(stats.totalSalary)}
+          value={formatINR(stats.totalSalary)}
           icon={Wallet}
           accent="primary"
           delay={0.18}
@@ -263,7 +260,7 @@ function DashboardPage() {
         />
         <StatCard
           label="Total Expense"
-          value={fmtINR(stats.totalExpenses)}
+          value={formatINR(stats.totalExpenses)}
           icon={BadgeDollarSign}
           accent="destructive"
           delay={0.21}
@@ -402,7 +399,7 @@ function DashboardPage() {
                         borderRadius: 8,
                         fontSize: 13,
                       }}
-                      formatter={(v) => fmtINR(Number(v))}
+                      formatter={(v) => formatINR(Number(v))}
                     />
                     <Legend
                       verticalAlign="bottom"

@@ -237,10 +237,10 @@ function DepartmentsPage() {
       )}
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-white/95 backdrop-blur-xl">
-          <div className="h-2 w-full bg-linear-to-r from-primary via-primary/50 to-primary/80" />
-          <div className="p-5">
-            <DialogHeader className="mb-4">
+        <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-white/95 backdrop-blur-xl max-h-[90vh] flex flex-col">
+          <div className="h-2 w-full bg-linear-to-r from-primary via-primary/50 to-primary/80 shrink-0" />
+          <div className="p-5 flex-1 flex flex-col min-h-0">
+            <DialogHeader className="mb-4 shrink-0">
               <div className="flex items-center gap-4">
                 <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary grid place-items-center shadow-inner">
                   <Building2 className="h-5 w-5" />
@@ -251,7 +251,8 @@ function DepartmentsPage() {
                 </div>
               </div>
             </DialogHeader>
-            <form onSubmit={submit} className="space-y-4">
+            <form onSubmit={submit} className="flex-1 flex flex-col min-h-0">
+              <div className="space-y-4 flex-1 overflow-y-auto min-h-0">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Department Name</label>
@@ -336,8 +337,9 @@ function DepartmentsPage() {
                   />
                 </div>
               </div>
+              </div>
 
-              <DialogFooter className="gap-2 pt-4 border-t border-border/40 mt-1">
+              <DialogFooter className="gap-2 pt-4 border-t border-border/40 mt-1 shrink-0">
                 <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)} className="rounded-xl h-10 font-bold px-8 text-muted-foreground hover:bg-muted/50 text-[13px]">Discard</Button>
                 <ActionButton 
                   type="submit"

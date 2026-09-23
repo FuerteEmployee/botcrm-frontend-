@@ -14,13 +14,8 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { motion } from 'framer-motion';
 import { Search, Clock, CheckCircle, XCircle, RotateCcw, Loader2, Plus } from 'lucide-react';
 import { useAdvanceSalaryService } from '@/services/advance-salary-service';
+import { formatINR } from '@/lib/format';
 import { NewRequestModal } from './NewRequestModal';
-
-const RUPEE_FORMATTER = new Intl.NumberFormat('en-IN', {
-  style: 'currency',
-  currency: 'INR',
-  maximumFractionDigits: 0,
-});
 
 interface MyAdvanceSalaryProps {
   onOpenNewRequest?: () => void;
@@ -152,12 +147,12 @@ export function MyAdvanceSalary({ onOpenNewRequest }: MyAdvanceSalaryProps) {
             transition={{ delay: idx * 0.1 }}
           >
             <Card className={`bg-linear-to-br ${stat.color} border-0 shadow-md`}>
-              <CardContent className="p-6">
+              <CardContent className="p-6 min-w-0">
                 <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2 uppercase tracking-wide">
                   {stat.label}
                 </p>
-                <p className={`text-3xl font-bold ${stat.textColor}`}>
-                  {RUPEE_FORMATTER.format(stat.value)}
+                <p className={`text-3xl font-bold truncate ${stat.textColor}`}>
+                  {formatINR(stat.value)}
                 </p>
               </CardContent>
             </Card>
@@ -252,10 +247,10 @@ export function MyAdvanceSalary({ onOpenNewRequest }: MyAdvanceSalaryProps) {
                     </div>
 
                     {/* Right: Amount & Status */}
-                    <div className="flex gap-4 items-center justify-between md:justify-end md:flex-col md:items-end">
-                      <div className="text-right">
-                        <p className="text-2xl font-bold text-slate-900 dark:text-white">
-                          {RUPEE_FORMATTER.format(request.amount)}
+                    <div className="flex gap-4 items-center justify-between md:justify-end md:flex-col md:items-end min-w-0 max-w-full">
+                      <div className="text-right min-w-0 max-w-full">
+                        <p className="text-2xl font-bold text-slate-900 dark:text-white truncate">
+                          {formatINR(request.amount)}
                         </p>
                         <Badge variant={getStatusBadgeVariant(request.status)} className="mt-2 rounded-md">
                           <span className="flex items-center gap-1">

@@ -10,6 +10,7 @@ import {
 } from "@/services/superadmin-service";
 import { useState } from "react";
 import { Check, X, Plus, Edit, Settings2, Trash2 } from "lucide-react";
+import { formatINRFull } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
@@ -113,7 +114,7 @@ function PlansPage() {
                 )}
                 <h3 className="font-medium text-sm">{plan.name}</h3>
                 <p className="text-2xl font-semibold mt-2">
-                  ₹{plan.price.toLocaleString("en-IN")}
+                  {formatINRFull(plan.price)}
                   <span className="text-xs font-normal text-muted-foreground">/mo</span>
                 </p>
                 <div className="mt-4 space-y-1.5">

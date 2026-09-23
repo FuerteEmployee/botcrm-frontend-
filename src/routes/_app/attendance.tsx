@@ -1511,10 +1511,10 @@ function AttendancePage() {
 
       {/* Request Correction Dialog */}
       <Dialog open={correctionOpen} onOpenChange={setCorrectionOpen}>
-        <DialogContent className="max-w-md rounded-2xl border-none shadow-2xl p-0 overflow-hidden">
-          <div className="h-2 w-full bg-primary" />
-          <div className="p-6">
-            <DialogHeader className="mb-6">
+        <DialogContent className="max-w-md rounded-2xl border-none shadow-2xl p-0 overflow-hidden max-h-[90vh] flex flex-col">
+          <div className="h-2 w-full bg-primary shrink-0" />
+          <div className="p-6 flex-1 flex flex-col min-h-0">
+            <DialogHeader className="mb-6 shrink-0">
               <div className="h-12 w-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-4">
                 <ClipboardList className="h-6 w-6" />
               </div>
@@ -1523,75 +1523,77 @@ function AttendancePage() {
                 Submit an attendance correction for admin approval.
               </DialogDescription>
             </DialogHeader>
-            <form className="space-y-4" onSubmit={handleSubmitCorrection}>
-              <div className="space-y-2">
-                <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Employee</label>
-                <Select value={correctionForm.employeeId} onValueChange={(v) => setCorrectionForm({ ...correctionForm, employeeId: v })}>
-                  <SelectTrigger className="h-11 rounded-xl">
-                    <SelectValue placeholder="Select employee..." />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl">
-                    {employees.map((e) => (
-                      <SelectItem key={e._id} value={e._id}>{e.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <FormInput
-                label="Date"
-                type="date"
-                value={correctionForm.date}
-                onChange={(e) => setCorrectionForm({ ...correctionForm, date: e.target.value })}
-                className="h-11"
-                containerClassName="space-y-1"
-              />
-              <div className="grid grid-cols-2 gap-3">
+            <form className="flex-1 flex flex-col min-h-0" onSubmit={handleSubmitCorrection}>
+              <div className="space-y-4 flex-1 overflow-y-auto min-h-0">
+                <div className="space-y-2">
+                  <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Employee</label>
+                  <Select value={correctionForm.employeeId} onValueChange={(v) => setCorrectionForm({ ...correctionForm, employeeId: v })}>
+                    <SelectTrigger className="h-11 rounded-xl">
+                      <SelectValue placeholder="Select employee..." />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl">
+                      {employees.map((e) => (
+                        <SelectItem key={e._id} value={e._id}>{e.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <FormInput
-                  label="Punch In"
-                  type="datetime-local"
-                  value={correctionForm.requestedPunchIn}
-                  onChange={(e) => setCorrectionForm({ ...correctionForm, requestedPunchIn: e.target.value })}
+                  label="Date"
+                  type="date"
+                  value={correctionForm.date}
+                  onChange={(e) => setCorrectionForm({ ...correctionForm, date: e.target.value })}
                   className="h-11"
                   containerClassName="space-y-1"
                 />
-                <FormInput
-                  label="Punch Out"
-                  type="datetime-local"
-                  value={correctionForm.requestedPunchOut}
-                  onChange={(e) => setCorrectionForm({ ...correctionForm, requestedPunchOut: e.target.value })}
-                  className="h-11"
-                  containerClassName="space-y-1"
-                />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <FormInput
+                    label="Punch In"
+                    type="datetime-local"
+                    value={correctionForm.requestedPunchIn}
+                    onChange={(e) => setCorrectionForm({ ...correctionForm, requestedPunchIn: e.target.value })}
+                    className="h-11"
+                    containerClassName="space-y-1"
+                  />
+                  <FormInput
+                    label="Punch Out"
+                    type="datetime-local"
+                    value={correctionForm.requestedPunchOut}
+                    onChange={(e) => setCorrectionForm({ ...correctionForm, requestedPunchOut: e.target.value })}
+                    className="h-11"
+                    containerClassName="space-y-1"
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <FormInput
+                    label="Lunch In"
+                    type="datetime-local"
+                    value={correctionForm.requestedLunchInTime}
+                    onChange={(e) => setCorrectionForm({ ...correctionForm, requestedLunchInTime: e.target.value })}
+                    className="h-11"
+                    containerClassName="space-y-1"
+                  />
+                  <FormInput
+                    label="Lunch Out"
+                    type="datetime-local"
+                    value={correctionForm.requestedLunchOutTime}
+                    onChange={(e) => setCorrectionForm({ ...correctionForm, requestedLunchOutTime: e.target.value })}
+                    className="h-11"
+                    containerClassName="space-y-1"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Reason</label>
+                  <Textarea
+                    value={correctionForm.reason}
+                    onChange={(e) => setCorrectionForm({ ...correctionForm, reason: e.target.value })}
+                    placeholder="e.g. Forgot to punch out, GPS was off..."
+                    rows={3}
+                    className="text-[13px]"
+                  />
+                </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <FormInput
-                  label="Lunch In"
-                  type="datetime-local"
-                  value={correctionForm.requestedLunchInTime}
-                  onChange={(e) => setCorrectionForm({ ...correctionForm, requestedLunchInTime: e.target.value })}
-                  className="h-11"
-                  containerClassName="space-y-1"
-                />
-                <FormInput
-                  label="Lunch Out"
-                  type="datetime-local"
-                  value={correctionForm.requestedLunchOutTime}
-                  onChange={(e) => setCorrectionForm({ ...correctionForm, requestedLunchOutTime: e.target.value })}
-                  className="h-11"
-                  containerClassName="space-y-1"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Reason</label>
-                <Textarea
-                  value={correctionForm.reason}
-                  onChange={(e) => setCorrectionForm({ ...correctionForm, reason: e.target.value })}
-                  placeholder="e.g. Forgot to punch out, GPS was off..."
-                  rows={3}
-                  className="text-[13px]"
-                />
-              </div>
-              <DialogFooter className="pt-2 gap-3">
+              <DialogFooter className="pt-2 gap-3 shrink-0">
                 <Button type="button" variant="ghost" onClick={() => setCorrectionOpen(false)} className="rounded-xl h-11 flex-1 font-bold">Cancel</Button>
                 <ActionButton
                   variant="add"

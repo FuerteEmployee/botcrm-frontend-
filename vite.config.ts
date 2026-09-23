@@ -7,7 +7,7 @@ import path from "path";
 import { VitePWA } from "vite-plugin-pwa";
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   server: {
     host: true, // Listen on all local IPs
   },
@@ -40,7 +40,16 @@ export default defineConfig({
       workbox: {
         // Increase max file size limit to 5 MB so precaching won't fail on large bundles
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
-        globPatterns: ["**/*.{css,html,ico,png,svg,woff,woff2}", "assets/index-*.js", "assets/vendor-react-*.js", "assets/vendor-tanstack-*.js"],
+        globPatterns: [
+          "**/*.{css,html,ico,png,svg,woff,woff2}",
+          "assets/index-*.js",
+          // vendor-react-*.js / vendor-tanstack-*.js only exist after the
+          // manualChunks build step below runs (a production-only Rollup
+          // option). Dev mode serves modules unbundled, so listing them
+          // unconditionally made every `npm run dev` log a harmless workbox
+          // "glob pattern doesn't match any files" warning.
+          ...(command === "build" ? ["assets/vendor-react-*.js", "assets/vendor-tanstack-*.js"] : []),
+        ],
         // Precache the SHELL, not the whole app.
         //
         // Every JS file used to be precached, so a first visit downloaded ~3.8
@@ -179,4 +188,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

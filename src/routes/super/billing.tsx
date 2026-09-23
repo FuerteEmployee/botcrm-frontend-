@@ -26,7 +26,7 @@ function downloadInvoiceReceipt(inv: any) {
     `Company: ${inv.adminId?.name || "—"}`,
     `Plan: ${inv.planId?.name || "—"}`,
     `Period: ${inv.period || "—"}`,
-    `Amount: ₹${(inv.amount || 0).toLocaleString("en-IN")}`,
+    `Amount: ${formatINRFull(inv.amount || 0)}`,
     `Status: ${inv.status || "—"}`,
     `Paid at: ${inv.paidAt ? new Date(inv.paidAt).toLocaleString("en-IN") : "—"}`,
   ];

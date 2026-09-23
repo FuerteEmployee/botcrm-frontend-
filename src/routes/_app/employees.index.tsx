@@ -468,8 +468,8 @@ function EmployeesPage() {
       />
 
       <Dialog open={!!deactivateTarget} onOpenChange={(o) => !o && setDeactivateTarget(null)}>
-        <DialogContent className="rounded-2xl">
-          <DialogHeader>
+        <DialogContent className="rounded-2xl max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle className="text-[18px] font-black tracking-tight">
               Deactivate {deactivateTarget?.name}?
             </DialogTitle>
@@ -478,7 +478,7 @@ function EmployeesPage() {
               it will be shown to them on the login screen.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
+          <div className="space-y-2 flex-1 overflow-y-auto min-h-0">
             <Label htmlFor="deactivate-reason" className="text-xs font-bold text-muted-foreground/80">
               Reason (optional)
             </Label>
@@ -491,7 +491,7 @@ function EmployeesPage() {
               className="rounded-xl"
             />
           </div>
-          <DialogFooter className="gap-2 mt-2">
+          <DialogFooter className="gap-2 mt-2 shrink-0">
             <Button
               variant="outline"
               className="rounded-xl"

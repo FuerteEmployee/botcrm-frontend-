@@ -28,6 +28,7 @@ import { useShiftService } from "@/services/shift-service";
 import { useBranchService } from "@/services/branch-service";
 import { SettingsGuide, settingsGuideLines } from "@/components/settings/settings-guide";
 import { usePermission } from "@/hooks/use-permission";
+import { formatINRFull } from "@/lib/format";
 
 export const Route = createFileRoute("/_app/settings")({
   component: SettingsPage,
@@ -544,7 +545,7 @@ function SettingsPage() {
 
                       <div>
                         <SectionHeader icon={CheckCircle2} label="Rounding" description="Applied once to the final net salary." />
-                        <div className="grid grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                           <div className="space-y-1">
                             <Label className="text-[11px] font-bold uppercase tracking-wide">Mode</Label>
                             <select
@@ -774,7 +775,7 @@ function SettingsPage() {
                                   comp.enabled && (
                                     <div key={key} className="flex justify-between text-[11px]">
                                       <span className="text-muted-foreground font-medium uppercase tracking-tight">{formatKey(key)}</span>
-                                      <span className="font-black text-foreground/80">{comp.type === 'percentage' ? `${comp.percentage}%` : `₹${comp.amount}`}</span>
+                                      <span className="font-black text-foreground/80">{comp.type === 'percentage' ? `${comp.percentage}%` : formatINRFull(comp.amount)}</span>
                                     </div>
                                   )
                                 ))}
@@ -1173,8 +1174,8 @@ function SettingsPage() {
       />
 
       <Dialog open={accessLogsOpen} onOpenChange={setAccessLogsOpen}>
-        <DialogContent className="rounded-3xl p-6 md:p-8 border border-border/40 shadow-elegant max-w-2xl bg-white focus:outline-hidden">
-          <DialogHeader className="space-y-1 mb-4">
+        <DialogContent className="rounded-3xl p-6 md:p-8 border border-border/40 shadow-elegant max-w-2xl bg-white focus:outline-hidden max-h-[90vh] flex flex-col">
+          <DialogHeader className="space-y-1 mb-4 shrink-0">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary grid place-items-center">
                 <Bell className="h-5 w-5" />
@@ -1188,6 +1189,7 @@ function SettingsPage() {
             </div>
           </DialogHeader>
 
+          <div className="flex-1 overflow-y-auto min-h-0">
           {/* Controls: Search and Filters */}
           <div className="flex flex-col sm:flex-row gap-3 mb-4">
             <div className="relative flex-1">
@@ -1199,15 +1201,15 @@ function SettingsPage() {
                 onChange={(e) => setLogsSearch(e.target.value)}
               />
               {logsSearch && (
-                <button 
-                  onClick={() => setLogsSearch("")} 
+                <button
+                  onClick={() => setLogsSearch("")}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs font-bold"
                 >
                   Clear
                 </button>
               )}
             </div>
-            
+
             <div className="flex gap-1.5 p-1 bg-muted/30 border border-border/40 rounded-xl self-start sm:self-auto">
               {(["all", "login", "logout"] as const).map((filter) => (
                 <button
@@ -1307,8 +1309,9 @@ function SettingsPage() {
               </div>
             )}
           </div>
+          </div>
 
-          <div className="mt-6 flex justify-end items-center border-t border-border/40 pt-4">
+          <div className="mt-6 flex justify-end items-center border-t border-border/40 pt-4 shrink-0">
             <DialogClose asChild>
               <Button className="h-9 px-6 rounded-xl font-bold text-[12px] cursor-pointer">
                 Close Window

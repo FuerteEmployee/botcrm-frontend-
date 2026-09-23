@@ -301,5 +301,3 @@ function UserAccountSummaryPage() {
     </div>
   );
 }
-
-export default UserAccountSummaryPage;

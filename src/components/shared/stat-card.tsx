@@ -126,11 +126,11 @@ function CardContent({ theme, Icon, label, value, trend, trendUp }: any) {
           )}
         </div>
 
-        <div>
+        <div className="min-w-0">
           <p className="text-[12px] font-bold tracking-widest text-muted-foreground/50 mb-1">
             {label}
           </p>
-          <h3 className="text-[24px] font-bold tracking-tight text-foreground/90 tabular-nums leading-none">
+          <h3 className="text-[24px] font-bold tracking-tight text-foreground/90 tabular-nums leading-none truncate">
             {value}
           </h3>
         </div>

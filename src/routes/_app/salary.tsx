@@ -25,6 +25,7 @@ import { fetchApprovedAdvancesForEmployee, type AdvanceSalaryRequest } from "@/s
 import { fetchApprovedExpensesForEmployee, type Expense } from "@/services/expense-service";
 import { toast } from "sonner";
 import { cn, formatTime12h } from "@/lib/utils";
+import { formatINR, formatINRFull } from "@/lib/format";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { motion, AnimatePresence } from "framer-motion";
 import { useDepartmentService } from "@/services/department-service";
@@ -44,7 +45,6 @@ export const Route = createFileRoute("/_app/salary")({
   component: SalaryPage,
 });
 
-function fmtINR(n: number) { return "₹" + (n || 0).toLocaleString("en-IN"); }
 
 const MONTHS = Array.from({ length: 12 }).map((_, i) => {
   const d = new Date();
@@ -245,9 +245,9 @@ function SalaryPage() {
           <SkeletonLoader type="stats" count={3} className="col-span-3" />
         ) : (
           <>
-            <StatCard label="Total Payroll" value={fmtINR(total)} icon={Wallet} accent="primary" />
-            <StatCard label="Paid" value={fmtINR(paid)} icon={Wallet} accent="success" />
-            <StatCard label="Pending" value={fmtINR(pending)} icon={Wallet} accent="warning" />
+            <StatCard label="Total Payroll" value={formatINR(total)} icon={Wallet} accent="primary" />
+            <StatCard label="Paid" value={formatINR(paid)} icon={Wallet} accent="success" />
+            <StatCard label="Pending" value={formatINR(pending)} icon={Wallet} accent="warning" />
           </>
         )}
       </div>
@@ -344,19 +344,19 @@ function SalaryPage() {
                 }
               >
                 <div className="space-y-3 mt-1">
-                  <div className="flex justify-between items-center bg-muted/20 p-2 rounded-lg border border-border/40">
-                    <span className="text-[11px] text-muted-foreground font-medium">Net Payable</span>
-                    <span className="text-[16px] font-black text-primary">{fmtINR(r.totalSalary)}</span>
+                  <div className="flex justify-between items-center gap-2 bg-muted/20 p-2 rounded-lg border border-border/40">
+                    <span className="text-[11px] text-muted-foreground font-medium shrink-0">Net Payable</span>
+                    <span className="text-[16px] font-black text-primary truncate min-w-0">{formatINRFull(r.totalSalary)}</span>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 mt-2">
-                    <div className="p-2 rounded-lg bg-success/5 border border-success/10">
+                    <div className="p-2 rounded-lg bg-success/5 border border-success/10 min-w-0">
                       <p className="text-[9px] text-success font-bold uppercase tracking-tighter">Earnings</p>
-                      <p className="text-[13px] font-bold">{fmtINR(r.baseSalary + (r.breakdown?.earnings || []).reduce((s: number, e: any) => s + (e.name !== "Basic Salary" ? e.amount : 0), 0))}</p>
+                      <p className="text-[13px] font-bold truncate">{formatINRFull(r.baseSalary + (r.breakdown?.earnings || []).reduce((s: number, e: any) => s + (e.name !== "Basic Salary" ? e.amount : 0), 0))}</p>
                     </div>
-                    <div className="p-2 rounded-lg bg-destructive/5 border border-destructive/10">
+                    <div className="p-2 rounded-lg bg-destructive/5 border border-destructive/10 min-w-0">
                       <p className="text-[9px] text-destructive font-bold uppercase tracking-tighter">Deductions</p>
-                      <p className="text-[13px] font-bold">-{fmtINR(r.deductions)}</p>
+                      <p className="text-[13px] font-bold truncate">-{formatINRFull(r.deductions)}</p>
                     </div>
                   </div>
 
@@ -439,10 +439,10 @@ function SalaryPage() {
                       : (r.workingDays ? `${r.workingDays}/26` : "—")}
                     {r.needsReview && <span className="ml-1 text-amber-500 text-[10px]">⚠</span>}
                   </DataTableCell>
-                  <DataTableCell className="text-[13px] text-right font-mono text-muted-foreground">{fmtINR(r.baseSalary)}</DataTableCell>
-                  <DataTableCell className="text-[13px] text-right text-success font-medium">+{fmtINR((r.breakdown?.earnings || []).reduce((s: number, e: any) => s + (e.name !== "Basic Salary" ? e.amount : 0), 0))}</DataTableCell>
-                  <DataTableCell className="text-[13px] text-right text-destructive font-medium">-{fmtINR(r.deductions)}</DataTableCell>
-                  <DataTableCell className="text-[13px] text-right font-bold text-foreground">{fmtINR(r.totalSalary)}</DataTableCell>
+                  <DataTableCell className="text-[13px] text-right font-mono text-muted-foreground">{formatINRFull(r.baseSalary)}</DataTableCell>
+                  <DataTableCell className="text-[13px] text-right text-success font-medium">+{formatINRFull((r.breakdown?.earnings || []).reduce((s: number, e: any) => s + (e.name !== "Basic Salary" ? e.amount : 0), 0))}</DataTableCell>
+                  <DataTableCell className="text-[13px] text-right text-destructive font-medium">-{formatINRFull(r.deductions)}</DataTableCell>
+                  <DataTableCell className="text-[13px] text-right font-bold text-foreground">{formatINRFull(r.totalSalary)}</DataTableCell>
                   <DataTableCell>
                     <Badge
                       variant="outline"
@@ -483,8 +483,8 @@ function SalaryPage() {
 
       {/* Breakdown Dialog */}
       <Dialog open={!!detailsRecord} onOpenChange={(o) => !o && setDetailsRecord(null)}>
-        <DialogContent className="max-w-md rounded-2xl overflow-hidden p-0 border-none shadow-2xl">
-          <div className="bg-linear-to-br from-primary/10 via-primary/5 to-transparent p-6 pb-4">
+        <DialogContent className="max-w-md rounded-2xl overflow-hidden p-0 border-none shadow-2xl max-h-[90vh] flex flex-col">
+          <div className="bg-linear-to-br from-primary/10 via-primary/5 to-transparent p-6 pb-4 shrink-0">
             <DialogHeader>
               <div className="h-12 w-12 rounded-2xl bg-white shadow-sm border border-primary/10 grid place-items-center mb-3">
                 <Receipt className="h-6 w-6 text-primary" />
@@ -496,7 +496,7 @@ function SalaryPage() {
             </DialogHeader>
           </div>
 
-          <div className="p-6 space-y-6 bg-white">
+          <div className="p-6 space-y-6 bg-white flex-1 overflow-y-auto min-h-0">
             {/* Earnings */}
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-[11px] font-bold text-success uppercase tracking-widest">
@@ -506,7 +506,7 @@ function SalaryPage() {
                 {(detailsRecord?.breakdown?.earnings || []).map((e: any, idx: number) => (
                   <div key={idx} className="flex justify-between items-center text-[13px]">
                     <span className="text-muted-foreground font-medium">{e.name}</span>
-                    <span className="font-bold text-foreground">{fmtINR(e.amount)}</span>
+                    <span className="font-bold text-foreground">{formatINRFull(e.amount)}</span>
                   </div>
                 ))}
               </div>
@@ -523,7 +523,7 @@ function SalaryPage() {
                 {(detailsRecord?.breakdown?.deductions || []).map((e: any, idx: number) => (
                   <div key={idx} className="flex justify-between items-center text-[13px]">
                     <span className="text-muted-foreground font-medium">{e.name}</span>
-                    <span className="font-bold text-destructive">-{fmtINR(e.amount)}</span>
+                    <span className="font-bold text-destructive">-{formatINRFull(e.amount)}</span>
                   </div>
                 ))}
               </div>
@@ -533,7 +533,7 @@ function SalaryPage() {
             <div className="mt-8 p-4 rounded-2xl bg-muted/30 border border-border/40 flex justify-between items-center">
               <div>
                 <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Net Payable</p>
-                <p className="text-[20px] font-black text-primary">{fmtINR(detailsRecord?.totalSalary || 0)}</p>
+                <p className="text-[20px] font-black text-primary">{formatINRFull(detailsRecord?.totalSalary || 0)}</p>
               </div>
               <Badge variant="outline" className={cn(
                 "px-3 py-1 rounded-full text-[11px] font-bold",
@@ -548,7 +548,7 @@ function SalaryPage() {
 
       {/* Advance Salary Deduction Dialog */}
       <Dialog open={!!advanceModalRecord} onOpenChange={(o) => !o && setAdvanceModalRecord(null)}>
-        <DialogContent className="max-w-md rounded-2xl">
+        <DialogContent className="max-w-md rounded-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-[18px] font-black tracking-tight">
               Apply Advance Deduction
@@ -587,7 +587,7 @@ function SalaryPage() {
                     </div>
                   </div>
                   <span className="text-[13px] font-black text-foreground shrink-0">
-                    {fmtINR(req.approvedAmount ?? req.amount)}
+                    {formatINRFull(req.approvedAmount ?? req.amount)}
                   </span>
                 </label>
               ))}
@@ -597,7 +597,7 @@ function SalaryPage() {
           <div className="flex items-center justify-between px-1 pt-2 border-t border-border/40">
             <span className="text-[12px] font-bold text-muted-foreground">Total selected</span>
             <span className="text-[15px] font-black text-primary">
-              {fmtINR(advanceOptions
+              {formatINRFull(advanceOptions
                 .filter((req) => selectedAdvanceIds.has(req._id))
                 .reduce((s, req) => s + (req.approvedAmount ?? req.amount), 0))}
             </span>
@@ -626,7 +626,7 @@ function SalaryPage() {
 
       {/* Expense Reimbursement Dialog */}
       <Dialog open={!!expenseModalRecord} onOpenChange={(o) => !o && setExpenseModalRecord(null)}>
-        <DialogContent className="max-w-md rounded-2xl">
+        <DialogContent className="max-w-md rounded-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-[18px] font-black tracking-tight">
               Apply Expense Reimbursement
@@ -663,7 +663,7 @@ function SalaryPage() {
                     </div>
                   </div>
                   <span className="text-[13px] font-black text-foreground shrink-0">
-                    {fmtINR(exp.amount)}
+                    {formatINRFull(exp.amount)}
                   </span>
                 </label>
               ))}
@@ -673,7 +673,7 @@ function SalaryPage() {
           <div className="flex items-center justify-between px-1 pt-2 border-t border-border/40">
             <span className="text-[12px] font-bold text-muted-foreground">Total selected</span>
             <span className="text-[15px] font-black text-primary">
-              {fmtINR(expenseOptions
+              {formatINRFull(expenseOptions
                 .filter((exp) => selectedExpenseIds.has(exp._id))
                 .reduce((s, exp) => s + exp.amount, 0))}
             </span>

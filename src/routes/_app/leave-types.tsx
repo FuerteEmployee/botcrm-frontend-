@@ -292,7 +292,7 @@ function LeaveTypesPage() {
               className="h-10 text-[13px]"
             />
             
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <FormInput
                 label="Code"
                 icon={Hash}

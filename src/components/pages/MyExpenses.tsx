@@ -14,14 +14,9 @@ import { motion } from 'framer-motion';
 import { Search, Clock, CheckCircle, XCircle, Loader2, Plus, Tag, Users } from 'lucide-react';
 import { useExpenseService, type Expense } from '@/services/expense-service';
 import { EXPENSE_CATEGORIES } from '@/lib/expense-categories';
+import { formatINR } from '@/lib/format';
 import { NewExpenseModal } from './NewExpenseModal';
 import { ViewExpenseModal } from './ViewExpenseModal';
-
-const RUPEE_FORMATTER = new Intl.NumberFormat('en-IN', {
-  style: 'currency',
-  currency: 'INR',
-  maximumFractionDigits: 0,
-});
 
 export function MyExpenses() {
   const [searchQuery, setSearchQuery] = useState('');
@@ -114,9 +109,9 @@ export function MyExpenses() {
         ].map((stat, idx) => (
           <motion.div key={idx} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.1 }}>
             <Card className={`bg-linear-to-br ${stat.color} border-0 shadow-md`}>
-              <CardContent className="p-6">
+              <CardContent className="p-6 min-w-0">
                 <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2 uppercase tracking-wide">{stat.label}</p>
-                <p className={`text-3xl font-bold ${stat.textColor}`}>{RUPEE_FORMATTER.format(stat.value)}</p>
+                <p className={`text-3xl font-bold truncate ${stat.textColor}`}>{formatINR(stat.value)}</p>
               </CardContent>
             </Card>
           </motion.div>
@@ -199,8 +194,8 @@ export function MyExpenses() {
                         )}
                       </div>
 
-                      <div className="flex gap-4 items-center justify-between md:justify-end md:flex-col md:items-end">
-                        <p className="text-2xl font-bold text-slate-900 dark:text-white">{RUPEE_FORMATTER.format(exp.amount)}</p>
+                      <div className="flex gap-4 items-center justify-between md:justify-end md:flex-col md:items-end min-w-0">
+                        <p className="text-2xl font-bold text-slate-900 dark:text-white truncate">{formatINR(exp.amount)}</p>
                         <Badge variant={getStatusBadgeVariant(exp.status)} className="rounded-md">
                           <span className="flex items-center gap-1">
                             {getStatusIcon(exp.status)}

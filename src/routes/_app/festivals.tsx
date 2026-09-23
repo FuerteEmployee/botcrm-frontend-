@@ -474,10 +474,10 @@ function FestivalsPage() {
 
       {/* Add/Edit Dialog */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-white/95 backdrop-blur-xl">
-          <div className="h-2 w-full bg-linear-to-r from-primary via-primary/50 to-primary/80" />
-          <div className="p-5">
-            <DialogHeader className="mb-3">
+        <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-white/95 backdrop-blur-xl max-h-[90vh] flex flex-col">
+          <div className="h-2 w-full bg-linear-to-r from-primary via-primary/50 to-primary/80 shrink-0" />
+          <div className="p-5 flex-1 flex flex-col min-h-0">
+            <DialogHeader className="mb-3 shrink-0">
               <div className="flex items-center gap-4 mb-2">
                 <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center shadow-inner">
                   <PartyPopper className="h-5 w-5" />
@@ -489,7 +489,8 @@ function FestivalsPage() {
               </div>
             </DialogHeader>
 
-            <form onSubmit={submit} className="space-y-4">
+            <form onSubmit={submit} className="flex-1 flex flex-col min-h-0">
+              <div className="space-y-4 flex-1 overflow-y-auto min-h-0">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Holiday Name</label>
@@ -518,7 +519,7 @@ function FestivalsPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
                   <label className="text-[10px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Start Date</label>
                   <FormInput
@@ -596,8 +597,9 @@ function FestivalsPage() {
                   />
                 </div>
               </div>
+              </div>
 
-              <DialogFooter className="gap-2 pt-4 border-t border-border/40 mt-1">
+              <DialogFooter className="gap-2 pt-4 border-t border-border/40 mt-1 shrink-0">
                 <Button
                   type="button"
                   variant="ghost"

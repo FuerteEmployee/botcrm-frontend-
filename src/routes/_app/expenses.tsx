@@ -25,6 +25,7 @@ import { useEmployeeService } from "@/services/employee-service";
 import { useLayoutSettings } from "@/hooks/use-layout-settings";
 import { usePermission } from "@/hooks/use-permission";
 import { cn } from "@/lib/utils";
+import { formatINR, formatINRFull } from "@/lib/format";
 import { EXPENSE_CATEGORIES as CATEGORIES } from "@/lib/expense-categories";
 
 import {
@@ -159,7 +160,7 @@ function ExpensesPage() {
       />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <StatCard label="Total Portfolio" value={`₹${totalAmount.toLocaleString()}`} icon={Wallet} accent="primary" delay={0} />
+        <StatCard label="Total Portfolio" value={formatINR(totalAmount)} icon={Wallet} accent="primary" delay={0} />
         <StatCard label="Awaiting Approval" value={pendingCount} icon={Clock} accent="warning" delay={0.05} />
         <StatCard label="Active Employees" value={groupedByEmployee.length} icon={UserCheck} accent="info" delay={0.1} />
       </div>
@@ -198,7 +199,7 @@ function ExpensesPage() {
                   delay={i * 0.04}
                   statusNode={
                     <Badge variant="outline" className="text-[10px] font-bold text-primary bg-primary/5 border-primary/20">
-                      ₹{groupTotal.toLocaleString()}
+                      {formatINR(groupTotal)}
                     </Badge>
                   }
                 >
@@ -213,7 +214,7 @@ function ExpensesPage() {
                             </div>
                             <div className="text-[11px] font-medium truncate max-w-[80px]">{exp.category}</div>
                           </div>
-                          <div className="text-[11px] font-bold">₹{exp.amount.toLocaleString()}</div>
+                          <div className="text-[11px] font-bold shrink-0">{formatINRFull(exp.amount)}</div>
                         </div>
                       );
                     })}
@@ -271,7 +272,7 @@ function ExpensesPage() {
                         <span className="font-medium text-[12px]">{exp.category}</span>
                       </div>
                     </DataTableCell>
-                    <DataTableCell className="font-bold text-foreground text-[12px]">₹{exp.amount.toLocaleString()}</DataTableCell>
+                    <DataTableCell className="font-bold text-foreground text-[12px]">{formatINRFull(exp.amount)}</DataTableCell>
                     <DataTableCell className="text-muted-foreground text-[12px] font-medium">{new Date(exp.date).toLocaleDateString()}</DataTableCell>
                     <DataTableCell>
                       <Badge
@@ -328,15 +329,16 @@ function ExpensesPage() {
       </AnimatePresence>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md rounded-xl">
-          <DialogHeader>
+        <DialogContent className="max-w-md rounded-xl max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
             <div className="h-9 w-9 rounded-lg bg-primary/5 text-primary grid place-items-center mb-2">
               <Receipt className="h-4.5 w-4.5" />
             </div>
             <DialogTitle className="text-[15px] font-bold">{editing ? "Edit Record" : "New Expense"}</DialogTitle>
             <DialogDescription className="text-[12px]">Log financial data for office management.</DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleSave} className="space-y-4 mt-1">
+          <form onSubmit={handleSave} className="mt-1 flex-1 flex flex-col min-h-0">
+          <div className="space-y-4 flex-1 overflow-y-auto min-h-0">
             <FormSelect
               label="Associated Employee"
               value={form.employeeId}
@@ -348,7 +350,7 @@ function ExpensesPage() {
               containerClassName="space-y-1"
             />
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <FormInput
                 label="Amount (₹)"
                 type="number"
@@ -397,11 +399,12 @@ function ExpensesPage() {
                 { label: "Reimbursed", value: "reimbursed" },
               ]}
             />
+          </div>
 
-            <DialogFooter className="gap-2 pt-2">
+            <DialogFooter className="gap-2 pt-2 shrink-0">
               <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)} className="rounded-xl h-10 text-[12px] font-semibold">Cancel</Button>
-              <ActionButton 
-                type="submit" 
+              <ActionButton
+                type="submit"
                 variant="add"
                 showLabel
                 label={editing ? "Save Changes" : "Confirm Record"}

@@ -25,6 +25,7 @@ import { GridCard } from "@/components/shared/grid-card";
 import { useLayoutSettings } from "@/hooks/use-layout-settings";
 import { useEffect } from "react";
 import { usePermission } from "@/hooks/use-permission";
+import { formatINR, formatINRFull } from "@/lib/format";
 
 export const Route = createFileRoute("/_app/assets/")({
   component: AssetsPage,
@@ -111,7 +112,7 @@ function AssetsPage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <StatCard label="Total Allocated" value={assets.length} icon={Monitor} accent="primary" delay={0} />
-        <StatCard label="Total Value" value={`₹${totalValue.toLocaleString()}`} icon={IndianRupee} accent="info" delay={0.05} />
+        <StatCard label="Total Value" value={formatINR(totalValue)} icon={IndianRupee} accent="info" delay={0.05} />
         <StatCard label="Active Devices" value={assets.filter(a => a.status === 'active').length} icon={CheckCircle2} accent="success" delay={0.1} />
         <StatCard label="Issues/Damaged" value={assets.filter(a => a.status === 'damaged').length} icon={AlertCircle} accent="destructive" delay={0.15} />
       </div>
@@ -188,7 +189,7 @@ function AssetsPage() {
                             <div className="text-[10px] text-muted-foreground flex items-center gap-2">
                               <span className="font-mono">{asset.serialNumber}</span>
                               <span>•</span>
-                              <span className="text-primary/70 font-medium">₹{asset.amount.toLocaleString()}</span>
+                              <span className="text-primary/70 font-medium">{formatINRFull(asset.amount)}</span>
                             </div>
                           </div>
                         </div>
@@ -244,7 +245,7 @@ function AssetsPage() {
                       <div className="text-[13px] font-semibold">{asset.deviceName}</div>
                       <div className="text-[11px] text-muted-foreground truncate max-w-[150px]">{asset.brand}</div>
                     </DataTableCell>
-                    <DataTableCell className="font-bold text-foreground">₹{asset.amount.toLocaleString()}</DataTableCell>
+                    <DataTableCell className="font-bold text-foreground">{formatINRFull(asset.amount)}</DataTableCell>
                     <DataTableCell className="font-mono text-[12px] text-muted-foreground">{asset.serialNumber}</DataTableCell>
                     <DataTableCell>
                       <Badge

@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import * as Icons from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
+import { formatINRFull } from "@/lib/format";
 
 type AssetAllocateSearch = {
   assetId?: string;
@@ -551,7 +552,7 @@ function AssetAllocatePage() {
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                           <div className="md:col-span-1 flex flex-col gap-2">
                             <Label className="text-[10px] font-bold text-muted-foreground ml-1">Unlock Method</Label>
-                            <div className="grid grid-cols-3 gap-2">
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                               {[
                                 { id: 'password', label: 'Pass', icon: Lock },
                                 { id: 'pin', label: 'PIN', icon: Hash },
@@ -660,7 +661,7 @@ function AssetAllocatePage() {
                                   </svg>
 
                                   <div className={cn(
-                                    "grid gap-12 relative z-20",
+                                    "grid gap-6 sm:gap-12 relative z-20",
                                     device.patternSize === 4 ? "grid-cols-4" : "grid-cols-3"
                                   )}>
                                     {Array.from({ length: (device.patternSize || 3) * (device.patternSize || 3) }).map((_, i) => {
@@ -781,9 +782,9 @@ function AssetAllocatePage() {
                 <span className="text-[12px] font-bold text-foreground">{devices.length} Units</span>
               </div>
               <div className="pt-4 border-t border-border/40">
-                <div className="flex items-center justify-between">
-                  <span className="text-[13px] font-bold text-foreground uppercase tracking-wider">Total Value</span>
-                  <span className="text-[18px] font-bold text-primary">₹{totalValue.toLocaleString()}</span>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[13px] font-bold text-foreground uppercase tracking-wider shrink-0">Total Value</span>
+                  <span className="text-[18px] font-bold text-primary truncate min-w-0">{formatINRFull(totalValue)}</span>
                 </div>
               </div>
             </div>
