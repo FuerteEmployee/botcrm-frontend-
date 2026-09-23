@@ -516,7 +516,7 @@ function ShiftsPage() {
       />
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
         <StatCard label="Total Shifts" value={list.length} icon={Clock} accent="primary" delay={0} />
         <StatCard label="Total Assigned" value={totalAssigned} icon={Users} accent="success" delay={0.05} />
         <StatCard label="Avg per Shift" value={list.length ? Math.round(totalAssigned / list.length) : 0} icon={Sun} accent="warning" delay={0.1} />

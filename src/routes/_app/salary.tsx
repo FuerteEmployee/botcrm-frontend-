@@ -240,12 +240,12 @@ function SalaryPage() {
       />
 
       {/* Stat Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
         {isLoading ? (
-          <SkeletonLoader type="stats" count={3} className="col-span-3" />
+          <SkeletonLoader type="stats" count={3} className="col-span-2 sm:col-span-3" />
         ) : (
           <>
-            <StatCard label="Total Payroll" value={formatINR(total)} icon={Wallet} accent="primary" />
+            <StatCard label="Total Payroll" value={formatINR(total)} icon={Wallet} accent="primary" className="col-span-2 sm:col-span-1" />
             <StatCard label="Paid" value={formatINR(paid)} icon={Wallet} accent="success" />
             <StatCard label="Pending" value={formatINR(pending)} icon={Wallet} accent="warning" />
           </>

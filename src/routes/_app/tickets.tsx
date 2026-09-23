@@ -119,7 +119,7 @@ function TicketsPage() {
         <AttendanceCorrectionsPanel />
       ) : (
       <>
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-3 gap-2 sm:gap-4">
         <StatCard label="Pending Review" value={counts.pending} icon={Clock} accent="warning" delay={0} />
         <StatCard label="Resolved" value={counts.approved} icon={Check} accent="success" delay={0.05} />
         <StatCard label="Total Tickets" value={counts.all} icon={TicketIcon} accent="primary" delay={0.1} />

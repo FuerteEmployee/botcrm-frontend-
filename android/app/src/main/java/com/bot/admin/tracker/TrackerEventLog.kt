@@ -66,6 +66,17 @@ object TrackerEventLog {
     const val WATCHDOG_RESTART  = "watchdog_restart"
     const val PERMISSION_LOST   = "permission_lost"
     const val FG_DENIED         = "fg_denied"
+    /**
+     * start() was asked for and the service did not come up.
+     *
+     * Its absence is what made a whole missing afternoon unexplainable: the
+     * plugin rejected the call, the TS wrapper turned that into a console
+     * warning nobody sees, and the only remaining trace was a 20-hour hole in
+     * the fixes. Carries `stage` (dispatch | confirm) and, when there is one,
+     * the exception class -- "which of the two ways did it fail" is the whole
+     * question.
+     */
+    const val START_FAILED      = "start_failed"
     const val FIX_GAP           = "fix_gap"
     const val BATTERY           = "battery"
 

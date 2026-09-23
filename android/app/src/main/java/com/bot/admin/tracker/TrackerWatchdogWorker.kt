@@ -8,6 +8,9 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.ExistingWorkPolicy
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -117,6 +120,7 @@ class TrackerWatchdogWorker(
     companion object {
         private const val TAG = "BgTracker/Watchdog"
         const val WORK_NAME = "bot_tracker_watchdog"
+        const val IMMEDIATE_WORK_NAME = "bot_tracker_watchdog_now"
 
         /** 15 min is WorkManager's floor for periodic work. */
         private const val INTERVAL_MIN = 15L
@@ -150,9 +154,44 @@ class TrackerWatchdogWorker(
             )
         }
 
+        /**
+         * Try again NOW, rather than at the next periodic slot.
+         *
+         * The periodic worker floors at fifteen minutes and Doze stretches that
+         * further -- 97 minutes, on the outage this was written for, during
+         * which an employee left the building and came back with nothing
+         * recorded. That is a backstop, not a recovery path.
+         *
+         * Expedited so it runs as soon as the system will allow.
+         * RUN_AS_NON_EXPEDITED_WORK_REQUEST is the required fallback: expedited
+         * quota is finite, and a request that cannot be expedited must still
+         * run rather than being dropped.
+         *
+         * REPLACE, unlike the periodic KEEP: this is "the start just failed,
+         * try again", so the newest request is always the one that matters and
+         * queueing several achieves nothing.
+         */
+        @JvmStatic
+        fun scheduleImmediate(ctx: Context) {
+            val req = OneTimeWorkRequestBuilder<TrackerWatchdogWorker>()
+                .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
+                .build()
+
+            WorkManager.getInstance(ctx).enqueueUniqueWork(
+                IMMEDIATE_WORK_NAME,
+                ExistingWorkPolicy.REPLACE,
+                req,
+            )
+
+            // The periodic backstop may never have been scheduled if the very
+            // first start failed, so make sure it exists too.
+            schedule(ctx)
+        }
+
         @JvmStatic
         fun cancel(ctx: Context) {
             WorkManager.getInstance(ctx).cancelUniqueWork(WORK_NAME)
+            WorkManager.getInstance(ctx).cancelUniqueWork(IMMEDIATE_WORK_NAME)
         }
     }
 }

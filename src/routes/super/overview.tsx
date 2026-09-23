@@ -110,7 +110,7 @@ function OverviewPage() {
 
       <div className="p-6 space-y-6">
         {/* Stats row */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
           <StatCard
             label="Active customers"
             value={stats.activeTenants || 0}
@@ -144,7 +144,7 @@ function OverviewPage() {
         {/* Product KPIs */}
         <div>
           <h2 className="text-sm font-semibold mb-3">Platform usage</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-4">
             <StatCard
               label="Total employees"
               value={stats.totalEmployees || 0}

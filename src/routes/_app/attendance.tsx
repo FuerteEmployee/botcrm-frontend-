@@ -8,6 +8,7 @@ import { ActionButton } from "@/components/shared/action-button";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/shared/page-header";
 import { ViewToggle } from "@/components/shared/view-toggle";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -371,6 +372,24 @@ function AttendancePage() {
   const [remarkText, setRemarkText] = useState("");
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
   const [view, setView] = useState<"grid" | "list">(defaultLayout);
+
+
+  /**
+   * Narrow screens drop COLUMNS, they do not change view.
+   *
+   * Cards were the obvious answer and the wrong one: this screen is read once a
+   * day against every employee, so at 50 staff a card list is several thousand
+   * pixels of scrolling to answer "who is missing". The table is the right
+   * shape -- one scannable line each -- it just cannot carry eleven columns at
+   * 360px.
+   *
+   * So below md the table keeps the five that get read at a glance (staff, in,
+   * out, hours, status) and drops date, both lunch times, the selfies and the
+   * location. None of those are lost: the date is the one already chosen in the
+   * filter bar, and the rest are all in View Details, one tap away.
+   */
+  const isMobile = useIsMobile();
+
   const { can } = usePermission();
   const canEdit = can("attendance", "edit");
   const canCreate = can("attendance", "create");
@@ -857,7 +876,11 @@ function AttendancePage() {
       </div>
 
       {/* ── Filters Bar ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-2.5 py-1">
+      {/* Grid below md, flex from md up. Every control here is `w-full` on
+          mobile, and in a flex-wrap row that means each one claims its own
+          line -- five filters became five full-width rows above the data. Two
+          per row keeps them reachable without scrolling past the whole bar. */}
+      <div className="grid grid-cols-2 gap-2.5 py-1 md:flex md:flex-wrap md:items-center">
         <ViewToggle view={view} onViewChange={updateDefaultLayout} />
 
         <Select value={shiftFilter} onValueChange={(v) => { setShiftFilter(v); setTablePage(1); setCardPage(1); }}>
@@ -943,7 +966,7 @@ function AttendancePage() {
         <FormInput
         placeholder="Search employee..."
         icon={Search}
-        className="h-10 w-full md:w-[260px] shadow-none"
+        className="h-10 w-full col-span-2 md:col-span-1 md:w-[260px] shadow-none"
         value={search}
         onChange={(e) => { setSearch(e.target.value); setTablePage(1); setCardPage(1); }}
         />
@@ -988,6 +1011,13 @@ function AttendancePage() {
                     </div>
                   )
                 }
+                // Worked hours are a column in the table view but had no place
+                // in the card. That was survivable while the card was opt-in;
+                // it is not now that phones always get the card, because "how
+                // long did they work" is the question this screen exists to
+                // answer. Same helper as the table cell and the CSV export, so
+                // the three cannot disagree.
+                metaRight={{ icon: ClockIcon, label: workedHours(t) || "--:--" }}
                 statusNode={
                   <div className="flex items-center gap-1.5">
                     <Badge
@@ -1103,7 +1133,9 @@ function AttendancePage() {
             className="space-y-4"
           >
             <DataTable
-              headers={["Staff", "Date", "Punch In", "Lunch In", "Lunch Out", "Punch Out", "Selfie", "Total Hrs", "Location", "Status", "Actions"]}
+              headers={isMobile
+                ? ["Staff", "In", "Out", "Hrs", "Status", ""]
+                : ["Staff", "Date", "Punch In", "Lunch In", "Lunch Out", "Punch Out", "Selfie", "Total Hrs", "Location", "Status", "Actions"]}
               isEmpty={filtered.length === 0}
               emptyMessage={`No logs found.`}
               className="shadow-sm"
@@ -1131,16 +1163,23 @@ function AttendancePage() {
                       </div>
                     </div>
                   </DataTableCell>
-                  <DataTableCell className="text-[13px] text-muted-foreground">{new Date(t.date).toLocaleDateString()}</DataTableCell>
+                  {/* Date: already chosen in the filter bar above. */}
+                  {!isMobile && (
+                    <DataTableCell className="text-[13px] text-muted-foreground">{new Date(t.date).toLocaleDateString()}</DataTableCell>
+                  )}
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
                     {t.punchIn ? new Date(t.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
                   </DataTableCell>
-                  <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {getDisplayLunchIn(t) ? new Date(getDisplayLunchIn(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
-                  </DataTableCell>
-                  <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {getDisplayLunchOut(t) ? new Date(getDisplayLunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
-                  </DataTableCell>
+                  {!isMobile && (
+                    <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
+                      {getDisplayLunchIn(t) ? new Date(getDisplayLunchIn(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
+                    </DataTableCell>
+                  )}
+                  {!isMobile && (
+                    <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
+                      {getDisplayLunchOut(t) ? new Date(getDisplayLunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
+                    </DataTableCell>
+                  )}
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
                     {getDisplayPunchOut(t) ? new Date(getDisplayPunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
                     {(() => {
@@ -1157,35 +1196,40 @@ function AttendancePage() {
                       ) : null;
                     })()}
                   </DataTableCell>
-                  <DataTableCell>
-                    <div className="flex items-center gap-1.5">
-                      {([["IN", t.punchInPhoto], ["OUT", t.punchOutPhoto]] as const).map(([label, src]) => (
-                        <div key={label} className="flex flex-col items-center gap-0.5">
-                          <span className="text-[8px] font-bold uppercase tracking-wider text-muted-foreground/60">{label}</span>
-                          {src ? (
-                            <img
-                              src={src}
-                              alt={`${label} selfie`}
-                              loading="lazy"
-                              className="h-8 w-8 rounded-lg object-cover border border-border/50"
-                            />
-                          ) : (
-                            <div className="h-8 w-8 rounded-lg bg-muted/40 border border-border/40 grid place-items-center text-muted-foreground/40 text-[11px]">
-                              –
+                  {/* Selfies: too wide for a phone row; both are in View Details. */}
+                  {!isMobile && (
+                      <DataTableCell>
+                        <div className="flex items-center gap-1.5">
+                          {([["IN", t.punchInPhoto], ["OUT", t.punchOutPhoto]] as const).map(([label, src]) => (
+                            <div key={label} className="flex flex-col items-center gap-0.5">
+                              <span className="text-[8px] font-bold uppercase tracking-wider text-muted-foreground/60">{label}</span>
+                              {src ? (
+                                <img
+                                  src={src}
+                                  alt={`${label} selfie`}
+                                  loading="lazy"
+                                  className="h-8 w-8 rounded-lg object-cover border border-border/50"
+                                />
+                              ) : (
+                                <div className="h-8 w-8 rounded-lg bg-muted/40 border border-border/40 grid place-items-center text-muted-foreground/40 text-[11px]">
+                                  –
+                                </div>
+                              )}
                             </div>
-                          )}
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  </DataTableCell>
+                      </DataTableCell>
+                  )}
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
                     {workedHours(t) ?? <span className="text-muted-foreground/40">—</span>}
                   </DataTableCell>
-                  <DataTableCell className="text-[12px] text-muted-foreground max-w-[150px] truncate italic">
-                    {t.punchInLocation && typeof t.punchInLocation === 'object'
-                      ? `${t.punchInLocation.lat?.toFixed(2)}, ${t.punchInLocation.lng?.toFixed(2)}`
-                      : (t.punchInLocation || "N/A")}
-                  </DataTableCell>
+                  {!isMobile && (
+                    <DataTableCell className="text-[12px] text-muted-foreground max-w-[150px] truncate italic">
+                      {t.punchInLocation && typeof t.punchInLocation === 'object'
+                        ? `${t.punchInLocation.lat?.toFixed(2)}, ${t.punchInLocation.lng?.toFixed(2)}`
+                        : (t.punchInLocation || "N/A")}
+                    </DataTableCell>
+                  )}
                   <DataTableCell>
                     <div className="flex items-center gap-1.5">
                       <Badge

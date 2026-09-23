@@ -10,4 +10,20 @@
       Matches the light background used by the employee and admin shells.
     -->
     <color name="statusBarBg">#FAF7F9</color>
+
+    <!--
+      The launch screen's background (see drawable/splash.xml): the mark
+      centred on white, and nothing else.
+
+      The web boot screen in index.html is deliberately the same white with the
+      same centred mark, so the moment the WebView takes over is invisible and
+      the user sees one unchanging screen until the app itself paints. If this
+      colour is ever changed, change that one with it — a mismatch shows up as
+      a full-screen flash on every cold start.
+
+      No values-night override on purpose: the launch is identical in either
+      system theme, and the mark is a knockout whose black stem and clock ring
+      would disappear on a dark background.
+    -->
+    <color name="splashBg">#FFFFFF</color>
 </resources>

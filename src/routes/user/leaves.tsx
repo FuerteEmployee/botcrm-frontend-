@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useLeaveTypeService } from "@/services/leave-type-service";
-import { useLeaveService } from "@/services/leave-service";
+import { useLeaveService, formatLeaveSpan } from "@/services/leave-service";
 import {
   CheckCircle, XCircle, Clock, Plus, AlertCircle, RefreshCw, Info, CalendarRange
 } from "lucide-react";
@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { motion } from "framer-motion";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/user/leaves")({
   component: UserLeaves,
@@ -24,6 +25,12 @@ function UserLeaves() {
   const [leaveTypeId, setLeaveTypeId] = useState<string>("");
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
+  // How much time off is being asked for. "half" and "single" are both one
+  // date, so the End Date field is hidden for them and endDate is kept equal
+  // to startDate -- the server requires startDate === endDate for a half day
+  // and would otherwise reject a stale endDate left over from a range.
+  const [mode, setMode] = useState<"half" | "single" | "range">("single");
+  const [halfPortion, setHalfPortion] = useState<"first_half" | "second_half">("first_half");
   const [description, setDescription] = useState<string>("");
 
   const { leaveTypes = [], isLoading: isLeaveTypesLoading } = useLeaveTypeService();
@@ -62,9 +69,21 @@ function UserLeaves() {
     };
   });
 
+  // One date for everything but a range, so a half day can never be submitted
+  // with an endDate the server will refuse.
+  useEffect(() => {
+    if (mode !== "range") setEndDate(startDate);
+  }, [mode, startDate]);
+
   const createLeaveMutation = async () => {
     try {
-      await createLeave({ leaveTypeId, startDate, endDate, reason: description });
+      await createLeave({
+        leaveTypeId,
+        startDate,
+        endDate: mode === "range" ? endDate : startDate,
+        reason: description,
+        dayPortion: mode === "half" ? halfPortion : "full",
+      });
       setOpen(false);
       setStartDate("");
       setEndDate("");
@@ -191,7 +210,7 @@ function UserLeaves() {
                   </div>
 
                   <h4 className="text-[12px] font-bold text-slate-800 dark:text-slate-100 leading-snug">
-                    {new Date(leave.startDate).toLocaleDateString()} to {new Date(leave.endDate).toLocaleDateString()} · {leave.duration} {leave.duration === 1 ? "day" : "days"}
+                    {formatLeaveSpan(leave)}
                   </h4>
 
                   {leave.reason && (
@@ -251,9 +270,62 @@ function UserLeaves() {
               </Select>
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Duration</Label>
+              <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-800/60">
+                {([
+                  { key: "half", label: "Half Day" },
+                  { key: "single", label: "One Day" },
+                  { key: "range", label: "Date Range" },
+                ] as const).map((opt) => (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => setMode(opt.key)}
+                    className={cn(
+                      "h-8 rounded-lg text-[11px] font-bold transition-all",
+                      mode === opt.key
+                        ? "bg-white dark:bg-slate-900 text-primary shadow-sm"
+                        : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                    )}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {mode === "half" && (
               <div className="space-y-1.5">
-                <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-405">Start Date</Label>
+                <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Which Half</Label>
+                <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-800/60">
+                  {([
+                    { key: "first_half", label: "First Half" },
+                    { key: "second_half", label: "Second Half" },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.key}
+                      type="button"
+                      onClick={() => setHalfPortion(opt.key)}
+                      className={cn(
+                        "h-8 rounded-lg text-[11px] font-bold transition-all",
+                        halfPortion === opt.key
+                          ? "bg-white dark:bg-slate-900 text-primary shadow-sm"
+                          : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                      )}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className={cn("gap-3", mode === "range" ? "grid grid-cols-2" : "grid grid-cols-1")}>
+              <div className="space-y-1.5">
+                <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-405">
+                  {mode === "range" ? "Start Date" : "Date"}
+                </Label>
                 <Input
                   type="date"
                   value={startDate}
@@ -261,15 +333,17 @@ function UserLeaves() {
                   className="rounded-xl border-slate-200 dark:border-slate-800 h-10 text-xs px-3 focus-visible:ring-1 focus-visible:ring-primary"
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-405">End Date</Label>
-                <Input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="rounded-xl border-slate-200 dark:border-slate-800 h-10 text-xs px-3 focus-visible:ring-1 focus-visible:ring-primary"
-                />
-              </div>
+              {mode === "range" && (
+                <div className="space-y-1.5">
+                  <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-405">End Date</Label>
+                  <Input
+                    type="date"
+                    value={endDate}
+                    onChange={(e) => setEndDate(e.target.value)}
+                    className="rounded-xl border-slate-200 dark:border-slate-800 h-10 text-xs px-3 focus-visible:ring-1 focus-visible:ring-primary"
+                  />
+                </div>
+              )}
             </div>
 
             <div className="space-y-1.5">
@@ -293,7 +367,7 @@ function UserLeaves() {
             </Button>
             <Button
               onClick={createLeaveMutation}
-              disabled={isCreating || !startDate || !endDate || !leaveTypeId}
+              disabled={isCreating || !startDate || (mode === "range" && !endDate) || !leaveTypeId}
               className="flex-1 bg-gradient-primary text-white font-bold rounded-xl h-10 border-none shadow-md shadow-primary/20 text-xs"
             >
               {isCreating ? <RefreshCw className="h-4 w-4 animate-spin" /> : "Submit"}

@@ -15,6 +15,8 @@ interface StatCardProps {
   delay?: number;
   to?: string;
   search?: any;
+  /** Sizing from the caller -- used to make the dashboard rows swipeable on phones. */
+  className?: string;
 }
 
 const ACCENT_THEMES = {
@@ -66,6 +68,7 @@ export function StatCard({
   delay = 0,
   to,
   search,
+  className,
 }: StatCardProps) {
   const theme = ACCENT_THEMES[accent];
 
@@ -75,7 +78,7 @@ export function StatCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay, ease: [0.23, 1, 0.32, 1] }}
       whileHover={{ y: -4 }}
-      className="group h-full"
+      className={cn("group h-full", className)}
     >
       {to ? (
         <Link to={to} search={search} className="block h-full cursor-pointer">
@@ -92,7 +95,7 @@ function CardContent({ theme, Icon, label, value, trend, trendUp }: any) {
   return (
     <div
       className={cn(
-        "relative h-full overflow-hidden rounded-xl border border-border/50 bg-white p-4 shadow-sm transition-all duration-500 hover:shadow-lg hover:shadow-primary/5",
+        "relative h-full overflow-hidden rounded-xl border border-border/50 bg-white p-3 sm:p-4 shadow-sm transition-all duration-500 hover:shadow-lg hover:shadow-primary/5",
         theme.border
       )}
     >
@@ -105,14 +108,14 @@ function CardContent({ theme, Icon, label, value, trend, trendUp }: any) {
       </div>
 
       <div className="relative z-10 flex h-full flex-col">
-        <div className="flex items-start justify-between mb-3">
+        <div className="flex items-start justify-between mb-2 sm:mb-3">
           <div
             className={cn(
-              "flex h-10 w-10 items-center justify-center rounded-lg border transition-all duration-300 group-hover:scale-110 group-hover:-rotate-3",
+              "flex h-8 w-8 sm:h-10 sm:w-10 items-center justify-center rounded-lg border transition-all duration-300 group-hover:scale-110 group-hover:-rotate-3",
               theme.icon
             )}
           >
-            <Icon className="h-5 w-5" />
+            <Icon className="h-4 w-4 sm:h-5 sm:w-5" />
           </div>
 
           {trend && (
@@ -127,10 +130,15 @@ function CardContent({ theme, Icon, label, value, trend, trendUp }: any) {
         </div>
 
         <div className="min-w-0">
-          <p className="text-[12px] font-bold tracking-widest text-muted-foreground/50 mb-1">
+          {/* Wraps rather than truncates. At three cards across a 360px screen
+              there are about 77px of text width, so "Total Branches" clips --
+              and a clipped label on a number nobody can identify is worse than
+              two short lines. Tracking is dropped on small screens for the same
+              reason: widest tracking costs roughly a character and a half. */}
+          <p className="text-[10px] sm:text-[12px] font-bold tracking-wide sm:tracking-widest leading-tight text-muted-foreground/50 mb-1">
             {label}
           </p>
-          <h3 className="text-[24px] font-bold tracking-tight text-foreground/90 tabular-nums leading-none truncate">
+          <h3 className="text-[19px] sm:text-[24px] font-bold tracking-tight text-foreground/90 tabular-nums leading-none">
             {value}
           </h3>
         </div>
