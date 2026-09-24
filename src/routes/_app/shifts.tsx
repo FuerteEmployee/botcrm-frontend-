@@ -149,22 +149,20 @@ function to12hLabel(hhmm: string): string {
 }
 
 const LUNCH_MODES = [
-  { label: "Use company default", value: "inherit" },
-  { label: "No lunch deduction", value: "none" },
   { label: "Fixed window (e.g. 1pm - 2pm)", value: "fixed_window" },
   { label: "Fixed length (e.g. 1 hour)", value: "fixed_duration" },
   { label: "Calculate from punches", value: "from_punches" },
+  { label: "No lunch deduction", value: "none" },
 ];
 
 const LUNCH_HELP: Record<string, string> = {
-  inherit:
-    "Follows Settings > Attendance > minimum lunch. That rule deducts the configured minimum from everyone, whether or not a break was punched.",
-  none: "Nothing is ever deducted. Worked hours equal the time between punches.",
   fixed_window:
     "Only the part of this window the employee actually worked through is deducted. Someone who was not at work then loses nothing.",
   fixed_duration: "This exact length is deducted every working day, punched or not.",
   from_punches:
     "Deducts exactly the break that was punched, and nothing at all if none was. Use this when employees reliably punch their lunch.",
+  none: "Nothing is ever deducted. Worked hours equal the time between punches.",
+  inherit: "Fixed lunch deduction as configured.",
 };
 import { toast } from "sonner";
 import { cn, formatTime12h } from "@/lib/utils";
@@ -267,7 +265,7 @@ function ShiftsPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<BackendShift | null>(null);
   const [globalWorkDays, setGlobalWorkDays] = useState<string[]>(["M", "T", "W", "Th", "F", "Sa"]);
-  const [form, setForm] = useState({ name: "", startTime: "09:00", endTime: "18:00", workDays: ["M", "T", "W", "Th", "F", "Sa"], is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, lunch: { mode: "inherit" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
+  const [form, setForm] = useState({ name: "", startTime: "09:00", endTime: "18:00", workDays: ["M", "T", "W", "Th", "F", "Sa"], is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, lunch: { mode: "fixed_window" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();

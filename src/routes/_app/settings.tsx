@@ -416,9 +416,9 @@ function SettingsPage() {
                   className="space-y-10"
                 >
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
-                    {/* Default Shift & Work Day Requirements */}
+                    {/* Default Shift */}
                     <div className="space-y-6">
-                      <SectionHeader icon={Clock} label="Default Shift & Work Hours" description="Select standard shift and required daily work hours." />
+                      <SectionHeader icon={Clock} label="Default Shift" description="Select standard shift automatically assigned to new employees." />
                       <div className="grid grid-cols-1 gap-4">
                         <FormSelect
                           label="Global Default Shift"
@@ -427,25 +427,11 @@ function SettingsPage() {
                           options={shifts.map(s => ({ value: s._id, label: `${s.name} (${formatTime12h(s.startTime)} - ${formatTime12h(s.endTime)})` }))}
                           placeholder="-- Select Default Shift --"
                         />
-                        <div className="grid grid-cols-2 gap-4">
-                          <FormInput
-                            label="Full Day Requirement (Hours)"
-                            type="number"
-                            min={1}
-                            max={24}
-                            value={attendance.reqHours}
-                            onChange={(e) => setAttendance(p => ({ ...p, reqHours: Number(e.target.value) || 0 }))}
-                            placeholder="8"
-                          />
-                          <FormInput
-                            label="Half Day Minimum (Hours)"
-                            type="number"
-                            min={1}
-                            max={24}
-                            value={attendance.halfDayHours}
-                            onChange={(e) => setAttendance(p => ({ ...p, halfDayHours: Number(e.target.value) || 0 }))}
-                            placeholder="4"
-                          />
+                        <div className="rounded-xl border border-border/50 bg-muted/20 p-3.5 space-y-1">
+                          <p className="text-[12px] font-semibold text-foreground">Configured in Shift Management</p>
+                          <p className="text-[11px] text-muted-foreground leading-relaxed">
+                            Shift timings, working hours, lunch break rules, and grace periods are configured directly per shift under <b>Shift Management</b>. New employees will automatically start on this default shift.
+                          </p>
                         </div>
                       </div>
                     </div>
@@ -496,111 +482,6 @@ function SettingsPage() {
                             onCheckedChange={(v) => setAttendance(p => ({ ...p, allowMultiplePunches: v }))} 
                           />
                         </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8 border-t border-border/40 pt-8">
-                    {/* Lunch Break (Company Default) */}
-                    <div className="space-y-6">
-                      <SectionHeader
-                        icon={Utensils}
-                        label="Lunch Break (Company Default)"
-                        description="Default lunch policy when shifts use 'Use company default'."
-                      />
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                          <FormInput
-                            label="Minimum Lunch (Minutes)"
-                            type="number"
-                            min={0}
-                            max={180}
-                            value={attendance.minLunch}
-                            onChange={(e) => setAttendance(p => ({ ...p, minLunch: Number(e.target.value) || 0 }))}
-                            placeholder="30"
-                          />
-                          <FormInput
-                            label="Maximum Lunch (Minutes)"
-                            type="number"
-                            min={0}
-                            max={240}
-                            value={attendance.maxLunch}
-                            onChange={(e) => setAttendance(p => ({ ...p, maxLunch: Number(e.target.value) || 0 }))}
-                            placeholder="90"
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          <FormInput
-                            label="Lunch Window Starts"
-                            type="time"
-                            value={attendance.lunchIn}
-                            onChange={(e) => setAttendance(p => ({ ...p, lunchIn: e.target.value }))}
-                          />
-                          <FormInput
-                            label="Lunch Window Ends"
-                            type="time"
-                            value={attendance.lunchOut}
-                            onChange={(e) => setAttendance(p => ({ ...p, lunchOut: e.target.value }))}
-                          />
-                        </div>
-                        <p className="text-[11px] text-muted-foreground leading-relaxed">
-                          Shifts set to <b>Use company default</b> deduct the minimum lunch break ({attendance.minLunch || 30} mins) as unpaid time. Punches exceeding maximum lunch ({attendance.maxLunch || 90} mins) are flagged as overruns.
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Grace Periods & Overtime */}
-                    <div className="space-y-6">
-                      <SectionHeader
-                        icon={Timer}
-                        label="Grace Periods & Overtime"
-                        description="Punctuality thresholds and daily overtime rules."
-                      />
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                          <FormInput
-                            label="Late Arrival Grace (Minutes)"
-                            type="number"
-                            min={0}
-                            max={120}
-                            value={attendance.lateGrace}
-                            onChange={(e) => setAttendance(p => ({ ...p, lateGrace: Number(e.target.value) || 0 }))}
-                            placeholder="15"
-                          />
-                          <FormInput
-                            label="Early Departure Grace (Minutes)"
-                            type="number"
-                            min={0}
-                            max={120}
-                            value={attendance.earlyGrace}
-                            onChange={(e) => setAttendance(p => ({ ...p, earlyGrace: Number(e.target.value) || 0 }))}
-                            placeholder="5"
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                          <FormInput
-                            label="Daily OT Threshold (Hours)"
-                            type="number"
-                            min={1}
-                            max={24}
-                            value={attendance.otThreshold}
-                            onChange={(e) => setAttendance(p => ({ ...p, otThreshold: Number(e.target.value) || 0 }))}
-                            placeholder="9"
-                          />
-                          <FormInput
-                            label="OT Pay Multiplier (e.g. 1.5x)"
-                            type="number"
-                            step="0.1"
-                            min={1}
-                            max={5}
-                            value={attendance.otMultiplier}
-                            onChange={(e) => setAttendance(p => ({ ...p, otMultiplier: Number(e.target.value) || 1 }))}
-                            placeholder="1.5"
-                          />
-                        </div>
-                        <p className="text-[11px] text-muted-foreground leading-relaxed">
-                          Punches within grace minutes are not penalized. Work hours logged past {attendance.otThreshold || 9}h count toward overtime pay calculated at {attendance.otMultiplier || 1.5}x.
-                        </p>
                       </div>
                     </div>
                   </div>
