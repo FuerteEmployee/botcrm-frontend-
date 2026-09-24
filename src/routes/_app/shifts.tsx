@@ -30,10 +30,7 @@ import { FormSelect } from "@/components/shared/form-select";
 import { SettingsGuide, settingsGuideLines } from "@/components/settings/settings-guide";
 
 /**
- * The five answers to "how much of this shift is unpaid break".
- *
- * `inherit` is first and is the default, so an existing shift that nobody
- * touches keeps the behaviour it already had.
+ * The four answers to "how much of this shift is unpaid break".
  */
 const SECTION_LABEL = "text-[11px] font-black text-muted-foreground uppercase tracking-wider block";
 
@@ -81,9 +78,7 @@ function shiftSummary(f: {
 
   const L = f.lunch;
   let lunchMins = 0;
-  if (L.mode === "inherit") {
-    lines.push({ tone: "bg-muted-foreground/50", text: "Lunch follows the company default in Settings > Attendance, which deducts the configured minimum from everyone." });
-  } else if (L.mode === "none") {
+  if (L.mode === "none") {
     lines.push({ tone: "bg-success", text: "No lunch is deducted. Credited hours equal the time between punches." });
   } else if (L.mode === "fixed_window") {
     const w = Math.max(0, toMins(L.endTime || "") - toMins(L.startTime || ""));
@@ -92,12 +87,14 @@ function shiftSummary(f: {
   } else if (L.mode === "fixed_duration") {
     lunchMins = Number(L.durationMins) || 0;
     lines.push({ tone: "bg-warning", text: `${fmtMins(lunchMins)} is deducted every working day, whether or not a break is punched.` });
-  } else {
+  } else if (L.mode === "from_punches") {
     const parts = [
       L.minMins != null ? `counted as at least ${fmtMins(Number(L.minMins))}` : null,
       L.maxMins != null ? `never more than ${fmtMins(Number(L.maxMins))}` : null,
     ].filter(Boolean).join(", ");
     lines.push({ tone: "bg-success", text: `Only a break that was actually punched is deducted${parts ? ` — ${parts}` : ""}. Nothing is docked if no lunch is punched.` });
+  } else {
+    lines.push({ tone: "bg-muted-foreground/50", text: "No lunch deduction configured for this shift." });
   }
 
   // The Full Day bar, stated as a sum the admin can check against a payslip.
@@ -108,23 +105,18 @@ function shiftSummary(f: {
   const graceOut = Math.max(0, Number(f.halfDayEarlyPunchOutMin) || 0);
   const hasOwnGrace = graceIn > 0 || graceOut > 0;
 
-  if (L.mode !== "inherit" || hasOwnGrace) {
-    const known = L.mode !== "inherit";
-    const bar = Math.max(0, span - lunchMins - graceIn - graceOut);
-    const sum = [
-      `${fmtMins(span)} shift`,
-      known ? `${fmtMins(lunchMins)} lunch` : null,
-      graceIn > 0 ? `${fmtMins(graceIn)} late grace` : null,
-      graceOut > 0 ? `${fmtMins(graceOut)} early grace` : null,
-    ].filter(Boolean).join(" − ");
+  const bar = Math.max(0, span - lunchMins - graceIn - graceOut);
+  const sum = [
+    `${fmtMins(span)} shift`,
+    lunchMins > 0 ? `${fmtMins(lunchMins)} lunch` : null,
+    graceIn > 0 ? `${fmtMins(graceIn)} late grace` : null,
+    graceOut > 0 ? `${fmtMins(graceOut)} early grace` : null,
+  ].filter(Boolean).join(" − ");
 
-    lines.push({
-      tone: "bg-primary",
-      text: known
-        ? `A Full Day needs ${fmtMins(bar)} of credited work (${sum}). Anything less is a Half Day.`
-        : `A Full Day is ${sum}, minus whatever lunch the company default deducts.`,
-    });
-  }
+  lines.push({
+    tone: "bg-primary",
+    text: `A Full Day needs ${fmtMins(bar)} of credited work (${sum}). Anything less is a Half Day.`,
+  });
 
   if (hasOwnGrace) {
     const bits = [
@@ -133,7 +125,7 @@ function shiftSummary(f: {
     ].filter(Boolean).join(", and leaving ");
     lines.push({ tone: "bg-success", text: `Arriving ${bits}, costs nothing on its own — only the hours decide.` });
   } else {
-    lines.push({ tone: "bg-muted-foreground/50", text: "No shift-specific grace; the company values in Settings > Attendance apply, and the day is graded on hours worked." });
+    lines.push({ tone: "bg-muted-foreground/50", text: "No shift grace configured (0 mins arrival / departure grace). The day is graded on hours worked." });
   }
 
   return lines;
@@ -162,7 +154,6 @@ const LUNCH_HELP: Record<string, string> = {
   from_punches:
     "Deducts exactly the break that was punched, and nothing at all if none was. Use this when employees reliably punch their lunch.",
   none: "Nothing is ever deducted. Worked hours equal the time between punches.",
-  inherit: "Fixed lunch deduction as configured.",
 };
 import { toast } from "sonner";
 import { cn, formatTime12h } from "@/lib/utils";
@@ -356,20 +347,24 @@ function ShiftsPage() {
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ name: "", startTime: "09:00", endTime: "18:00", workDays: globalWorkDays, is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, lunch: { mode: "inherit" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
+    setForm({ name: "", startTime: "09:00", endTime: "18:00", workDays: globalWorkDays, is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, lunch: { mode: "fixed_window" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
     setOpen(true);
   };
 
   const openEdit = (s: BackendShift) => {
     setEditing(s);
     const is24 = s.startTime === "00:00" && s.endTime === "23:59";
+    const initialMode: LunchMode =
+      s.lunch?.mode && s.lunch.mode !== ("inherit" as any)
+        ? s.lunch.mode
+        : "fixed_window";
     setForm({
       name: s.name, startTime: s.startTime, endTime: s.endTime,
       workDays: s.workDays || globalWorkDays, is24Hours: is24,
       halfDayLatePunchInMin: s.halfDayLatePunchInMin || 0,
       halfDayEarlyPunchOutMin: s.halfDayEarlyPunchOutMin || 0,
       lunch: {
-        mode: (s.lunch?.mode || "inherit") as LunchMode,
+        mode: initialMode,
         // Defaults for the inputs the SAVED mode does not use, so switching
         // mode inside the dialog never presents an empty required field.
         startTime: s.lunch?.startTime || "13:00",

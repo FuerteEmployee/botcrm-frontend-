@@ -221,7 +221,7 @@ export function settingsGuideLines(tab: string, c: GuideContext): GuideLine[] {
             : "No shifts yet. Until one exists and is assigned, days cannot be graded on hours worked.",
         },
         { tone: "info", text: "Working days resolve in three layers: the employee's own Weekly Holidays win, then the shift's working days, then the company-wide Active Work Days in Settings." },
-        { tone: "warn", text: "Lunch Break defaults to \u201cUse company default\u201d, which deducts the tenant's configured minimum from everyone \u2014 whether or not a break was punched. Choose \u201cCalculate from punches\u201d if you only want to deduct breaks that were actually taken." },
+        { tone: "info", text: "Each shift defines its own lunch deduction mode (Fixed window, Fixed length, Calculate from punches, or No lunch deduction)." },
         { tone: "info", text: "Half Day Rules are off by default (0 minutes = no rule); with both blank, a day is graded purely on hours worked against the shift span minus lunch." },
         { tone: "info", text: "Editing a shift changes how FUTURE days are graded. It does not recompute attendance already recorded." },
       ];
