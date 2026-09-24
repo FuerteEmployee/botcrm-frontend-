@@ -291,14 +291,14 @@ function TicketsPage() {
 
       {/* Review Ticket Dialog */}
       <Dialog open={!!selectedTicket} onOpenChange={(o) => { if (!o) setSelectedTicket(null); }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
+        <DialogContent className="max-w-md max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle className="text-[15px]">Review Ticket</DialogTitle>
             <DialogDescription className="text-[12px]">Approve or reject this request with a remark.</DialogDescription>
           </DialogHeader>
-          
+
           {selectedTicket && (
-            <div className="space-y-4 py-2">
+            <div className="space-y-4 py-2 flex-1 overflow-y-auto min-h-0">
               <div className="p-3 rounded-xl bg-muted/30 border border-border/40">
                 <div className="flex items-center justify-between mb-2">
                   <Badge variant="outline" className="text-[10px]">{selectedTicket.type}</Badge>

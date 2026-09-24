@@ -8,13 +8,8 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { FileText, Tag } from 'lucide-react';
 import { EXPENSE_CATEGORIES } from '@/lib/expense-categories';
+import { formatINR } from '@/lib/format';
 import type { Expense } from '@/services/expense-service';
-
-const RUPEE_FORMATTER = new Intl.NumberFormat('en-IN', {
-  style: 'currency',
-  currency: 'INR',
-  maximumFractionDigits: 0,
-});
 
 interface ViewExpenseModalProps {
   open: boolean;
@@ -57,13 +52,13 @@ export function ViewExpenseModal({ open, onOpenChange, expense }: ViewExpenseMod
 
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <div>
-              <p className="text-3xl font-bold text-slate-900 dark:text-white">
-                {RUPEE_FORMATTER.format(expense.amount)}
+            <div className="min-w-0">
+              <p className="text-3xl font-bold text-slate-900 dark:text-white truncate">
+                {formatINR(expense.amount)}
               </p>
               {expense.splitGroupId && expense.splitParticipantCount && (
                 <p className="text-xs text-muted-foreground mt-1">
-                  Your share · split {expense.splitParticipantCount} ways of {RUPEE_FORMATTER.format(expense.splitTotalAmount ?? expense.amount)}
+                  Your share · split {expense.splitParticipantCount} ways of {formatINR(expense.splitTotalAmount ?? expense.amount)}
                 </p>
               )}
             </div>

@@ -287,5 +287,3 @@ function UserTickets() {
     </div>
   );
 }
-
-export default UserTickets;

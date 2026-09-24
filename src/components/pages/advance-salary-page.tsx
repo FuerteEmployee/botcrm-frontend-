@@ -35,12 +35,7 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
-
-const RUPEE_FORMATTER = new Intl.NumberFormat('en-IN', {
-  style: 'currency',
-  currency: 'INR',
-  maximumFractionDigits: 0,
-});
+import { formatINR, formatINRFull } from '@/lib/format';
 
 export function AdvanceSalaryPage() {
   const { session } = useAuth();
@@ -249,16 +244,16 @@ export function AdvanceSalaryPage() {
             >
               <Card className={`bg-linear-to-br ${stat.color} border-0 shadow-md`}>
                 <CardContent className="p-6">
-                  <div className="flex items-center justify-between">
-                    <div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
                       <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2 uppercase tracking-wide">
                         {stat.label}
                       </p>
-                      <p className={`text-3xl font-bold ${stat.textColor}`}>
-                        {RUPEE_FORMATTER.format(stat.value)}
+                      <p className={`text-3xl font-bold truncate ${stat.textColor}`}>
+                        {formatINR(stat.value)}
                       </p>
                     </div>
-                    <stat.icon className={`w-10 h-10 ${stat.textColor} opacity-20`} />
+                    <stat.icon className={`w-10 h-10 shrink-0 ${stat.textColor} opacity-20`} />
                   </div>
                 </CardContent>
               </Card>
@@ -356,10 +351,10 @@ export function AdvanceSalaryPage() {
                         <AvatarImage src={request.employeeId?.profileImage} />
                         <AvatarFallback>{request.employeeId?.name?.charAt(0) || "?"}</AvatarFallback>
                       </Avatar>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="font-bold text-base text-slate-900 dark:text-white">{request.employeeId?.name || "Unknown Employee"}</h3>
-                          <Badge variant="outline" className="text-xs font-semibold rounded-md">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1 min-w-0">
+                          <h3 className="font-bold text-base text-slate-900 dark:text-white truncate min-w-0">{request.employeeId?.name || "Unknown Employee"}</h3>
+                          <Badge variant="outline" className="text-xs font-semibold rounded-md shrink-0">
                             {request.type === 'advance-salary' ? 'Advance Salary' : 'Loan'}
                           </Badge>
                         </div>
@@ -378,16 +373,16 @@ export function AdvanceSalaryPage() {
                     </div>
 
                     {/* Right: Amount & Status & Actions */}
-                    <div className="flex gap-4 items-center justify-between md:justify-end md:flex-col md:items-end">
-                      <div className="text-right">
-                        <p className="text-2xl font-bold text-slate-900 dark:text-white">
-                          {RUPEE_FORMATTER.format(request.amount)}
+                    <div className="flex gap-4 items-center justify-between md:justify-end md:flex-col md:items-end min-w-0 max-w-full">
+                      <div className="text-right min-w-0 max-w-full">
+                        <p className="text-2xl font-bold text-slate-900 dark:text-white truncate">
+                          {formatINRFull(request.amount)}
                         </p>
                         {request.status === 'approved' &&
                           request.approvedAmount != null &&
                           request.approvedAmount !== request.amount && (
-                            <p className="text-xs font-semibold text-green-600 dark:text-green-400 mt-0.5">
-                              Approved: {RUPEE_FORMATTER.format(request.approvedAmount)}
+                            <p className="text-xs font-semibold text-green-600 dark:text-green-400 mt-0.5 truncate">
+                              Approved: {formatINRFull(request.approvedAmount)}
                             </p>
                           )}
                         <Badge variant={getStatusBadgeVariant(request.status)} className="mt-2 rounded-md">
@@ -473,7 +468,7 @@ export function AdvanceSalaryPage() {
             <DialogTitle>Approve Request</DialogTitle>
             <DialogDescription>
               {approveTarget
-                ? `${approveTarget.employeeId?.name || "This employee"} requested ${RUPEE_FORMATTER.format(approveTarget.amount)}. Approve the full amount or enter a lower amount.`
+                ? `${approveTarget.employeeId?.name || "This employee"} requested ${formatINRFull(approveTarget.amount)}. Approve the full amount or enter a lower amount.`
                 : ''}
             </DialogDescription>
           </DialogHeader>

@@ -10,6 +10,7 @@ import {
 } from "@/components/ui/select";
 import { useSalaryService } from "@/services/salary-service";
 import { toast } from "sonner";
+import { formatINRFull } from "@/lib/format";
 
 export const Route = createFileRoute("/_app/payslips")({
   component: PayslipsPage,
@@ -68,7 +69,7 @@ function PayslipsPage() {
             <DataTableCell>{p.employeeId?.name}</DataTableCell>
             <DataTableCell>{p.month}</DataTableCell>
             <DataTableCell>{p.year}</DataTableCell>
-            <DataTableCell>₹{(p.netSalary ?? p.totalSalary ?? 0).toLocaleString()}</DataTableCell>
+            <DataTableCell>{formatINRFull(p.netSalary ?? p.totalSalary ?? 0)}</DataTableCell>
             <DataTableCell>
               <Badge variant={p.status === "final" ? "default" : "secondary"}>
                 {p.status ?? "pending"}

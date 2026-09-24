@@ -129,7 +129,7 @@ function CardContent({ theme, Icon, label, value, trend, trendUp }: any) {
           )}
         </div>
 
-        <div>
+        <div className="min-w-0">
           {/* Wraps rather than truncates. At three cards across a 360px screen
               there are about 77px of text width, so "Total Branches" clips --
               and a clipped label on a number nobody can identify is worse than

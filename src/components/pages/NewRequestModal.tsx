@@ -65,7 +65,7 @@ export function NewRequestModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="rounded-lg p-6 md:p-8 border-0 shadow-lg sm:max-w-[500px]">
+      <DialogContent className="rounded-lg p-6 md:p-8 border-0 shadow-lg sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
         <DialogHeader className="space-y-2 mb-6">
           <DialogTitle className="text-[20px] font-bold tracking-tight text-slate-900 dark:text-white">New Request</DialogTitle>
           <DialogDescription className="text-[14px] text-slate-600 dark:text-slate-400">

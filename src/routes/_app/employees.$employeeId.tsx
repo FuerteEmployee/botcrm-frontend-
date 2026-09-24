@@ -61,6 +61,7 @@ import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { statusLabel, statusClass } from "@/lib/attendance-status";
 import { DeviceTab } from "@/components/employees/device-tab";
+import { formatINR, formatINRFull } from "@/lib/format";
 
 export const Route = createFileRoute("/_app/employees/$employeeId")({
   component: EmployeeDetailsPage,
@@ -482,18 +483,18 @@ function EmployeeDetailsPage() {
                   <IndianRupee className="h-24 w-24" />
                 </div>
                 <CardContent className="p-6 relative z-10">
-                  <div className="flex items-center justify-between mb-6">
-                    <div>
+                  <div className="flex items-center justify-between mb-6 gap-2">
+                    <div className="min-w-0">
                       <h4 className="text-[9px] font-bold opacity-70 uppercase tracking-widest mb-1 text-white">Annual CTC</h4>
-                      <div className="text-2xl font-bold tracking-tight">₹{(employee.salary * 12).toLocaleString()}</div>
+                      <div className="text-2xl font-bold tracking-tight truncate">{formatINR(employee.salary * 12)}</div>
                     </div>
-                    <div className="h-10 w-10 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur-md border border-white/10 shadow-inner">
+                    <div className="h-10 w-10 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur-md border border-white/10 shadow-inner shrink-0">
                       <CreditCard className="h-4 w-4 text-white" />
                     </div>
                   </div>
-                  <div className="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 backdrop-blur-sm">
-                    <span className="text-[9px] font-bold opacity-60 uppercase tracking-wider">Monthly Base</span>
-                    <span className="text-xs font-semibold">₹{employee.salary.toLocaleString()}</span>
+                  <div className="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-white/5 border border-white/10 backdrop-blur-sm">
+                    <span className="text-[9px] font-bold opacity-60 uppercase tracking-wider shrink-0">Monthly Base</span>
+                    <span className="text-xs font-semibold truncate min-w-0">{formatINRFull(employee.salary)}</span>
                   </div>
                 </CardContent>
               </Card>
@@ -627,46 +628,46 @@ function EmployeeDetailsPage() {
                         <span className="text-[10px] font-bold text-muted-foreground/80 uppercase tracking-widest">Earnings</span>
                       </div>
                       {expectedEarnings.map((e, i) => (
-                        <div key={i} className="flex items-center justify-between">
+                        <div key={i} className="flex items-center justify-between gap-2">
                           <span className="text-[12px] font-medium text-muted-foreground">
                             {e.name}
                             {!e.included && <Badge className="ml-2 bg-primary/10 text-primary border-none text-[8px] px-1 py-0">ON TOP</Badge>}
                           </span>
-                          <p className="text-[14px] font-bold text-foreground">₹{e.amount.toLocaleString()}</p>
+                          <p className="text-[14px] font-bold text-foreground truncate min-w-0">{formatINRFull(e.amount)}</p>
                         </div>
                       ))}
-                      <div className="pt-4 mt-2 border-t border-border/40 flex items-center justify-between">
-                        <span className="text-[11px] font-bold text-foreground uppercase tracking-widest">Gross Salary</span>
-                        <span className="text-[15px] font-bold text-success">₹{grossSalary.toLocaleString()}</span>
+                      <div className="pt-4 mt-2 border-t border-border/40 flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold text-foreground uppercase tracking-widest shrink-0">Gross Salary</span>
+                        <span className="text-[15px] font-bold text-success truncate min-w-0 text-right">{formatINRFull(grossSalary)}</span>
                       </div>
                     </div>
-                    
+
                     <div className="p-6 space-y-4">
                       <div className="flex items-center gap-2 mb-2">
                         <div className="h-1 w-3 bg-destructive rounded-full" />
                         <span className="text-[10px] font-bold text-muted-foreground/80 uppercase tracking-widest">Deductions</span>
                       </div>
                       {expectedDeductions.length > 0 ? expectedDeductions.map((d, i) => (
-                        <div key={i} className="flex items-center justify-between">
+                        <div key={i} className="flex items-center justify-between gap-2">
                           <span className="text-[12px] font-medium text-muted-foreground">
                             {d.name}
                             {!d.included && <Badge className="ml-2 bg-muted/50 text-muted-foreground border-none text-[8px] px-1 py-0">IGNORED</Badge>}
                           </span>
-                          <span className="text-[13px] font-bold text-foreground">₹{d.amount.toLocaleString()}</span>
+                          <span className="text-[13px] font-bold text-foreground truncate min-w-0">{formatINRFull(d.amount)}</span>
                         </div>
                       )) : (
                         <div className="text-[12px] text-muted-foreground/50 italic py-2">No deductions configured</div>
                       )}
-                      <div className="pt-4 mt-auto border-t border-border/40 flex items-center justify-between">
-                        <span className="text-[11px] font-bold text-foreground uppercase tracking-widest">Total Deductions</span>
-                        <span className="text-[15px] font-bold text-destructive">₹{totalDeductions.toLocaleString()}</span>
+                      <div className="pt-4 mt-auto border-t border-border/40 flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold text-foreground uppercase tracking-widest shrink-0">Total Deductions</span>
+                        <span className="text-[15px] font-bold text-destructive truncate min-w-0 text-right">{formatINRFull(totalDeductions)}</span>
                       </div>
                     </div>
                   </div>
-                  
-                  <div className="bg-primary/5 p-4 border-t border-primary/10 flex items-center justify-between px-6">
-                    <span className="text-[12px] font-bold text-primary uppercase tracking-widest">Net Payable Salary</span>
-                    <span className="text-xl font-black text-primary tracking-tight">₹{netSalary.toLocaleString()}</span>
+
+                  <div className="bg-primary/5 p-4 border-t border-primary/10 flex items-center justify-between gap-2 px-6">
+                    <span className="text-[12px] font-bold text-primary uppercase tracking-widest shrink-0">Net Payable Salary</span>
+                    <span className="text-xl font-black text-primary tracking-tight truncate min-w-0 text-right">{formatINRFull(netSalary)}</span>
                   </div>
                 </CardContent>
               </Card>
@@ -880,9 +881,9 @@ function EmployeeDetailsPage() {
                         <span className="text-muted-foreground font-medium">Total Working Hours</span>
                         <span className="font-bold text-primary">{totalWorkingHours}</span>
                       </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground font-medium">Estimated Net Salary</span>
-                        <span className="font-bold text-success">₹{(employee.salary).toLocaleString()}</span>
+                      <div className="flex items-center justify-between gap-2 text-sm">
+                        <span className="text-muted-foreground font-medium shrink-0">Estimated Net Salary</span>
+                        <span className="font-bold text-success truncate min-w-0">{formatINR(employee.salary)}</span>
                       </div>
                     </div>
                   </CardContent>

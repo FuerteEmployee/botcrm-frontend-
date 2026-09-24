@@ -432,7 +432,7 @@ function LeavesPage() {
 
               <div className="flex-1 overflow-y-auto px-6 space-y-8 pb-10">
                 <Card className="p-4 bg-muted/20 border-border/40 rounded-2xl shadow-none">
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1">
                       <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Leave Type</span>
                       <div className="flex items-center gap-2 font-bold text-foreground">
@@ -491,7 +491,7 @@ function LeavesPage() {
 
               {selectedLeave.status === "pending" && canEdit && (
                 <div className="p-6 border-t border-border/40 bg-white/50 backdrop-blur-md">
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <ActionButton variant="approve" showLabel label="APPROVE" onClick={() => handleStatus(selectedLeave._id, "approved")} className="bg-emerald-500 text-white border-none h-12 shadow-lg shadow-emerald-500/20" />
                     <ActionButton variant="reject" showLabel label="REJECT" onClick={() => handleStatus(selectedLeave._id, "rejected")} className="bg-destructive text-white border-none h-12 shadow-lg shadow-destructive/20" />
                   </div>
@@ -504,10 +504,10 @@ function LeavesPage() {
 
       {/* HR Apply Dialog */}
       <Dialog open={hrApplyOpen} onOpenChange={setHrApplyOpen}>
-        <DialogContent className="max-w-md rounded-2xl border-none shadow-2xl p-0 overflow-hidden">
-          <div className="h-2 w-full bg-primary" />
-          <div className="p-6">
-            <DialogHeader className="mb-6">
+        <DialogContent className="max-w-md rounded-2xl border-none shadow-2xl p-0 overflow-hidden max-h-[90vh] flex flex-col">
+          <div className="h-2 w-full bg-primary shrink-0" />
+          <div className="p-6 flex-1 flex flex-col min-h-0">
+            <DialogHeader className="mb-6 shrink-0">
               <div className="h-12 w-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-4">
                 <UserPlus className="h-6 w-6" />
               </div>
@@ -517,7 +517,8 @@ function LeavesPage() {
               </DialogDescription>
             </DialogHeader>
 
-            <form className="space-y-5" onSubmit={handleHrApplySubmit}>
+            <form className="flex-1 flex flex-col min-h-0" onSubmit={handleHrApplySubmit}>
+              <div className="space-y-5 flex-1 overflow-y-auto min-h-0">
               <div className="space-y-2">
                 <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Select Employee</label>
                 <Select value={hrFormEmployeeId} onValueChange={setHrFormEmployeeId}>
@@ -616,8 +617,9 @@ function LeavesPage() {
                 <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Reason / Note</label>
                 <FormInput placeholder="Official reason for application..." className="h-12 rounded-xl" value={hrFormReason} onChange={(e) => setHrFormReason(e.target.value)} />
               </div>
+              </div>
 
-              <DialogFooter className="pt-4 gap-3">
+              <DialogFooter className="pt-4 gap-3 shrink-0">
                 <Button type="button" variant="ghost" onClick={() => setHrApplyOpen(false)} className="rounded-xl h-12 flex-1 font-bold">Discard</Button>
                 <ActionButton variant="add" type="submit" showLabel label="SUBMIT REQUEST" icon={Check} disabled={isCreating} className="flex-1 h-12 shadow-lg shadow-primary/20" />
               </DialogFooter>

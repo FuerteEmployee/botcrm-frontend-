@@ -467,15 +467,15 @@ function AddMachineDialog({
 
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
+      <DialogContent className="max-w-md max-h-[90vh] flex flex-col">
+        <DialogHeader className="shrink-0">
           <DialogTitle className="text-base font-bold flex items-center gap-2">
             <Fingerprint className="h-4 w-4" />
             Add a biometric machine
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-4 mt-1">
+        <div className="space-y-4 mt-1 flex-1 overflow-y-auto min-h-0">
           <div className="space-y-1.5">
             <Label className="text-xs font-bold">Serial number</Label>
             <Input
@@ -491,7 +491,7 @@ function AddMachineDialog({
             </p>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label className="text-xs font-bold">Location</Label>
               <Input
@@ -521,7 +521,7 @@ function AddMachineDialog({
           </div>
         </div>
 
-        <div className="flex justify-end gap-2 mt-5">
+        <div className="flex justify-end gap-2 mt-5 shrink-0">
           <Button variant="outline" onClick={onClose} className="h-10 rounded-xl">
             Cancel
           </Button>

@@ -378,5 +378,3 @@ function UserLeaves() {
     </div>
   );
 }
-
-export default UserLeaves;

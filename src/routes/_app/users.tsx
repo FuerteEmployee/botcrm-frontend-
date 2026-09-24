@@ -343,7 +343,7 @@ function UserFormDialog({
 
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-5">
           {/* Name + Phone */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label className="text-xs">Name</Label>
               <Input
@@ -396,7 +396,7 @@ function UserFormDialog({
               </div>
             </div>
 
-            <div className="border rounded-lg overflow-hidden">
+            <div className="border rounded-lg overflow-x-auto">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="bg-muted/50 border-b">

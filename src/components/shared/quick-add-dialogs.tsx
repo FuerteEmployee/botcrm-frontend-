@@ -86,9 +86,9 @@ export function QuickAddBranchDialog({ open, onOpenChange, onCreated }: QuickAdd
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-white/95 backdrop-blur-xl">
-        <div className="h-2 w-full bg-linear-to-r from-primary via-primary/50 to-primary/80" />
-        <div className="p-5">
+      <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-white/95 backdrop-blur-xl max-h-[90vh] flex flex-col">
+        <div className="h-2 w-full bg-linear-to-r from-primary via-primary/50 to-primary/80 shrink-0" />
+        <div className="p-5 flex-1 overflow-y-auto min-h-0">
           <DialogHeader className="mb-4">
             <div className="flex items-center gap-4">
               <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary grid place-items-center shadow-inner">
@@ -147,7 +147,7 @@ export function QuickAddBranchDialog({ open, onOpenChange, onCreated }: QuickAdd
                   loading={fetchingLoc}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[9px] font-bold uppercase text-muted-foreground/60 ml-1">Latitude</label>
                   <FormInput
@@ -219,9 +219,9 @@ export function QuickAddDepartmentDialog({ open, onOpenChange, onCreated }: Quic
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-white/95 backdrop-blur-xl">
-        <div className="h-2 w-full bg-linear-to-r from-primary via-primary/50 to-primary/80" />
-        <div className="p-5">
+      <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-white/95 backdrop-blur-xl max-h-[90vh] flex flex-col">
+        <div className="h-2 w-full bg-linear-to-r from-primary via-primary/50 to-primary/80 shrink-0" />
+        <div className="p-5 flex-1 overflow-y-auto min-h-0">
           <DialogHeader className="mb-4">
             <div className="flex items-center gap-4">
               <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary grid place-items-center shadow-inner">
@@ -356,15 +356,15 @@ export function QuickAddShiftDialog({ open, onOpenChange, onCreated }: QuickAddD
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md rounded-xl">
-        <DialogHeader>
+      <DialogContent className="max-w-md rounded-xl max-h-[90vh] flex flex-col">
+        <DialogHeader className="shrink-0">
           <div className="h-10 w-10 rounded-xl bg-linear-to-br from-primary/15 to-primary/5 text-primary grid place-items-center mb-2">
             <Clock className="h-5 w-5" />
           </div>
           <DialogTitle className="text-[16px]">New Shift</DialogTitle>
           <DialogDescription className="text-[13px]">Set the shift name and working hours.</DialogDescription>
         </DialogHeader>
-        <form onSubmit={submit} className="space-y-4 mt-2">
+        <form onSubmit={submit} className="space-y-4 mt-2 flex-1 overflow-y-auto min-h-0">
           <FormInput
             label="Shift Name"
             placeholder="e.g. Morning"
@@ -395,7 +395,7 @@ export function QuickAddShiftDialog({ open, onOpenChange, onCreated }: QuickAddD
           </div>
 
           {!form.is24Hours ? (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {(["start", "end"] as const).map((which) => {
                 const timeKey = which === "start" ? "startTime" : "endTime";
                 const { hour, minute, period } = to12h(form[timeKey]);

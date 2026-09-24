@@ -36,7 +36,7 @@ export function FormDialog({
 }: FormDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={cn("rounded-2xl p-6 md:p-8 border-none shadow-2xl", maxWidth)}>
+      <DialogContent className={cn("rounded-2xl p-6 md:p-8 border-none shadow-2xl max-h-[90vh] flex flex-col", maxWidth)}>
         <DialogHeader className="space-y-2">
           <DialogTitle className="text-[20px] font-black tracking-tight">{title}</DialogTitle>
           {description && (
@@ -45,8 +45,8 @@ export function FormDialog({
             </DialogDescription>
           )}
         </DialogHeader>
-        
-        <div className="py-2">
+
+        <div className="py-2 flex-1 overflow-y-auto min-h-0">
           {children}
         </div>
 

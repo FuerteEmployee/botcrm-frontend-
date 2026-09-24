@@ -467,7 +467,7 @@ function ManageDialog({
               <SelectContent>
                 {plans.filter((p: any) => p.isActive !== false).map((p: any) => (
                   <SelectItem key={p._id} value={p._id} className="text-xs">
-                    {p.name} — ₹{p.price}/mo
+                    {p.name} — {formatINRFull(p.price)}/mo
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -668,7 +668,7 @@ function CreateTenantDialog({
               <SelectContent>
                 {plans.filter((p: any) => p.isActive !== false).map((p: any) => (
                   <SelectItem key={p._id} value={p._id} className="text-xs">
-                    {p.name} — ₹{p.price}/mo
+                    {p.name} — {formatINRFull(p.price)}/mo
                   </SelectItem>
                 ))}
               </SelectContent>

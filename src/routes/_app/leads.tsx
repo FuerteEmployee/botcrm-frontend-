@@ -32,6 +32,7 @@ import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { useLayoutSettings } from "@/hooks/use-layout-settings";
 import { GridCard } from "@/components/shared/grid-card";
 import { usePermission } from "@/hooks/use-permission";
+import { formatINR, formatINRFull } from "@/lib/format";
 
 export const Route = createFileRoute("/_app/leads")({
   component: LeadsPage,
@@ -510,7 +511,7 @@ function LeadsPage() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard label="TOTAL LEADS" value={totalLeads} icon={Users} accent="primary" delay={0} />
-        <StatCard label="OPEN PIPELINE" value={`₹${openPipeline.toLocaleString("en-IN")}`} icon={Banknote} accent="warning" delay={0.05} />
+        <StatCard label="OPEN PIPELINE" value={formatINR(openPipeline)} icon={Banknote} accent="warning" delay={0.05} />
         <StatCard label="WON" value={wonLeads} icon={CheckCircle2} accent="success" delay={0.1} />
         <StatCard label="FOLLOW-UPS DUE" value={followUpsDue} icon={Clock} accent="destructive" delay={0.15} />
       </div>
@@ -613,7 +614,7 @@ function LeadsPage() {
                       </span>
                     </div>
                     <div className="flex items-center justify-between text-[11px] text-muted-foreground/60 border-t border-border/20 pt-2 mt-2">
-                      <span>Value: <strong className="text-foreground">₹{(l.value || 0).toLocaleString("en-IN")}</strong></span>
+                      <span>Value: <strong className="text-foreground">{formatINRFull(l.value || 0)}</strong></span>
                       <span>Follow-up: <strong className="text-foreground">{(() => {
                         const formatted = formatFollowUpDate(l.followUpDate);
                         return <span className={formatted.className}>{formatted.text}</span>;
@@ -768,7 +769,7 @@ function LeadsPage() {
                         </div>
                       </DataTableCell>
                       <DataTableCell className="text-[12.5px] font-semibold text-foreground">
-                        {l.value ? `₹${l.value.toLocaleString("en-IN")}` : "₹0"}
+                        {formatINRFull(l.value || 0)}
                       </DataTableCell>
                       <DataTableCell className="text-[12.5px]">
                         {(() => {
