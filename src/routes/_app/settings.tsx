@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { AppVersionCard } from "@/components/shared/app-update";
 import { useState, useEffect, useMemo } from "react";
-import { LogOut, Bell, Lock, Building2, Palette, AlertCircle, Mail, Phone, MapPin, Camera, User, LayoutGrid, List, CheckCircle2, ShieldCheck, Globe, Trash2, Edit2, Loader2, Clock, CalendarDays, Plus, X, GitBranch, Receipt, Search, LogIn, Copy, Check, Banknote, Smartphone } from "lucide-react";
+import { LogOut, Bell, Lock, Building2, Palette, AlertCircle, Mail, Phone, MapPin, Camera, User, LayoutGrid, List, CheckCircle2, ShieldCheck, Globe, Trash2, Edit2, Loader2, Clock, CalendarDays, Plus, X, GitBranch, Receipt, Search, LogIn, Copy, Check, Banknote, Smartphone, Utensils, Timer } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,7 @@ import { useShiftService } from "@/services/shift-service";
 import { useBranchService } from "@/services/branch-service";
 import { SettingsGuide, settingsGuideLines } from "@/components/settings/settings-guide";
 import { usePermission } from "@/hooks/use-permission";
+import { useFeatureToggles } from "@/hooks/use-feature-toggles";
 
 export const Route = createFileRoute("/_app/settings")({
   component: SettingsPage,
@@ -76,6 +77,7 @@ function SettingsPage() {
   const { shifts } = useShiftService();
   const { branches: branchList, isLoading: branchesLoading } = useBranchService();
   const { can } = usePermission();
+  const { isFeatureEnabled } = useFeatureToggles();
   const canCreate = can("settings", "create");
   const canEdit = can("settings", "edit");
   const canDelete = can("settings", "delete");
@@ -108,6 +110,19 @@ function SettingsPage() {
     workDays: ["M", "T", "W", "Th", "F"],
     requireLocation: false,
     remotePunch: true,
+    reqHours: 8,
+    halfDayHours: 4,
+    autoPunchOut: true,
+    allowMultiplePunches: false,
+    lunchIn: "13:00",
+    lunchOut: "14:00",
+    minLunch: 30,
+    maxLunch: 90,
+    lunchGrace: 5,
+    lateGrace: 15,
+    earlyGrace: 5,
+    otThreshold: 9,
+    otMultiplier: 1.5,
   });
   const [payroll, setPayroll] = useState({
     enabled: false,
@@ -158,8 +173,21 @@ function SettingsPage() {
           setAttendance({
             defaultShiftId: data.attendance.defaultShiftId || "",
             workDays: data.attendance.workDays || ["M", "T", "W", "Th", "F"],
-            requireLocation: data.attendance.requireLocation || false,
-            remotePunch: data.attendance.remotePunch || true,
+            requireLocation: data.attendance.requireLocation ?? false,
+            remotePunch: data.attendance.remotePunch ?? true,
+            reqHours: data.attendance.reqHours ?? 8,
+            halfDayHours: data.attendance.halfDayHours ?? 4,
+            autoPunchOut: data.attendance.autoPunchOut ?? true,
+            allowMultiplePunches: data.attendance.allowMultiplePunches ?? false,
+            lunchIn: data.attendance.lunchIn || "13:00",
+            lunchOut: data.attendance.lunchOut || "14:00",
+            minLunch: data.attendance.minLunch ?? 30,
+            maxLunch: data.attendance.maxLunch ?? 90,
+            lunchGrace: data.attendance.lunchGrace ?? 5,
+            lateGrace: data.attendance.lateGrace ?? 15,
+            earlyGrace: data.attendance.earlyGrace ?? 5,
+            otThreshold: data.attendance.otThreshold ?? 9,
+            otMultiplier: data.attendance.otMultiplier ?? 1.5,
           });
         }
         
@@ -388,8 +416,9 @@ function SettingsPage() {
                   className="space-y-10"
                 >
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
+                    {/* Default Shift & Work Day Requirements */}
                     <div className="space-y-6">
-                      <SectionHeader icon={Clock} label="Default Shift" description="Select the standard shift for new employees." />
+                      <SectionHeader icon={Clock} label="Default Shift & Work Hours" description="Select standard shift and required daily work hours." />
                       <div className="grid grid-cols-1 gap-4">
                         <FormSelect
                           label="Global Default Shift"
@@ -398,13 +427,34 @@ function SettingsPage() {
                           options={shifts.map(s => ({ value: s._id, label: `${s.name} (${formatTime12h(s.startTime)} - ${formatTime12h(s.endTime)})` }))}
                           placeholder="-- Select Default Shift --"
                         />
+                        <div className="grid grid-cols-2 gap-4">
+                          <FormInput
+                            label="Full Day Requirement (Hours)"
+                            type="number"
+                            min={1}
+                            max={24}
+                            value={attendance.reqHours}
+                            onChange={(e) => setAttendance(p => ({ ...p, reqHours: Number(e.target.value) || 0 }))}
+                            placeholder="8"
+                          />
+                          <FormInput
+                            label="Half Day Minimum (Hours)"
+                            type="number"
+                            min={1}
+                            max={24}
+                            value={attendance.halfDayHours}
+                            onChange={(e) => setAttendance(p => ({ ...p, halfDayHours: Number(e.target.value) || 0 }))}
+                            placeholder="4"
+                          />
+                        </div>
                       </div>
                     </div>
 
+                    {/* Punch Controls */}
                     <div className="space-y-6">
-                      <SectionHeader icon={ShieldCheck} label="Punch Controls" description="Security and location requirements." />
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between p-4 rounded-xl bg-muted/20 border border-border/40">
+                      <SectionHeader icon={ShieldCheck} label="Punch Controls" description="Security, auto punch-out and session policies." />
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between p-3.5 rounded-xl bg-muted/20 border border-border/40">
                           <div>
                             <div className="text-[13px] font-bold">Geofencing</div>
                             <div className="text-[11px] text-muted-foreground">Require GPS for every punch.</div>
@@ -414,7 +464,7 @@ function SettingsPage() {
                             onCheckedChange={(v) => setAttendance(p => ({ ...p, requireLocation: v }))} 
                           />
                         </div>
-                        <div className="flex items-center justify-between p-4 rounded-xl bg-muted/20 border border-border/40">
+                        <div className="flex items-center justify-between p-3.5 rounded-xl bg-muted/20 border border-border/40">
                           <div>
                             <div className="text-[13px] font-bold">Remote Punch</div>
                             <div className="text-[11px] text-muted-foreground">Allow clock-in from any location.</div>
@@ -424,11 +474,138 @@ function SettingsPage() {
                             onCheckedChange={(v) => setAttendance(p => ({ ...p, remotePunch: v }))} 
                           />
                         </div>
+                        {isFeatureEnabled("geofenceAutoPunchOut") && (
+                          <div className="flex items-center justify-between p-3.5 rounded-xl bg-muted/20 border border-border/40">
+                            <div>
+                              <div className="text-[13px] font-bold">Auto Punch-Out</div>
+                              <div className="text-[11px] text-muted-foreground">Automatically close shift if employee forgets to punch out.</div>
+                            </div>
+                            <Switch 
+                              checked={attendance.autoPunchOut} 
+                              onCheckedChange={(v) => setAttendance(p => ({ ...p, autoPunchOut: v }))} 
+                            />
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between p-3.5 rounded-xl bg-muted/20 border border-border/40">
+                          <div>
+                            <div className="text-[13px] font-bold">Multiple Sessions / Punches</div>
+                            <div className="text-[11px] text-muted-foreground">Allow employees to punch in and out multiple times daily.</div>
+                          </div>
+                          <Switch 
+                            checked={attendance.allowMultiplePunches} 
+                            onCheckedChange={(v) => setAttendance(p => ({ ...p, allowMultiplePunches: v }))} 
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8 border-t border-border/40 pt-8">
+                    {/* Lunch Break (Company Default) */}
+                    <div className="space-y-6">
+                      <SectionHeader
+                        icon={Utensils}
+                        label="Lunch Break (Company Default)"
+                        description="Default lunch policy when shifts use 'Use company default'."
+                      />
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <FormInput
+                            label="Minimum Lunch (Minutes)"
+                            type="number"
+                            min={0}
+                            max={180}
+                            value={attendance.minLunch}
+                            onChange={(e) => setAttendance(p => ({ ...p, minLunch: Number(e.target.value) || 0 }))}
+                            placeholder="30"
+                          />
+                          <FormInput
+                            label="Maximum Lunch (Minutes)"
+                            type="number"
+                            min={0}
+                            max={240}
+                            value={attendance.maxLunch}
+                            onChange={(e) => setAttendance(p => ({ ...p, maxLunch: Number(e.target.value) || 0 }))}
+                            placeholder="90"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <FormInput
+                            label="Lunch Window Starts"
+                            type="time"
+                            value={attendance.lunchIn}
+                            onChange={(e) => setAttendance(p => ({ ...p, lunchIn: e.target.value }))}
+                          />
+                          <FormInput
+                            label="Lunch Window Ends"
+                            type="time"
+                            value={attendance.lunchOut}
+                            onChange={(e) => setAttendance(p => ({ ...p, lunchOut: e.target.value }))}
+                          />
+                        </div>
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                          Shifts set to <b>Use company default</b> deduct the minimum lunch break ({attendance.minLunch || 30} mins) as unpaid time. Punches exceeding maximum lunch ({attendance.maxLunch || 90} mins) are flagged as overruns.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Grace Periods & Overtime */}
+                    <div className="space-y-6">
+                      <SectionHeader
+                        icon={Timer}
+                        label="Grace Periods & Overtime"
+                        description="Punctuality thresholds and daily overtime rules."
+                      />
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <FormInput
+                            label="Late Arrival Grace (Minutes)"
+                            type="number"
+                            min={0}
+                            max={120}
+                            value={attendance.lateGrace}
+                            onChange={(e) => setAttendance(p => ({ ...p, lateGrace: Number(e.target.value) || 0 }))}
+                            placeholder="15"
+                          />
+                          <FormInput
+                            label="Early Departure Grace (Minutes)"
+                            type="number"
+                            min={0}
+                            max={120}
+                            value={attendance.earlyGrace}
+                            onChange={(e) => setAttendance(p => ({ ...p, earlyGrace: Number(e.target.value) || 0 }))}
+                            placeholder="5"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <FormInput
+                            label="Daily OT Threshold (Hours)"
+                            type="number"
+                            min={1}
+                            max={24}
+                            value={attendance.otThreshold}
+                            onChange={(e) => setAttendance(p => ({ ...p, otThreshold: Number(e.target.value) || 0 }))}
+                            placeholder="9"
+                          />
+                          <FormInput
+                            label="OT Pay Multiplier (e.g. 1.5x)"
+                            type="number"
+                            step="0.1"
+                            min={1}
+                            max={5}
+                            value={attendance.otMultiplier}
+                            onChange={(e) => setAttendance(p => ({ ...p, otMultiplier: Number(e.target.value) || 1 }))}
+                            placeholder="1.5"
+                          />
+                        </div>
+                        <p className="text-[11px] text-muted-foreground leading-relaxed">
+                          Punches within grace minutes are not penalized. Work hours logged past {attendance.otThreshold || 9}h count toward overtime pay calculated at {attendance.otMultiplier || 1.5}x.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-6 border-t border-border/40 pt-8">
                     <SectionHeader icon={CalendarDays} label="Active Work Days" description="Select the days when attendance is mandatory." />
                     <div className="flex flex-wrap gap-3">
                       {["M", "T", "W", "Th", "F", "Sa", "Su"].map(day => (

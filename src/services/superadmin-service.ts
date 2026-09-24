@@ -227,3 +227,16 @@ export async function deletePlanFeature(id: string) {
   const { data } = await apiClient.delete(`${BASE}/plan-features/${id}`);
   return data;
 }
+
+// ─── Feature Toggles ─────────────────────────────────────────────────────────
+
+export async function updateFeatureToggles(
+  adminId: string,
+  featureToggles: Record<string, boolean>
+) {
+  const { data } = await apiClient.put(
+    `${BASE}/tenants/${adminId}/feature-toggles`,
+    { featureToggles }
+  );
+  return data;
+}

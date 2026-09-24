@@ -1,4 +1,4 @@
-﻿import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard,
   Users,
@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { logoutAndClear } from "@/lib/logout";
 import { useAuth } from "@/hooks/use-auth";
 import { useSidebarOrder } from "@/hooks/use-sidebar-order";
+import { useFeatureToggles } from "@/hooks/use-feature-toggles";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import logo from "@/assets/bot-logo.png";
@@ -41,6 +42,9 @@ type NavItem = {
   label: string;
   icon: React.ElementType;
   adminOnly?: boolean;
+  /** Feature toggle key — when set, the item is hidden if the super admin
+   *  has disabled this feature for the tenant. */
+  featureKey?: string;
 };
 
 const NAV: NavItem[] = [
@@ -52,16 +56,16 @@ const NAV: NavItem[] = [
   { to: "/attendance", label: "Attendance Dashboard", icon: CalendarCheck },
   { to: "/tickets", label: "Helpdesk Tickets", icon: Ticket },
   { to: "/salary", label: "Salary", icon: Wallet },
-  { to: "/advance-salary", label: "Advance Salary & Loan", icon: Coins },
-  { to: "/leads", label: "Lead Management", icon: UserCheck },
+  { to: "/advance-salary", label: "Advance Salary & Loan", icon: Coins, featureKey: "advanceSalary" },
+  { to: "/leads", label: "Lead Management", icon: UserCheck, featureKey: "leads" },
   { to: "/festivals", label: "Festivals & Holidays", icon: Gift },
-  { to: "/announcements", label: "Notice Board", icon: Megaphone },
-  { to: "/tracking", label: "Tracking", icon: MapPin },
+  { to: "/announcements", label: "Notice Board", icon: Megaphone, featureKey: "announcements" },
+  { to: "/tracking", label: "Tracking", icon: MapPin, featureKey: "tracking" },
   { to: "/leave-types", label: "Leave Types", icon: Settings2 },
   { to: "/shifts", label: "Shift Management", icon: Clock },
-  { to: "/biometric-devices", label: "Biometric Device", icon: Fingerprint },
-  { to: "/assets", label: "Assets Management", icon: Monitor },
-  { to: "/expenses", label: "Expense Management", icon: Receipt },
+  { to: "/biometric-devices", label: "Biometric Device", icon: Fingerprint, featureKey: "biometricDevices" },
+  { to: "/assets", label: "Assets Management", icon: Monitor, featureKey: "assets" },
+  { to: "/expenses", label: "Expense Management", icon: Receipt, featureKey: "expenses" },
   { to: "/users", label: "Users", icon: UserCog, adminOnly: true },
   { to: "/billing", label: "Plan & Billing", icon: CreditCard, adminOnly: true },
   { to: "/settings", label: "Settings", icon: Settings },
@@ -84,9 +88,12 @@ export function AppSidebar({
   const { session } = useAuth();
   const isSubadmin = session?.role === "subadmin";
   const permissions = session?.permissions || {};
+  const { isFeatureEnabled } = useFeatureToggles();
 
   // Filter nav: subadmin sees only permitted pages; admin-only items hidden from subadmin
   const visibleNav = NAV.filter((item) => {
+    // Hide features the super admin has disabled for this tenant
+    if (item.featureKey && !isFeatureEnabled(item.featureKey)) return false;
     if (item.adminOnly && isSubadmin) return false;
     if (!isSubadmin) return true;
     const key = item.to.replace("/", "");

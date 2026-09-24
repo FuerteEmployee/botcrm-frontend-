@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { getTenants, updateTenant, createTenant, deactivateTenant, deleteTenant } from "@/services/superadmin-service";
+import { getTenants, updateTenant, createTenant, deactivateTenant, deleteTenant, updateFeatureToggles } from "@/services/superadmin-service";
 import { getPlans } from "@/services/superadmin-service";
 import { useState, useEffect } from "react";
-import { Settings, MoreHorizontal, Search, Plus, Power, Trash2, Eye, EyeOff, Fingerprint } from "lucide-react";
+import { Settings, MoreHorizontal, Search, Plus, Power, Trash2, Eye, EyeOff, Fingerprint, ToggleLeft } from "lucide-react";
 import { MachinesDialog } from "@/components/pages/machines-manager";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -41,6 +41,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 
 export const Route = createFileRoute("/super/tenants")({
   component: TenantsPage,
@@ -65,6 +66,7 @@ function TenantsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [deactivating, setDeactivating] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState<{ id: string; name: string } | null>(null);
+  const [togglingFeatures, setTogglingFeatures] = useState<{ id: string; name: string } | null>(null);
 
   const deactivateMutation = useMutation({
     mutationFn: (id: string) => deactivateTenant(id),
@@ -258,6 +260,15 @@ function TenantsPage() {
                               <DropdownMenuItem
                                 disabled={!t.adminId?._id}
                                 onClick={() =>
+                                  t.adminId?._id && setTogglingFeatures({ id: t.adminId._id, name: t.adminId.name })
+                                }
+                              >
+                                <ToggleLeft className="h-3.5 w-3.5 mr-2" />
+                                Feature toggles
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                disabled={!t.adminId?._id}
+                                onClick={() =>
                                   t.adminId?._id && setMachinesFor({ id: t.adminId._id, name: t.adminId.name })
                                 }
                               >
@@ -310,6 +321,17 @@ function TenantsPage() {
           adminId={machinesFor.id}
           tenantName={machinesFor.name}
           onClose={() => setMachinesFor(null)}
+        />
+      )}
+
+      {/* Feature toggles per tenant */}
+      {togglingFeatures && (
+        <FeatureTogglesDialog
+          adminId={togglingFeatures.id}
+          tenantName={togglingFeatures.name}
+          tenants={tenants}
+          onClose={() => setTogglingFeatures(null)}
+          queryClient={queryClient}
         />
       )}
 
@@ -729,6 +751,111 @@ function CreateTenantDialog({
             }}
           >
             {mutation.isPending ? "Creating..." : "Create customer"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const FEATURE_TOGGLE_DEFINITIONS: {
+  key: string;
+  label: string;
+  description: string;
+}[] = [
+  { key: "tracking", label: "Live Tracking", description: "Real-time GPS tracking of employees" },
+  { key: "geofenceAutoPunchOut", label: "Geofence Auto Punch-Out", description: "Automatically punch out employees when they leave the branch" },
+  { key: "leads", label: "Lead Management", description: "CRM leads tracking and management" },
+  { key: "expenses", label: "Expense Management", description: "Employee expense claims and reimbursements" },
+  { key: "advanceSalary", label: "Advance Salary & Loan", description: "Advance salary requests and approvals" },
+  { key: "announcements", label: "Notice Board", description: "Company-wide announcements" },
+  { key: "biometricDevices", label: "Biometric Devices", description: "eSSL/ZKTeco biometric device integration" },
+  { key: "assets", label: "Assets Management", description: "Company asset tracking and allocation" },
+  { key: "recruitment", label: "Recruitment", description: "Job postings and hiring pipeline" },
+  { key: "training", label: "Training", description: "Employee training programs" },
+  { key: "performance", label: "Performance Reviews", description: "Employee performance evaluations" },
+  { key: "projects", label: "Projects", description: "Project tracking and management" },
+  { key: "policies", label: "HR Policies", description: "Policy document management" },
+];
+
+function FeatureTogglesDialog({
+  adminId,
+  tenantName,
+  tenants,
+  onClose,
+  queryClient,
+}: {
+  adminId: string;
+  tenantName: string;
+  tenants: any[];
+  onClose: () => void;
+  queryClient: any;
+}) {
+  const tenant = tenants.find((t: any) => t.adminId?._id === adminId);
+  const savedToggles = tenant?.featureToggles || {};
+
+  const [toggles, setToggles] = useState<Record<string, boolean>>(() => {
+    const defaults: Record<string, boolean> = {};
+    for (const f of FEATURE_TOGGLE_DEFINITIONS) {
+      defaults[f.key] = savedToggles[f.key] ?? (f.key === "tracking" || f.key === "geofenceAutoPunchOut" || f.key === "leads" || f.key === "expenses" || f.key === "advanceSalary" || f.key === "announcements" || f.key === "biometricDevices");
+    }
+    return defaults;
+  });
+
+  const mutation = useMutation({
+    mutationFn: (data: Record<string, boolean>) => updateFeatureToggles(adminId, data),
+    onSuccess: () => {
+      toast.success("Feature toggles updated");
+      queryClient.invalidateQueries({ queryKey: ["superadmin"] });
+      onClose();
+    },
+    onError: (err: any) => {
+      toast.error(err?.response?.data?.message || "Failed to update feature toggles");
+    },
+  });
+
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="max-w-md max-h-[85vh] flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="text-sm">
+            Feature Toggles — {tenantName}
+          </DialogTitle>
+        </DialogHeader>
+        <p className="text-[11px] text-muted-foreground -mt-1">
+          Enable or disable feature modules for this customer. Disabled features
+          are hidden from their admin panel.
+        </p>
+        <div className="flex-1 overflow-y-auto -mx-6 px-6 space-y-1 mt-2">
+          {FEATURE_TOGGLE_DEFINITIONS.map((f) => (
+            <div
+              key={f.key}
+              className="flex items-center justify-between py-2.5 px-3 rounded-lg hover:bg-muted/50 transition-colors"
+            >
+              <div className="min-w-0 pr-4">
+                <div className="text-[13px] font-medium">{f.label}</div>
+                <div className="text-[11px] text-muted-foreground">{f.description}</div>
+              </div>
+              <Switch
+                checked={toggles[f.key] ?? false}
+                onCheckedChange={(checked) =>
+                  setToggles((prev) => ({ ...prev, [f.key]: checked }))
+                }
+              />
+            </div>
+          ))}
+        </div>
+        <div className="flex justify-end gap-2 mt-3 pt-3 border-t">
+          <Button variant="outline" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            className="bg-primary hover:bg-primary/90"
+            disabled={mutation.isPending}
+            onClick={() => mutation.mutate(toggles)}
+          >
+            {mutation.isPending ? "Saving..." : "Save toggles"}
           </Button>
         </div>
       </DialogContent>

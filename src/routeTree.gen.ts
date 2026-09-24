@@ -53,7 +53,6 @@ import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
 import { Route as AppBranchesRouteImport } from './routes/_app/branches'
 import { Route as AppBiometricDevicesRouteImport } from './routes/_app/biometric-devices'
 import { Route as AppBillingRouteImport } from './routes/_app/billing'
-import { Route as AppAttendanceConfigRouteImport } from './routes/_app/attendance-config'
 import { Route as AppAttendanceRouteImport } from './routes/_app/attendance'
 import { Route as AppAssetsRouteImport } from './routes/_app/assets'
 import { Route as AppAnnouncementsRouteImport } from './routes/_app/announcements'
@@ -283,11 +282,6 @@ const AppBillingRoute = AppBillingRouteImport.update({
   path: '/billing',
   getParentRoute: () => AppRoute,
 } as any)
-const AppAttendanceConfigRoute = AppAttendanceConfigRouteImport.update({
-  id: '/attendance-config',
-  path: '/attendance-config',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppAttendanceRoute = AppAttendanceRouteImport.update({
   id: '/attendance',
   path: '/attendance',
@@ -343,7 +337,6 @@ export interface FileRoutesByFullPath {
   '/announcements': typeof AppAnnouncementsRoute
   '/assets': typeof AppAssetsRouteWithChildren
   '/attendance': typeof AppAttendanceRoute
-  '/attendance-config': typeof AppAttendanceConfigRoute
   '/billing': typeof AppBillingRoute
   '/biometric-devices': typeof AppBiometricDevicesRoute
   '/branches': typeof AppBranchesRoute
@@ -396,7 +389,6 @@ export interface FileRoutesByTo {
   '/advance-salary': typeof AppAdvanceSalaryRoute
   '/announcements': typeof AppAnnouncementsRoute
   '/attendance': typeof AppAttendanceRoute
-  '/attendance-config': typeof AppAttendanceConfigRoute
   '/billing': typeof AppBillingRoute
   '/biometric-devices': typeof AppBiometricDevicesRoute
   '/branches': typeof AppBranchesRoute
@@ -452,7 +444,6 @@ export interface FileRoutesById {
   '/_app/announcements': typeof AppAnnouncementsRoute
   '/_app/assets': typeof AppAssetsRouteWithChildren
   '/_app/attendance': typeof AppAttendanceRoute
-  '/_app/attendance-config': typeof AppAttendanceConfigRoute
   '/_app/billing': typeof AppBillingRoute
   '/_app/biometric-devices': typeof AppBiometricDevicesRoute
   '/_app/branches': typeof AppBranchesRoute
@@ -509,7 +500,6 @@ export interface FileRouteTypes {
     | '/announcements'
     | '/assets'
     | '/attendance'
-    | '/attendance-config'
     | '/billing'
     | '/biometric-devices'
     | '/branches'
@@ -562,7 +552,6 @@ export interface FileRouteTypes {
     | '/advance-salary'
     | '/announcements'
     | '/attendance'
-    | '/attendance-config'
     | '/billing'
     | '/biometric-devices'
     | '/branches'
@@ -617,7 +606,6 @@ export interface FileRouteTypes {
     | '/_app/announcements'
     | '/_app/assets'
     | '/_app/attendance'
-    | '/_app/attendance-config'
     | '/_app/billing'
     | '/_app/biometric-devices'
     | '/_app/branches'
@@ -982,13 +970,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBillingRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/attendance-config': {
-      id: '/_app/attendance-config'
-      path: '/attendance-config'
-      fullPath: '/attendance-config'
-      preLoaderRoute: typeof AppAttendanceConfigRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/_app/attendance': {
       id: '/_app/attendance'
       path: '/attendance'
@@ -1090,7 +1071,6 @@ interface AppRouteChildren {
   AppAnnouncementsRoute: typeof AppAnnouncementsRoute
   AppAssetsRoute: typeof AppAssetsRouteWithChildren
   AppAttendanceRoute: typeof AppAttendanceRoute
-  AppAttendanceConfigRoute: typeof AppAttendanceConfigRoute
   AppBillingRoute: typeof AppBillingRoute
   AppBiometricDevicesRoute: typeof AppBiometricDevicesRoute
   AppBranchesRoute: typeof AppBranchesRoute
@@ -1121,7 +1101,6 @@ const AppRouteChildren: AppRouteChildren = {
   AppAnnouncementsRoute: AppAnnouncementsRoute,
   AppAssetsRoute: AppAssetsRouteWithChildren,
   AppAttendanceRoute: AppAttendanceRoute,
-  AppAttendanceConfigRoute: AppAttendanceConfigRoute,
   AppBillingRoute: AppBillingRoute,
   AppBiometricDevicesRoute: AppBiometricDevicesRoute,
   AppBranchesRoute: AppBranchesRoute,
