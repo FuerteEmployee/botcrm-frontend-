@@ -110,6 +110,14 @@ class LocationTrackingService : Service() {
     private var usingFallback = false
     private var started = false
 
+    // The last fix put in the queue, to drop the same fix delivered twice. The fused
+    // provider and a heartbeat (or a ping) can hand over one reading moments apart,
+    // and both were stored: 6 of 110 rows on the emulator, some 11 ms apart, which
+    // the server's exact-timestamp dedupe cannot catch.
+    private var lastQueuedAt = 0L
+    private var lastQueuedLat = 0.0
+    private var lastQueuedLng = 0.0
+
     // Watches GPS / network / battery-saver while on duty. Null when not
     // tracking: we deliberately do not observe an employee's phone settings
     // outside their working session.
@@ -134,6 +142,17 @@ class LocationTrackingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // A stop request is answered BEFORE going foreground. The web layer sends one
+        // on every app open while the employee is not on duty (via startService, which
+        // carries no foreground-start deadline). Going foreground first, as below, made
+        // each of those stops start the service, fail Android's location check and log
+        // a false "fg_denied" failure, often before permission was even asked for.
+        if (intent?.action == ACTION_STOP) {
+            stopTrackingInternal()
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
         // ── Satisfy the foreground-service contract FIRST, before any decision ──
         //
         // startForegroundService() starts a ~5 second timer. If startForeground()
@@ -176,10 +195,7 @@ class LocationTrackingService : Service() {
             return START_NOT_STICKY
         }
 
-        if (intent?.action == ACTION_STOP) {
-            stopTrackingInternal()
-            return standDown("stop requested")
-        }
+        // (ACTION_STOP is handled at the top, before going foreground.)
 
         if (!hasLocationPermission()) {
             // Recorded only when a session was supposed to be running. On a fresh
@@ -369,7 +385,15 @@ class LocationTrackingService : Service() {
             pingClient.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return   // network/server issue — keep running
                 val body = resp.body?.string() ?: return
-                if (!hasOpenSession(body)) {
+                // Company chose "track always": keep recording with no open shift.
+                // Read on every poll, so switching the setting back to "on duty"
+                // stops the service at the next check (within ~30 s).
+                val always = wantsTrackAlways(body)
+                if (always != Prefs.trackAlways(applicationContext)) {
+                    Prefs.setTrackAlways(applicationContext, always)
+                    refreshNotification()
+                }
+                if (!always && !hasOpenSession(body)) {
                     Log.i(TAG, "Attendance API: no open session — stopping service.")
                     Prefs.clearActive(applicationContext)
                     stopSelf()
@@ -385,6 +409,25 @@ class LocationTrackingService : Service() {
      * Returns true if there is a punchIn without a punchOut,
      * OR if any element in the "shifts" array is open (no punchOut).
      */
+    /** True when /attendance/today carries `"trackAlways": true`. Anything else, including a parse error, is false. */
+    private fun wantsTrackAlways(json: String): Boolean {
+        return try {
+            JSONObject(json).optBoolean("trackAlways", false)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Re-post the ongoing notification so its wording follows the current mode. */
+    private fun refreshNotification() {
+        try {
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            nm.notify(NOTIF_ID, buildNotification())
+        } catch (_: Exception) {
+            // A stale sentence is harmless; never let this take the service down.
+        }
+    }
+
     private fun hasOpenSession(json: String): Boolean {
         return try {
             val obj = JSONObject(json)
@@ -492,6 +535,22 @@ class LocationTrackingService : Service() {
             Log.d(TAG, "Drop low-accuracy heartbeat fix (${accuracy}m > ${HEARTBEAT_ACCURACY}m)")
             return
         }
+        // Same reading twice within 2 s: one fix, not two. Deliberately narrow, so a
+        // stationary heartbeat 30 s later is still recorded (it proves the phone is
+        // alive), and so is a genuinely new position.
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - lastQueuedAt in 0..2_000) {
+            val d = FloatArray(1)
+            Location.distanceBetween(lastQueuedLat, lastQueuedLng, location.latitude, location.longitude, d)
+            if (d[0] < 1f) {
+                Log.d(TAG, "Drop duplicate fix delivered ${nowMs - lastQueuedAt} ms after the previous one")
+                return
+            }
+        }
+        lastQueuedAt = nowMs
+        lastQueuedLat = location.latitude
+        lastQueuedLng = location.longitude
+
         val speed = if (location.hasSpeed()) location.speed else 0f
 
         // Sensors first. The GPS-speed rule stays as the fallback for handsets
@@ -584,7 +643,11 @@ class LocationTrackingService : Service() {
                 "Attendance tracking",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Records your location while you are punched in"
+                // Neutral on purpose: a company can track on duty only or all the time,
+                // and Android shows this text in the phone's own settings, where it
+                // must not promise "only while punched in". Re-creating the channel on
+                // every start updates the text on phones that installed an older build.
+                description = "Records your location for attendance, as set by your company"
                 setShowBadge(false)
             }
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
@@ -601,8 +664,11 @@ class LocationTrackingService : Service() {
             )
         }
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Attendance tracking active")
-            .setContentText("Recording your location while you are punched in.")
+            .setContentTitle(if (Prefs.trackAlways(this)) "Location sharing is on" else "Attendance tracking active")
+            .setContentText(
+                if (Prefs.trackAlways(this)) "Your company records your location at all times, including after work."
+                else "Recording your location while you are punched in."
+            )
             .setSmallIcon(R.drawable.ic_tracking_notification)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)

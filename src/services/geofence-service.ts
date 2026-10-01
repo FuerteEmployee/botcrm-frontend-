@@ -78,11 +78,16 @@ export const REASON_LABEL: Record<string, string> = {
   too_few_fixes: "Not enough location readings",
   window_too_short: "Readings covered too little time",
   too_few_distinct_positions: "Same position repeated — one observation, not many",
+  repeated_coordinate: "One reading repeated many times — not trusted",
   within_buffer: "Just outside the radius, inside the exit buffer",
+  marginal_window_too_short: "Only just outside — waiting for more readings",
   stale_fixes: "Newest reading too old to be current",
+  confirming: "Looks outside — checking again before acting",
   grace_period: "Just punched in",
   role_exempt: "Works off-site — exempt",
+  work_from_home: "Working from home today",
   fence_disabled: "Geo-fence switched off",
+  department_disabled: "Turned off for this department",
   no_branch: "No branch with coordinates",
   on_lunch: "On a lunch break",
   not_punched_in: "Not punched in",
@@ -90,27 +95,48 @@ export const REASON_LABEL: Record<string, string> = {
   shadow_mode: "Engine not enabled",
 };
 
-export function useGeofenceAudit(params: { employeeId?: string; date?: string; decision?: string } = {}, enabled = true) {
-  const { data = [], isLoading } = useQuery<GeofenceAuditRow[]>({
+/** Plain words for each decision, for the audit list. */
+export const DECISION_LABEL: Record<GeofenceDecision, string> = {
+  punched_out: "Punched out",
+  abstained: "Did nothing — not sure",
+  inside: "Inside the branch",
+  suppressed: "Did nothing — rule says no",
+};
+
+/**
+ * The promotion-gate checks in words an admin can read. The numbers come from
+ * the server; only the sentence is written here.
+ */
+export const CRITERION_LABEL: Record<string, (c: ShadowCriterion) => string> = {
+  observedDays: (c) => `Watched on ${c.value} different day${c.value === 1 ? "" : "s"} (needs ${c.required})`,
+  employeesSeen: (c) => `Seen ${c.value} different employee${c.value === 1 ? "" : "s"} (needs ${c.required})`,
+  decisionsRecorded: (c) => `${c.value} decision${c.value === 1 ? "" : "s"} recorded (needs ${c.required})`,
+  wouldHaveClosed: (c) => (c.value >= c.required ? `Spotted ${c.value} real departure${c.value === 1 ? "" : "s"}` : "Has not yet spotted anyone leaving"),
+  noStaleDecisions: (c) => (c.value === 0 ? "No decision rested on an old reading" : `${c.value} decision${c.value === 1 ? "" : "s"} rested on a reading over 5 minutes old`),
+};
+
+export function useGeofenceAudit(params: { employeeId?: string; date?: string; decision?: string; limit?: number } = {}, enabled = true) {
+  const { data = [], isLoading, isError, error } = useQuery<GeofenceAuditRow[]>({
     queryKey: ["geofence-audit", params],
     queryFn: async () => {
       const { data } = await apiClient.get("/geofence/audit", { params });
-      return data;
+      return Array.isArray(data) ? data : [];
     },
     enabled,
   });
-  return { rows: data, isLoading };
+  return { rows: data, isLoading, isError, error };
 }
 
-export function useShadowReport(days = 14) {
-  const { data, isLoading, refetch } = useQuery<ShadowReport>({
+export function useShadowReport(days = 14, enabled = true) {
+  const { data, isLoading, isError, error, refetch } = useQuery<ShadowReport>({
     queryKey: ["geofence-shadow-report", days],
     queryFn: async () => {
       const { data } = await apiClient.get("/geofence/shadow-report", { params: { days } });
       return data;
     },
+    enabled,
   });
-  return { report: data, isLoading, refetch };
+  return { report: data, isLoading, isError, error, refetch };
 }
 
 export function useGeofenceMode() {
@@ -121,10 +147,14 @@ export function useGeofenceMode() {
       const { data } = await apiClient.put("/geofence/mode", body);
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_d, vars) => {
       qc.invalidateQueries({ queryKey: ["geofence-shadow-report"] });
       qc.invalidateQueries({ queryKey: ["settings"] });
-      toast.success("Auto punch-out setting saved");
+      toast.success(
+        vars.enabled && !vars.shadowMode
+          ? "Automatic punch-out is on"
+          : "Automatic punch-out is in test mode — it only records what it would do",
+      );
     },
     onError: (error: any) => {
       const res = error.response?.data;

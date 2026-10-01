@@ -118,16 +118,16 @@ export function TodaySessions({ sessions }: { sessions: NumberedSession[] }) {
             )}
           >
             <LogIn className={cn("h-3.5 w-3.5 shrink-0", open ? "text-emerald-300" : "text-white/50")} />
-            <span className="text-[10.5px] font-semibold text-white/85 shrink-0">Session {s.n}</span>
+            <span className="text-[12.5px] font-semibold text-white/90 shrink-0">Session {s.n}</span>
 
-            <span className="flex items-center gap-1.5 text-[10.5px] text-white/70 tabular-nums min-w-0">
+            <span className="flex items-center gap-1.5 text-[12.5px] text-white/80 tabular-nums min-w-0">
               <span className="truncate">{fmtTime(s.punchIn)}</span>
               <span className="text-white/30">&rarr;</span>
               <span className="truncate">{open ? "now" : fmtTime(s.punchOut)}</span>
             </span>
 
-            <span className="ml-auto text-[10px] font-mono font-semibold text-white/60 shrink-0">
-              {open ? "running" : fmtDuration(s.punchIn, s.punchOut, s.workMs)}
+            <span className="ml-auto text-[12px] font-mono font-semibold text-white/70 shrink-0">
+              {open ? "working" : fmtDuration(s.punchIn, s.punchOut, s.workMs)}
             </span>
           </div>
         );
@@ -180,10 +180,7 @@ export function TodayActivity({
     <div className="bg-white dark:bg-slate-900/50 rounded-[18px] border border-slate-100 dark:border-white/5 shadow-xs overflow-hidden">
       <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-100 dark:border-white/5">
         <History className="h-3.5 w-3.5 text-[#8C2059] dark:text-pink-400" />
-        <span className="text-[11px] font-bold text-slate-700 dark:text-slate-200">Today's Activity</span>
-        <span className="ml-auto text-[9.5px] font-semibold text-slate-400">
-          {sessions.length} session{sessions.length === 1 ? "" : "s"}
-        </span>
+        <span className="text-[14px] font-bold text-slate-700 dark:text-slate-200">Today's punches</span>
       </div>
 
       <div className="divide-y divide-slate-100 dark:divide-white/5">
@@ -208,24 +205,28 @@ export function TodayActivity({
               </div>
 
               <div className="min-w-0 flex-1">
-                <p className="text-[11.5px] font-semibold text-slate-700 dark:text-slate-200 truncate">
+                <p className="text-[14px] font-semibold text-slate-700 dark:text-slate-200 truncate">
                   {r.kind === "in" ? "Punched in" : "Punched out"}
                   <span className="text-slate-400 font-normal"> &mdash; </span>
                   <span className="tabular-nums">{fmtTime(r.at)}</span>
                 </p>
-                <p className="text-[9.5px] text-slate-400 dark:text-slate-500 truncate">
+                <p className="text-[12px] text-slate-500 dark:text-slate-400 truncate">
                   {dist ? `${dist} from ${branchName || "branch"}` : "Location not recorded"}
                   {auto && (
                     <span className="text-amber-600 dark:text-amber-400 font-semibold">
-                      {" "}&middot; {r.closeReason === "auto_geofence" ? "auto, you left the area" : "closed automatically"}
+                      {" "}&middot; {r.closeReason === "auto_geofence" ? "auto: you left the area" : "closed by the system"}
                     </span>
                   )}
                 </p>
               </div>
 
-              <span className="shrink-0 text-[9px] font-bold text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-white/10 rounded-full px-2 py-0.5">
-                S{r.session}
-              </span>
+              {/* "S1" means nothing to most people, and on a one-session
+                  day there is nothing to tell apart. */}
+              {sessions.length > 1 && (
+                <span className="shrink-0 text-[11px] font-semibold text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-white/10 rounded-full px-2 py-0.5">
+                  Session {r.session}
+                </span>
+              )}
             </div>
           );
         })}

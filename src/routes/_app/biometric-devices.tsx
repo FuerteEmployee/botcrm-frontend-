@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useMemo } from "react";
+import { requestErrorMessage } from "@/services/request-error";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Fingerprint,
@@ -18,6 +19,7 @@ import {
   Plus,
   Power,
   Trash2,
+  Clock,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -83,6 +85,26 @@ function relative(iso?: string | null) {
   }
 }
 
+/** "26 Sep, 9:05 am" in IST, for a real stored instant. */
+function istWhen(iso?: string | null) {
+  if (!iso) return "";
+  return new Date(iso).toLocaleString("en-IN", {
+    day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata",
+  });
+}
+
+/** "5h 30m" for a number of minutes. */
+function span(minutes: number) {
+  const m = Math.abs(Math.round(minutes));
+  const h = Math.floor(m / 60);
+  return h ? `${h}h ${m % 60}m` : `${m}m`;
+}
+
+/** Above this the server treats the machine's clock as wrong (DEVICE_SKEW_SUSPECT_MINUTES). */
+const CLOCK_WARN_MINUTES = 45;
+/** The offline alert fires after this much silence (DEVICE_QUIET_MINUTES, jobs/device_health.js). */
+const QUIET_MINUTES = 120;
+
 /** Online if the machine has checked in within the last 5 minutes (it polls ~30s). */
 function isOnline(d: MyDevice) {
   return !!d.lastSeenAt && Date.now() - new Date(d.lastSeenAt).getTime() < 5 * 60 * 1000;
@@ -98,16 +120,19 @@ function BiometricDevicesPage() {
   const [releasing, setReleasing] = useState<MyDevice | null>(null);
   const [pinSearch, setPinSearch] = useState("");
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ["biometric-devices"],
     queryFn: getMyDevices,
     refetchInterval: 30000,
   });
 
-  // ── Punch sequence lives in Settings.attendance. The whole `attendance`
-  // subdocument has to be sent back on save, because the API $sets the object
-  // wholesale — posting only punchSequence would wipe every other rule.
-  const [rawAttendance, setRawAttendance] = useState<Record<string, unknown> | null>(null);
+  // ── Punch sequence lives in Settings.attendance.punchSequence. Only that is
+  // sent on save: PUT /settings merges field by field (flattenForSet), so the
+  // rest of `attendance` is untouched. It used to echo back the WHOLE
+  // attendance block as loaded when the page opened -- including the
+  // automatic punch-out mode -- so saving punch rules could silently undo a
+  // change made elsewhere in the meantime (for instance switching automatic
+  // punch-out back to test mode).
   const [sequence, setSequence] = useState<PunchSequenceConfig>(DEFAULT_PUNCH_SEQUENCE);
   const [savingSeq, setSavingSeq] = useState(false);
   const [seqLoaded, setSeqLoaded] = useState(false);
@@ -117,7 +142,6 @@ function BiometricDevicesPage() {
       try {
         const { data: s } = await apiClient.get("/settings");
         const att = s?.attendance || {};
-        setRawAttendance(att);
         setSequence({
           ...DEFAULT_PUNCH_SEQUENCE,
           ...(att.punchSequence || {}),
@@ -142,12 +166,10 @@ function BiometricDevicesPage() {
     }
     setSavingSeq(true);
     try {
-      await apiClient.put("/settings", {
-        attendance: { ...(rawAttendance || {}), punchSequence: sequence },
-      });
+      await apiClient.put("/settings", { attendance: { punchSequence: sequence } });
       toast.success("Punch rules saved");
     } catch (e: any) {
-      toast.error(e?.response?.data?.message || "Could not save punch rules");
+      toast.error(requestErrorMessage(e, "Could not save punch rules. Try again.") || "Could not save punch rules.");
     } finally {
       setSavingSeq(false);
     }
@@ -207,6 +229,24 @@ function BiometricDevicesPage() {
     );
   }
 
+  if (isError && !data) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Biometric Device" description="Your fingerprint machines, what each punch means, and who each ID belongs to." />
+        <Card className="border border-destructive/30 bg-destructive/5 rounded-2xl p-6 text-center">
+          <p className="text-[14px] font-bold text-destructive">Could not load your machines</p>
+          <p className="text-[13px] text-muted-foreground mt-1">
+            {(error as { response?: { status?: number; data?: { featureDisabled?: boolean } } })?.response?.status === 403 &&
+            !(error as { response?: { data?: { featureDisabled?: boolean } } })?.response?.data?.featureDisabled
+              ? "You do not have permission to see the biometric machines. Ask your admin for access."
+              : requestErrorMessage(error, "Something went wrong on our side.") || "You may not have access to this page."}
+          </p>
+          <Button variant="outline" className="mt-4 h-10 rounded-xl" onClick={() => refetch()}>Try again</Button>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 pb-12">
       <PageHeader
@@ -247,7 +287,7 @@ function BiometricDevicesPage() {
             <div className="p-4">
               <div className="flex items-center gap-2 mb-1">
                 <s.icon className="h-3.5 w-3.5 text-muted-foreground" />
-                <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                   {s.label}
                 </p>
               </div>
@@ -283,7 +323,7 @@ function BiometricDevicesPage() {
                 up here on its own. The setup guide walks through the whole process.
               </p>
               {can("biometric-devices", "create") && (
-                <Button onClick={() => setShowAdd(true)} className="mt-4 h-9 rounded-xl font-bold">
+                <Button onClick={() => setShowAdd(true)} className="mt-4 h-10 rounded-xl font-bold">
                   <Plus className="h-3.5 w-3.5 mr-1.5" />
                   Add machine
                 </Button>
@@ -325,7 +365,7 @@ function BiometricDevicesPage() {
             <Button
               onClick={saveSequence}
               disabled={savingSeq || !!sequenceError}
-              className="h-9 px-4 rounded-xl font-bold"
+              className="h-10 px-4 rounded-xl font-bold"
             >
               <Save className="h-3.5 w-3.5 mr-1.5" />
               {savingSeq ? "Saving..." : "Save rules"}
@@ -358,7 +398,7 @@ function BiometricDevicesPage() {
                 placeholder="Search name or ID..."
                 value={pinSearch}
                 onChange={(e) => setPinSearch(e.target.value)}
-                className="pl-9 h-9 text-xs rounded-xl"
+                className="pl-9 h-10 text-[13px] rounded-xl"
               />
             </div>
           </div>
@@ -388,8 +428,8 @@ function BiometricDevicesPage() {
           )}
           <div className="divide-y divide-border/30">
             {filteredEmployees.length === 0 ? (
-              <p className="px-6 py-10 text-center text-[12px] text-muted-foreground">
-                No employees match "{pinSearch}"
+              <p className="px-6 py-10 text-center text-[13px] text-muted-foreground">
+                {pinSearch.trim() ? `No employees match "${pinSearch.trim()}"` : "No employees yet. Add them on the Employees page first."}
               </p>
             ) : (
               filteredEmployees.map((e) => (
@@ -453,16 +493,18 @@ function AddMachineDialog({
   const [model, setModel] = useState("eSSL MB20+ID");
 
   const mutation = useMutation({
-    mutationFn: () => claimDevice({ serialNumber, label, model }),
+    mutationFn: () => claimDevice({ serialNumber: serialNumber.trim(), label: label.trim(), model: model.trim() }),
     onSuccess: () => {
       toast.success(`${serialNumber.trim().toUpperCase()} added`);
       onSaved();
       onClose();
     },
-    onError: (e: any) =>
+    onError: (e: any) => {
       // A 409 here means the serial belongs to another company; the API's message
       // explains what to do without revealing whose it is.
-      toast.error(e?.response?.data?.message || "Could not add this machine", { duration: 8000 }),
+      const msg = requestErrorMessage(e, "Could not add this machine. Try again.");
+      if (msg) toast.error(msg, { duration: 8000 });
+    },
   });
 
   return (
@@ -483,9 +525,10 @@ function AddMachineDialog({
               value={serialNumber}
               onChange={(e) => setSerialNumber(e.target.value)}
               placeholder="EUF7254400194"
+              maxLength={40}
               className="h-10 font-mono rounded-xl"
             />
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-[11px] text-muted-foreground">
               On the machine: <em>Menu → System Info → Serial Number</em>. It's also printed on a
               sticker on the back. Capitals and lower case both work.
             </p>
@@ -498,6 +541,7 @@ function AddMachineDialog({
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
                 placeholder="Reception"
+                maxLength={60}
                 className="h-10 rounded-xl"
               />
             </div>
@@ -506,6 +550,7 @@ function AddMachineDialog({
               <Input
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
+                maxLength={40}
                 className="h-10 rounded-xl"
               />
             </div>
@@ -555,9 +600,15 @@ function DeviceRow({
 }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
+  const [confirmPause, setConfirmPause] = useState(false);
   const [label, setLabel] = useState(device.label || "");
   const online = isOnline(device);
   const warnings = device.recentUnresolved || [];
+  const quietMinutes = device.lastSeenAt ? (Date.now() - new Date(device.lastSeenAt).getTime()) / 60000 : null;
+  const quiet = device.status === "active" && quietMinutes != null && quietMinutes > QUIET_MINUTES;
+  const skew = typeof device.clockSkewMinutes === "number" ? device.clockSkewMinutes : null;
+  const clockWrong = skew != null && skew > CLOCK_WARN_MINUTES;
+  const manualOffset = Number(device.clockOffsetMinutes) || 0;
 
   const mutation = useMutation({
     mutationFn: () => updateMyDevice(device._id, { label }),
@@ -566,7 +617,10 @@ function DeviceRow({
       queryClient.invalidateQueries({ queryKey: ["biometric-devices"] });
       setEditing(false);
     },
-    onError: (e: any) => toast.error(e?.response?.data?.message || "Could not rename machine"),
+    onError: (e: any) => {
+      const msg = requestErrorMessage(e, "Could not rename the machine. Try again.");
+      if (msg) toast.error(msg);
+    },
   });
 
   const statusMutation = useMutation({
@@ -579,8 +633,12 @@ function DeviceRow({
           : `${device.serialNumber} is recording again`
       );
       queryClient.invalidateQueries({ queryKey: ["biometric-devices"] });
+      setConfirmPause(false);
     },
-    onError: (e: any) => toast.error(e?.response?.data?.message || "Could not change machine"),
+    onError: (e: any) => {
+      const msg = requestErrorMessage(e, "Could not change the machine. Try again.");
+      if (msg) toast.error(msg);
+    },
   });
 
   return (
@@ -591,7 +649,7 @@ function DeviceRow({
             <span className="font-mono text-[13px] font-bold">{device.serialNumber}</span>
             <span
               className={cn(
-                "inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold",
+                "inline-flex px-2 py-0.5 rounded-full text-[11px] font-bold",
                 device.status === "active"
                   ? "bg-emerald-50 text-emerald-700"
                   : "bg-muted text-muted-foreground"
@@ -605,7 +663,9 @@ function DeviceRow({
               ) : (
                 <WifiOff className="h-3 w-3" />
               )}
-              {online ? "online" : `last seen ${relative(device.lastSeenAt)}`}
+              <span title={device.lastSeenAt ? istWhen(device.lastSeenAt) : undefined}>
+                {online ? "online" : `last seen ${relative(device.lastSeenAt)}`}
+              </span>
             </span>
           </div>
 
@@ -616,11 +676,12 @@ function DeviceRow({
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
                 placeholder="e.g. Reception — ground floor"
-                className="h-8 text-xs w-56 rounded-lg"
+                maxLength={60}
+                className="h-10 text-[13px] w-full sm:w-56 rounded-lg"
               />
               <Button
                 size="sm"
-                className="h-8 text-xs"
+                className="h-10 text-[13px]"
                 disabled={mutation.isPending}
                 onClick={() => mutation.mutate()}
               >
@@ -629,7 +690,7 @@ function DeviceRow({
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-8 text-xs"
+                className="h-10 text-[13px]"
                 onClick={() => {
                   setLabel(device.label || "");
                   setEditing(false);
@@ -639,15 +700,16 @@ function DeviceRow({
               </Button>
             </div>
           ) : (
-            <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1.5">
+            <p className="text-[12px] text-muted-foreground mt-1 flex items-center gap-1.5">
               {device.label || device.model || "No location set"}
               {canEdit && (
                 <button
+                  type="button"
                   onClick={() => setEditing(true)}
-                  className="text-primary hover:underline inline-flex items-center gap-1"
+                  className="min-h-[40px] px-2 -my-2 text-primary hover:underline inline-flex items-center gap-1"
                 >
-                  <Pencil className="h-2.5 w-2.5" />
-                  rename
+                  <Pencil className="h-3 w-3" />
+                  Rename
                 </button>
               )}
             </p>
@@ -659,16 +721,18 @@ function DeviceRow({
             <p className="text-[11px] text-muted-foreground">Punches recorded</p>
             <p className="text-lg font-black tabular-nums">{device.punchCount || 0}</p>
             {device.lastPunchAt && (
-              <p className="text-[10px] text-muted-foreground">last {relative(device.lastPunchAt)}</p>
+              <p className="text-[11px] text-muted-foreground" title={istWhen(device.lastPunchAt)}>last {relative(device.lastPunchAt)}</p>
             )}
           </div>
 
           <div className="flex items-center gap-1">
             {canEdit && (
               <button
-                onClick={() => statusMutation.mutate()}
+                type="button"
+                onClick={() => (device.status === "active" ? setConfirmPause(true) : statusMutation.mutate())}
                 disabled={statusMutation.isPending}
-                className="p-2 rounded-xl border border-border/60 hover:bg-muted transition-colors disabled:opacity-40"
+                aria-label={device.status === "active" ? "Pause this machine" : "Resume this machine"}
+                className="h-10 w-10 flex items-center justify-center rounded-xl border border-border/60 hover:bg-muted transition-colors disabled:opacity-40"
                 title={
                   device.status === "active"
                     ? "Pause — stop recording punches from this machine"
@@ -685,8 +749,10 @@ function DeviceRow({
             )}
             {canDelete && (
               <button
+                type="button"
                 onClick={onRelease}
-                className="p-2 rounded-xl border border-border/60 hover:bg-destructive/10 transition-colors"
+                aria-label="Remove this machine"
+                className="h-10 w-10 flex items-center justify-center rounded-xl border border-border/60 hover:bg-destructive/10 transition-colors"
                 title="Remove this machine from your company"
               >
                 <Trash2 className="h-3.5 w-3.5 text-destructive" />
@@ -696,18 +762,51 @@ function DeviceRow({
         </div>
       </div>
 
+      {quiet && (
+        <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <WifiOff className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+          <p className="text-[12px] text-amber-900">
+            <strong>No contact for {span(quietMinutes || 0)}.</strong> Punches on it are not reaching us. Check that it
+            is switched on and connected to the internet.
+            {device.offlineAlertedAt ? ` We sent you an alert on ${istWhen(device.offlineAlertedAt)}.` : ""}
+          </p>
+        </div>
+      )}
+
+      {(clockWrong || manualOffset !== 0) && (
+        <div className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3">
+          <Clock className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+          <p className="text-[12px] text-amber-900">
+            {manualOffset !== 0 ? (
+              <>
+                <strong>Punch times from this machine are moved by {span(manualOffset)}</strong> (set by support), because
+                its clock is wrong.
+              </>
+            ) : (
+              <>
+                <strong>This machine's clock is about {span(skew || 0)} off.</strong>{" "}
+                {Math.abs((skew || 0) - 330) <= 3
+                  ? "That is exactly India's time difference from GMT, so its time zone is probably still set to GMT. Set it to GMT+5:30 on the machine."
+                  : "Set the correct date and time on the machine."}{" "}
+                Until then B.O.T corrects the punch times once it has seen the same difference several times.
+              </>
+            )}
+          </p>
+        </div>
+      )}
+
       {warnings.length > 0 && (
         <div className="mt-3 rounded-xl border border-destructive/30 bg-destructive/5 p-3">
           <div className="flex items-center justify-between gap-2 mb-1.5">
-            <p className="text-[11px] font-bold text-destructive flex items-center gap-1.5">
+            <p className="text-[12px] font-bold text-destructive flex items-center gap-1.5">
               <AlertTriangle className="h-3.5 w-3.5" />
-              {warnings.length} punch(es) nobody received
+              {warnings.length === 1 ? "1 punch was not recorded for anyone" : `${warnings.length} punches were not recorded for anyone`}
             </p>
             {canEdit && (
               <Button
                 variant="outline"
                 size="sm"
-                className="h-6 text-[10px]"
+                className="h-10 text-[12px]"
                 disabled={clearing}
                 onClick={onClearWarnings}
               >
@@ -721,16 +820,41 @@ function DeviceRow({
               .reverse()
               .slice(0, 6)
               .map((w, i) => (
-                <li key={i} className="text-[11px] flex items-baseline gap-2">
+                <li key={i} className="text-[12px] flex flex-wrap items-baseline gap-x-2">
                   <span className="font-mono font-bold">ID {w.pin}</span>
                   <span className="text-muted-foreground">
-                    {REASONS[w.reason || ""] || w.reason} · {relative(w.at)}
+                    {REASONS[w.reason || ""] || w.reason}
+                    {w.deviceTime ? ` · tapped ${w.deviceTime.slice(0, 16)}` : ""} · {relative(w.at)}
                   </span>
                 </li>
               ))}
           </ul>
         </div>
       )}
+
+      <AlertDialog open={confirmPause} onOpenChange={(o) => !o && setConfirmPause(false)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Pause {device.serialNumber}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Punches on this machine will not be recorded until you resume it. The machine still beeps and accepts
+              fingers, so tell your staff to use the app meanwhile.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={statusMutation.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                statusMutation.mutate();
+              }}
+            >
+              {statusMutation.isPending ? "Pausing..." : "Pause machine"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -748,6 +872,11 @@ function PinRow({
 }) {
   const [value, setValue] = useState(employee.deviceUserId || "");
   const [dirty, setDirty] = useState(false);
+  // Follow the saved value when the list refreshes (another admin changed it,
+  // or the server trimmed what was typed), unless an edit is in progress.
+  useEffect(() => {
+    if (!dirty) setValue(employee.deviceUserId || "");
+  }, [employee.deviceUserId, dirty]);
 
   const mutation = useMutation({
     mutationFn: () => setEmployeePin(employee._id, value.trim()),
@@ -760,7 +889,8 @@ function PinRow({
     },
     onError: (e: any) => {
       // The backend rejects a duplicate with a 409 naming who already holds it.
-      toast.error(e?.response?.data?.message || "Could not save ID");
+      const msg = requestErrorMessage(e, "Could not save the ID. Try again.");
+      if (msg) toast.error(msg);
     },
   });
 
@@ -769,17 +899,17 @@ function PinRow({
       <div className="flex-1 min-w-0">
         <p className="text-[13px] font-bold truncate">{employee.name}</p>
         {employee.status === "inactive" && (
-          <p className="text-[10px] text-muted-foreground">inactive</p>
+          <p className="text-[11px] text-muted-foreground">inactive</p>
         )}
       </div>
 
       {!employee.deviceUserId && !dirty && (
-        <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full shrink-0">
+        <span className="text-[11px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full shrink-0">
           No ID
         </span>
       )}
       {isDuplicate && (
-        <span className="text-[10px] font-bold text-destructive bg-destructive/10 px-2 py-0.5 rounded-full shrink-0">
+        <span className="text-[11px] font-bold text-destructive bg-destructive/10 px-2 py-0.5 rounded-full shrink-0">
           Duplicate
         </span>
       )}
@@ -791,9 +921,15 @@ function PinRow({
           setValue(e.target.value);
           setDirty(e.target.value !== (employee.deviceUserId || ""));
         }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && dirty && canEdit && !mutation.isPending) mutation.mutate();
+        }}
         placeholder="—"
+        maxLength={20}
+        inputMode="numeric"
+        aria-label={`Biometric ID for ${employee.name}`}
         className={cn(
-          "h-8 w-24 text-xs text-center font-mono rounded-lg shrink-0",
+          "h-10 w-24 text-[13px] text-center font-mono rounded-lg shrink-0",
           isDuplicate && "border-destructive"
         )}
       />
@@ -801,7 +937,8 @@ function PinRow({
       {dirty && canEdit && (
         <Button
           size="sm"
-          className="h-8 text-xs shrink-0"
+          className="h-10 w-10 p-0 text-[13px] shrink-0"
+          aria-label={`Save ID for ${employee.name}`}
           disabled={mutation.isPending}
           onClick={() => mutation.mutate()}
         >

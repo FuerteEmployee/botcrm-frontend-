@@ -2,22 +2,46 @@ import { useQuery } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "./use-auth";
 
-// Default toggles — every feature enabled that is on by default for new tenants.
+// Mirror of FEATURE_TOGGLE_DEFAULTS in backend/src/utils/feature_toggles.js —
+// change both. Every feature that already shipped defaults ON: a tenant with
+// nothing stored must keep what it had.
 const DEFAULTS: Record<string, boolean> = {
   tracking: true,
   geofenceAutoPunchOut: true,
   leads: true,
   expenses: true,
+  advanceSalary: true,
+  announcements: true,
+  biometricDevices: true,
+  assets: true,
   recruitment: false,
   training: false,
   performance: false,
   projects: false,
-  assets: false,
-  advanceSalary: true,
-  announcements: true,
   policies: false,
-  biometricDevices: true,
 };
+
+/**
+ * Admin-panel route prefix → the toggle that gates it. Used by the layout
+ * guard so a disabled page cannot be reached by typing its URL; the sidebar
+ * carries the same keys on its NAV entries.
+ */
+export const FEATURE_ROUTES: { prefix: string; key: string }[] = [
+  { prefix: "/tracking", key: "tracking" },
+  { prefix: "/leads", key: "leads" },
+  { prefix: "/expenses", key: "expenses" },
+  { prefix: "/advance-salary", key: "advanceSalary" },
+  { prefix: "/announcements", key: "announcements" },
+  { prefix: "/biometric-devices", key: "biometricDevices" },
+  { prefix: "/assets", key: "assets" },
+];
+
+export function featureKeyForPath(pathname: string): string | null {
+  const hit = FEATURE_ROUTES.find(
+    (r) => pathname === r.prefix || pathname.startsWith(`${r.prefix}/`),
+  );
+  return hit ? hit.key : null;
+}
 
 async function fetchFeatureToggles(): Promise<Record<string, boolean>> {
   const { data } = await apiClient.get("/settings/feature-toggles");
@@ -39,7 +63,7 @@ export function useFeatureToggles() {
   const role = session?.role;
   const shouldFetch = role === "admin" || role === "subadmin";
 
-  const { data: toggles } = useQuery<Record<string, boolean>>({
+  const { data: toggles, isSuccess } = useQuery<Record<string, boolean>>({
     queryKey: ["feature-toggles"],
     queryFn: fetchFeatureToggles,
     enabled: shouldFetch,
@@ -56,5 +80,7 @@ export function useFeatureToggles() {
     return source[key] !== false;
   };
 
-  return { isFeatureEnabled, toggles: toggles || DEFAULTS };
+  // `isLoaded` is true only once the server's answer is in, so a guard can
+  // wait for it instead of acting on the defaults.
+  return { isFeatureEnabled, toggles: toggles || DEFAULTS, isLoaded: isSuccess };
 }

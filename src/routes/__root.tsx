@@ -6,11 +6,13 @@ import { useAuth } from "@/hooks/use-auth";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { getSession, patchSession } from "@/lib/auth";
+import type { Session } from "@/lib/auth";
+import { panelHomeFor } from "@/lib/panel-home";
 import { apiClient } from "@/lib/api-client";
 
-function dashboardForRole(role: string) {
+function dashboardForRole(role: string, permissions?: Session["permissions"]) {
   if (role === "superadmin") return "/super/overview";
-  if (role === "admin" || role === "subadmin") return "/dashboard";
+  if (role === "admin" || role === "subadmin") return panelHomeFor({ role: role as Session["role"], permissions });
   return "/user";
 }
 
@@ -116,9 +118,15 @@ function RootComponent() {
 
   useEffect(() => {
     const handleUpgradeRequired = (e: Event) => {
+      // Employees cannot change the plan, so an "upgrade" prompt is only noise
+      // to them; their pages show "Not available for your company" in place.
+      if (getSession()?.role === "employee") return;
       const customEvent = e as CustomEvent<{ message: string }>;
-      toast.error(customEvent.detail?.message || "Plan Upgrade Required", {
-        description: "Your current subscription plan does not cover this feature module. Please upgrade.",
+      // One toast however many requests were refused at once: opening a page
+      // on a plan without the module used to stack four or five identical ones.
+      toast.error(customEvent.detail?.message || "Plan upgrade required", {
+        id: "plan-upgrade-required",
+        description: "Your current plan does not include this feature.",
         duration: 5000,
       });
     };
@@ -139,10 +147,16 @@ function RootComponent() {
       .get("/users/profile")
       .then(({ data }) => {
         const serverRole = data?.role as string | undefined;
+        // Permissions too, not just the role: after an admin edits a
+        // sub-admin's pages, the sidebar and page guard kept the old map
+        // until the next sign-in.
+        if (data?.permissions && JSON.stringify(data.permissions) !== JSON.stringify(stored.permissions ?? null)) {
+          patchSession({ permissions: data.permissions });
+        }
         if (serverRole && serverRole !== stored.role) {
           patchSession({ role: serverRole as typeof stored.role });
           // Send them to the panel that actually matches their real role
-          window.location.replace(dashboardForRole(serverRole));
+          window.location.replace(dashboardForRole(serverRole, data?.permissions));
         }
       })
       .catch(() => {

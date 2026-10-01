@@ -20,7 +20,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { cn, toISTDateKey } from "@/lib/utils";
 import { statusLabel, statusClass, NEEDS_REVIEW_HINT } from "@/lib/attendance-status";
-import type { AttendanceRecord, AttendanceSession, PunchChannel } from "@/services/attendance-service";
+import type { AttendanceRecord, AttendanceSession, DayGrading, PunchChannel } from "@/services/attendance-service";
+import { CorrectionLog, type PunchCorrectionEntry } from "@/components/tickets/correction-log";
 
 // Read-only blocks for the Attendance Dashboard detail sheet.
 //
@@ -53,10 +54,44 @@ export const fmtHM = (ms: number | null | undefined) => {
   return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 };
 
+// IST, like the day each time belongs to -- not the reviewer's browser zone.
 const fmtTime = (value?: string | null) =>
   value
-    ? new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    ? new Date(value).toLocaleTimeString("en-US", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true })
     : "—";
+
+/** Minutes past IST midnight for a real instant. */
+const istMinuteOfDay = (value: string) => {
+  const d = new Date(new Date(value).getTime() + 5.5 * 60 * 60 * 1000);
+  return d.getUTCHours() * 60 + d.getUTCMinutes();
+};
+
+/**
+ * The Full-Day bar in minutes, and what it is made of.
+ *
+ * Prefers `grading` -- computed by the server with the same requiredWorkMs /
+ * scheduledLunchMs / resolveGraceMs that grade the day. The browser-side
+ * fallback (tenant minLunch + lateGrace) ignores the shift's own lunch block
+ * and grace, and on a 09:30-18:30 shift with a 60-minute lunch it read 8h55m
+ * against the server's 7h50m, so every "why half day" line was built on a bar
+ * the grade was never measured against. It only remains for callers without a
+ * server figure.
+ */
+function resolveBar(
+  shift: ShiftLike | null | undefined,
+  lunchMins: number,
+  graceMins: number,
+  grading?: DayGrading | null,
+) {
+  if (grading && grading.requiredMs != null) {
+    return {
+      required: Math.round(grading.requiredMs / 60000),
+      lunch: Math.round((grading.lunchMs || 0) / 60000),
+      grace: Math.round(((grading.graceInMs || 0) + (grading.graceOutMs || 0)) / 60000),
+    };
+  }
+  return { required: requiredMinutes(shift, lunchMins, graceMins), lunch: lunchMins, grace: graceMins };
+}
 
 /** "HH:mm" to minutes past midnight. */
 const toMin = (t?: string | null) => {
@@ -292,7 +327,14 @@ export function DayStatsRow({
         ? { label: "Outside fence", className: "bg-warning/10 text-warning-foreground border-warning/25" }
         : null;
 
+  // Approved "Forgot to punch in/out" and missed-punch-out corrections. The
+  // punch fields above already hold the corrected time; this keeps what the
+  // employee actually punched, for reference. Read defensively: the field is
+  // new and not on the shared AttendanceRecord type.
+  const corrections = (record as AttendanceRecord & { corrections?: PunchCorrectionEntry[] }).corrections;
+
   return (
+    <div className="space-y-3">
     <div className="grid grid-cols-3 gap-3 rounded-2xl border border-border/40 bg-muted/20 p-4 text-center">
       <div className="space-y-1">
         <p className={LABEL}>Total Hours</p>
@@ -339,6 +381,8 @@ export function DayStatsRow({
           </Badge>
         )}
       </div>
+    </div>
+    <CorrectionLog corrections={corrections} />
     </div>
   );
 }
@@ -620,16 +664,19 @@ export function AutoPunchOutCard({
 
 export function ShiftRequirementCard({
   shift,
-  lunchMins,
-  graceMins,
+  lunchMins: lunchFallback,
+  graceMins: graceFallback,
   workedMs,
+  grading,
 }: {
   shift: ShiftLike | null | undefined;
   lunchMins: number;
   graceMins: number;
   workedMs: number;
+  /** Server-computed bar for this day; preferred over the fallback figures. */
+  grading?: DayGrading | null;
 }) {
-  const required = requiredMinutes(shift, lunchMins, graceMins);
+  const { required, lunch: lunchMins, grace: graceMins } = resolveBar(shift, lunchFallback, graceFallback, grading);
   const span = shiftSpanMinutes(shift);
   const workedMins = Math.round((workedMs || 0) / 60000);
 
@@ -696,8 +743,8 @@ export function WhyHalfDay({
   record,
   sessions,
   shift,
-  lunchMins,
-  graceMins,
+  lunchMins: lunchFallback,
+  graceMins: graceFallback,
 }: {
   record: AttendanceRecord;
   sessions: AttendanceSession[];
@@ -707,7 +754,7 @@ export function WhyHalfDay({
 }) {
   if (record.status !== "half-day") return null;
 
-  const required = requiredMinutes(shift, lunchMins, graceMins);
+  const { required, lunch: lunchMins } = resolveBar(shift, lunchFallback, graceFallback, record.grading);
   const workedMins = Math.round((record.totalWorkMs || 0) / 60000);
   const reasons: string[] = [];
 
@@ -719,8 +766,7 @@ export function WhyHalfDay({
     const firstIn = sessions[0]?.punchIn || record.punchIn;
     const startMin = toMin(shift?.startTime);
     if (firstIn && startMin != null) {
-      const d = new Date(firstIn);
-      const inMin = d.getHours() * 60 + d.getMinutes();
+      const inMin = istMinuteOfDay(firstIn);
       if (inMin > startMin) {
         reasons.push(
           `Arrived ${inMin - startMin} min after shift start (${fmtTime(firstIn)} vs ${fmt12(shift?.startTime)}).`,
@@ -731,8 +777,7 @@ export function WhyHalfDay({
     const lastOut = [...sessions].reverse().find((s) => s.punchOut)?.punchOut || record.punchOut;
     const endMin = toMin(shift?.endTime);
     if (lastOut && endMin != null) {
-      const d = new Date(lastOut);
-      const outMin = d.getHours() * 60 + d.getMinutes();
+      const outMin = istMinuteOfDay(lastOut);
       if (outMin < endMin) {
         reasons.push(
           `Left ${endMin - outMin} min before shift end (${fmtTime(lastOut)} vs ${fmt12(shift?.endTime)}).`,
@@ -765,7 +810,7 @@ export function WhyHalfDay({
       reasons.push(
         punched > lunchMins
           ? `Lunch ran ${punched} min — longer than the ${lunchMins} min allowance, so the full break was deducted.`
-          : `${lunchMins} min lunch deducted (configured minimum${punched > 0 ? `; actual break ${punched} min` : " — no lunch was punched"}).`,
+          : `${lunchMins} min lunch deducted (the shift's lunch rule${punched > 0 ? `; actual break ${punched} min` : " — no lunch was punched"}).`,
       );
     }
 

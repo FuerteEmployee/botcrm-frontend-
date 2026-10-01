@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Capacitor } from "@capacitor/core";
+import { reportClient } from "@/lib/client-telemetry";
 import {
   available,
   checkAllPermissions,
@@ -140,6 +141,9 @@ export function useTrackingSetup(): TrackingSetup {
     setReadiness(r);
     setCheckFailed(r === null);
     setLoading(false);
+    // Tell the server too, so the admin's Employees page shows what was just
+    // granted. reportClient sends only when something changed.
+    void reportClient();
   }, [applicable]);
 
   useEffect(() => {
@@ -193,6 +197,7 @@ export function useTrackingSetup(): TrackingSetup {
   const confirmAutostart = useCallback(() => {
     try { localStorage.setItem(AUTOSTART_KEY, "1"); } catch { /* storage blocked */ }
     setAutostartConfirmed(true);
+    void reportClient();
   }, []);
 
   const steps: SetupStep[] = applicable && readiness
@@ -201,35 +206,35 @@ export function useTrackingSetup(): TrackingSetup {
           id: "precise",
           title: "Precise location",
           detail:
-            "Choose Precise, not Approximate. Approximate rounds your position to about a kilometre, which is far too coarse to tell whether you are at your branch.",
+            "When your phone asks, choose Precise (not Approximate).",
           done: !!readiness.precise,
         },
         {
           id: "background",
           title: 'Location set to "Allow all the time"',
           detail:
-            'With "While using the app", Android stops sharing your location seconds after the screen locks — so your attendance stops being recorded the moment you put your phone in your pocket.',
+            'When your phone asks, choose "Allow all the time". If not, your hours stop recording when the screen locks.',
           done: !!readiness.background,
         },
         {
           id: "notifications",
           title: "Notifications",
           detail:
-            "Android requires a visible notification while location is being recorded. Blocking it stops the recording itself, not just the message.",
+            "Allow notifications. A small notice stays on while you are punched in, and it keeps the recording on.",
           done: !!readiness.notifications,
         },
         {
           id: "activity",
           title: "Physical activity",
           detail:
-            "Lets the app read your phone's motion sensor, so it can tell when you are genuinely still. Without it a phone resting on a desk records a route it never took \u2014 and the distance shows against your name.",
+            "Allow this so the app can tell when you are sitting still, and does not record trips you never made.",
           done: !!readiness.activityRecognition,
         },
         {
           id: "battery",
           title: "Battery set to Unrestricted",
           detail:
-            "Battery optimisation freezes the app after a few minutes with the screen off. Unrestricted keeps attendance recording while you work.",
+            "Set battery to Unrestricted, so the phone does not stop the app while you work.",
           done: !!readiness.batteryUnrestricted,
         },
         ...(readiness.hasAutostartScreen
@@ -237,7 +242,7 @@ export function useTrackingSetup(): TrackingSetup {
               id: "autostart" as StepId,
               title: `Auto-start${readiness.manufacturer ? ` (${readiness.manufacturer})` : ""}`,
               detail:
-                "Your phone's manufacturer adds its own restriction on top of Android. Without enabling auto-start here, attendance stops after a restart — and we have no way to check this one, so please confirm once you have switched it on.",
+                "Turn on Auto-start for this app. We cannot check this one, so tap \"I turned it on\" after you do it.",
               done: autostartConfirmed,
               selfDeclared: true,
             }]

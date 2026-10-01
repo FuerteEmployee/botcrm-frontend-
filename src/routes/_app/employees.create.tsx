@@ -1,5 +1,5 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState, useEffect, useMemo } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   ChevronLeft,
   Calendar,
@@ -50,8 +50,9 @@ import { useShiftService } from "@/services/shift-service";
 import { FormInput } from "@/components/shared/form-input";
 import { FormSelect } from "@/components/shared/form-select";
 import { QuickAddBranchDialog, QuickAddDepartmentDialog, QuickAddShiftDialog } from "@/components/shared/quick-add-dialogs";
-import { cn, formatTime12h } from "@/lib/utils";
+import { cn, formatTime12h, toISTDateKey } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
+import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { DAYS, WEEKS, DAY_LABELS } from "@/lib/constants";
 import { usePermission } from "@/hooks/use-permission";
 
@@ -100,7 +101,11 @@ function AddEmployeePage() {
   const [hasMounted, setHasMounted] = useState(false);
   const { employeeId } = Route.useSearch();
   const navigate = useNavigate();
-  const { createEmployee, updateEmployee, employees } = useEmployeeService();
+  // Every employee, inactive included. With the hook's old defaults (page 1,
+  // 10 rows, active only) the lookup below found nobody past the tenth
+  // newest active employee, and the edit form opened blank -- with today's
+  // date as the joining date -- for everyone else and every inactive one.
+  const { createEmployee, updateEmployee, employees, isLoading: employeesLoading } = useEmployeeService({ status: "all" });
   const { departments } = useDepartmentService();
   const { branches } = useBranchService();
   const { shifts } = useShiftService();
@@ -110,6 +115,17 @@ function AddEmployeePage() {
   const isEditing = !!employeeId;
   const { can } = usePermission();
   const isAllowed = isEditing ? can("employees", "edit") : can("employees", "create");
+  // "Add New" opens the Branches/Departments/Shifts create call, which a
+  // sub-admin may not hold. Offering it anyway only produced an
+  // "Access denied" toast after they had filled the dialog in.
+  const canAddBranch = can("branches", "create");
+  const canAddDepartment = can("departments", "create");
+  const canAddShift = can("shifts", "create");
+  const editTarget = isEditing ? employees.find((e) => e._id === employeeId) : undefined;
+  // The id the form was last filled from. Filling once per employee keeps a
+  // background refetch (a quick-add invalidates the list) from wiping edits
+  // the admin has typed but not saved.
+  const filledFor = useRef<string | null>(null);
 
   useEffect(() => {
     if (!isAllowed) {
@@ -119,8 +135,8 @@ function AddEmployeePage() {
   }, [isAllowed, isEditing, navigate]);
 
   const [form, setForm] = useState(() => {
-    const todayObj = new Date();
-    const localToday = `${todayObj.getFullYear()}-${String(todayObj.getMonth() + 1).padStart(2, '0')}-${String(todayObj.getDate()).padStart(2, '0')}`;
+    // Today in India, whatever timezone the admin's device is set to.
+    const localToday = toISTDateKey(new Date());
     const defaults = {
     fullName: "",
     phone: "",
@@ -274,21 +290,22 @@ function AddEmployeePage() {
     } catch { /* storage full / unavailable — ignore */ }
   }, [form, isEditing, hasMounted]);
 
+  // The calendar date in India. The form saves "YYYY-MM-DD", stored as UTC
+  // midnight, and reading that back as UTC gives the same day; but a date
+  // stored as IST midnight (18:30 UTC the day before) read as UTC showed, and
+  // on save wrote back, the previous day. IST reading is right for both.
   const formatDateForInput = (dateVal?: string | Date) => {
     if (!dateVal) return "";
-    try {
-      const date = new Date(dateVal);
-      if (isNaN(date.getTime())) return "";
-      return date.toISOString().split('T')[0];
-    } catch (e) {
-      return "";
-    }
+    const date = new Date(dateVal);
+    if (isNaN(date.getTime())) return "";
+    return toISTDateKey(date);
   };
 
   useEffect(() => {
-    if (employeeId && employees.length > 0) {
+    if (employeeId && filledFor.current !== employeeId && employees.length > 0) {
       const emp = employees.find(e => e._id === employeeId);
       if (emp) {
+        filledFor.current = employeeId;
         setForm({
           fullName: emp.name,
           phone: emp.phone,
@@ -349,7 +366,12 @@ function AddEmployeePage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+    // Enter in any field submits the form, and the button's loading state
+    // only blocks the mouse; a second Enter sent a second POST.
+    if (isSubmitting) return;
+    // Never save an edit form that was not filled from the employee.
+    if (isEditing && filledFor.current !== employeeId) return;
+
     setTouched({
       fullName: true, phone: true, email: true, salary: true, 
       joiningDate: true, branchId: true, departmentId: true, shiftId: true
@@ -384,14 +406,20 @@ function AddEmployeePage() {
       // Submission succeeded — clear the saved draft.
       try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
       navigate({ to: "/employees" });
-    } catch (error: any) {
-      // The actual validation reason (shown to the user via the toast in
-      // useEmployeeService) lives in the response body, not the AxiosError
-      // wrapper — log that directly so it's visible without expanding the object.
-      console.error("Employee save failed:", error?.response?.data ?? error);
+    } catch {
+      // useEmployeeService has already shown the reason in a toast.
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // Leaving on purpose throws the draft away. It used to survive "Discard
+  // Changes", so the next Add Employee opened pre-filled with the abandoned one.
+  const discard = () => {
+    if (!isEditing) {
+      try { sessionStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
+    }
+    navigate({ to: "/employees" });
   };
 
   const toggleHoliday = (day: string) => {
@@ -450,6 +478,29 @@ function AddEmployeePage() {
   };
 
   if (!hasMounted) return null;
+
+  // Edit mode shows the form only once the employee is in hand, so it can
+  // never be read as (or saved as) a blank record.
+  if (isEditing && !editTarget) {
+    if (employeesLoading) {
+      return (
+        <div className="space-y-6">
+          <SkeletonLoader type="card" count={3} />
+        </div>
+      );
+    }
+    return (
+      <div className="flex h-[60vh] flex-col items-center justify-center gap-3 text-center">
+        <h2 className="text-xl font-bold">Employee not found</h2>
+        <p className="max-w-sm text-[13px] text-muted-foreground">
+          They may have been deleted, or the list could not be loaded. Go back and open them again.
+        </p>
+        <Button asChild className="h-11 rounded-xl px-6 font-bold">
+          <Link to="/employees">Back to Employee List</Link>
+        </Button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 pb-20 relative">
@@ -584,8 +635,12 @@ function AddEmployeePage() {
                 icon={IndianRupee}
                 placeholder="Enter amount"
                 value={form.salary}
+                inputMode="numeric"
                 onChange={e => {
-                  const val = e.target.value.replace(/\D/g, '');
+                  // Whole rupees. Everything from a decimal point on is
+                  // dropped rather than stripped of its dot: "15000.50" used
+                  // to become 1500050 -- ₹15 lakh a month.
+                  const val = e.target.value.split('.')[0].replace(/\D/g, '');
                   setForm({ ...form, salary: val });
                 }}
                 onBlur={() => handleBlur('salary')}
@@ -619,13 +674,15 @@ function AddEmployeePage() {
                       BRANCH LOCATIONS<span className="text-destructive ml-0.5">*</span>
                       <span className="ml-2 font-semibold normal-case tracking-normal text-[10px] text-primary">Select one or more</span>
                     </label>
-                    <button
-                      type="button"
-                      onClick={() => setQuickAddOpen("branch")}
-                      className="flex items-center gap-1 text-[10px] font-bold text-primary hover:text-primary/70 transition-colors cursor-pointer"
-                    >
-                      <Plus className="h-3 w-3" /> Add New
-                    </button>
+                    {canAddBranch && (
+                      <button
+                        type="button"
+                        onClick={() => setQuickAddOpen("branch")}
+                        className="-my-2 -mr-2 flex items-center gap-1 px-2 py-2.5 text-[11px] font-bold text-primary hover:text-primary/70 transition-colors cursor-pointer"
+                      >
+                        <Plus className="h-3 w-3" /> Add New
+                      </button>
+                    )}
                   </div>
                   <div className="flex flex-wrap gap-2 rounded-xl border border-border/60 bg-background p-3 shadow-sm min-h-12">
                     {(branches || []).length === 0 && (
@@ -647,7 +704,7 @@ function AddEmployeePage() {
                             handleBlur('branchId');
                           }}
                           className={cn(
-                            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium transition-all",
+                            "inline-flex items-center gap-1.5 rounded-full border px-3 py-2.5 sm:py-1.5 text-[12px] font-medium transition-all",
                             selected
                               ? "border-primary bg-primary text-white shadow-sm"
                               : "border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted"
@@ -672,11 +729,15 @@ function AddEmployeePage() {
                   icon={MapPin}
                   placeholder="Select Branch"
                   value={form.branchId}
-                  onValueChange={(v) => { setForm({ ...form, branchId: v }); handleBlur('branchId'); }}
+                  onValueChange={(v) => {
+                    if (!v) return; // see the Department select below
+                    setForm(prev => ({ ...prev, branchId: v }));
+                    handleBlur('branchId');
+                  }}
                   options={(branches || []).map((b: any) => ({ label: b.branchName, value: b._id }))}
                   error={touched.branchId ? errors.branchId : undefined}
                   required
-                  onAddNew={() => setQuickAddOpen("branch")}
+                  onAddNew={canAddBranch ? () => setQuickAddOpen("branch") : undefined}
                 />
               )}
 
@@ -685,11 +746,20 @@ function AddEmployeePage() {
                 icon={Building2}
                 placeholder="Select Department"
                 value={form.departmentId}
-                onValueChange={(v) => { setForm({ ...form, departmentId: v }); handleBlur('departmentId'); }}
+                onValueChange={(v) => {
+                  // Radix Select reports "" when its value arrives before the
+                  // matching option has registered, which is exactly what
+                  // filling the edit form does. Taken at face value it blanked
+                  // the department on every edit ("Department selection is
+                  // required" on save). "" is never a real choice here.
+                  if (!v) return;
+                  setForm(prev => ({ ...prev, departmentId: v }));
+                  handleBlur('departmentId');
+                }}
                 options={(departments || []).map((d: any) => ({ label: d.name, value: d._id }))}
                 error={touched.departmentId ? errors.departmentId : undefined}
                 required
-                onAddNew={() => setQuickAddOpen("department")}
+                onAddNew={canAddDepartment ? () => setQuickAddOpen("department") : undefined}
               />
 
               <div className="space-y-4 md:col-span-2">
@@ -698,13 +768,15 @@ function AddEmployeePage() {
                     SHIFTS<span className="text-destructive ml-0.5">*</span>
                     <span className="ml-2 font-semibold normal-case tracking-normal text-[10px] text-primary">Select one or more</span>
                   </label>
-                  <button
-                    type="button"
-                    onClick={() => setQuickAddOpen("shift")}
-                    className="flex items-center gap-1 text-[10px] font-bold text-primary hover:text-primary/70 transition-colors cursor-pointer"
-                  >
-                    <Plus className="h-3 w-3" /> Add New
-                  </button>
+                  {canAddShift && (
+                    <button
+                      type="button"
+                      onClick={() => setQuickAddOpen("shift")}
+                      className="-my-2 -mr-2 flex items-center gap-1 px-2 py-2.5 text-[11px] font-bold text-primary hover:text-primary/70 transition-colors cursor-pointer"
+                    >
+                      <Plus className="h-3 w-3" /> Add New
+                    </button>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-2 rounded-xl border border-border/60 bg-background p-3 shadow-sm min-h-12">
                   {(shifts || []).length === 0 && (
@@ -726,7 +798,7 @@ function AddEmployeePage() {
                           handleBlur('shiftId');
                         }}
                         className={cn(
-                          "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium transition-all",
+                          "inline-flex items-center gap-1.5 rounded-full border px-3 py-2.5 sm:py-1.5 text-[12px] font-medium transition-all",
                           selected
                             ? "border-primary bg-primary text-white shadow-sm"
                             : "border-border/60 bg-muted/30 text-muted-foreground hover:bg-muted"
@@ -780,17 +852,17 @@ function AddEmployeePage() {
                     const holiday = form.weeklyHolidays.find(h => h.day === day);
                     return (
                       <div key={day} className="flex flex-col gap-2 p-3 rounded-xl border border-border/50 bg-muted/20">
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex items-center gap-3">
                             <Switch
                               checked={!!holiday}
                               onCheckedChange={() => toggleHoliday(day)}
-                              className="scale-90"
+                              aria-label={`${day} is a weekly holiday`}
                             />
                             <span className={cn("text-[13px] font-semibold", !!holiday ? "text-primary" : "text-muted-foreground")}>{day}</span>
                           </div>
                           {holiday && (
-                            <div className="flex items-center gap-1.5 bg-white/60 p-1 rounded-lg border border-border/40">
+                            <div className="flex flex-wrap items-center gap-1.5 bg-white/60 p-1 rounded-lg border border-border/40">
                               <span className="text-[10px] font-bold text-muted-foreground px-2">WEEKS:</span>
                               {WEEKS.map(w => (
                                 <button
@@ -798,7 +870,7 @@ function AddEmployeePage() {
                                   type="button"
                                   onClick={() => toggleWeek(day, w)}
                                   className={cn(
-                                    "h-6 w-6 rounded-md text-[10px] font-bold transition-all",
+                                    "h-10 w-10 sm:h-6 sm:w-6 rounded-md text-[11px] sm:text-[10px] font-bold transition-all",
                                     holiday.weeks?.includes(w) ? "bg-primary text-white" : "hover:bg-primary/10 text-muted-foreground"
                                   )}
                                 >
@@ -812,7 +884,7 @@ function AddEmployeePage() {
                                   weeklyHolidays: prev.weeklyHolidays.map(h => h.day === day ? { ...h, weeks: [] } : h)
                                 }))}
                                 className={cn(
-                                  "px-2 h-6 rounded-md text-[10px] font-bold transition-all",
+                                  "px-3 h-10 sm:px-2 sm:h-6 rounded-md text-[11px] sm:text-[10px] font-bold transition-all",
                                   (!holiday.weeks || holiday.weeks.length === 0) ? "bg-primary/20 text-primary" : "text-muted-foreground"
                                 )}
                               >
@@ -833,12 +905,35 @@ function AddEmployeePage() {
                   <Label className="text-[13px] font-bold text-foreground">Attendance Exceptions</Label>
                   <Switch
                     checked={form.attendanceExceptions.overrideGlobal}
-                    onCheckedChange={(v) => setForm(prev => ({ 
-                      ...prev, 
-                      attendanceExceptions: { ...prev.attendanceExceptions, overrideGlobal: v } 
-                    }))}
+                    aria-label="Use different attendance rules for this employee"
+                    onCheckedChange={(v) => setForm(prev => {
+                      // Switching the override on starts from the company's
+                      // rules, the same values the server applies while it is
+                      // off. The stored defaults (location not required,
+                      // remote punch allowed) made merely flipping this switch
+                      // relax both rules at once for a company that requires
+                      // location and forbids remote punch.
+                      const company = globalSettings?.attendance;
+                      if (v && !prev.attendanceExceptions.overrideGlobal && company) {
+                        return {
+                          ...prev,
+                          attendanceExceptions: {
+                            overrideGlobal: true,
+                            requireLocation: !!company.requireLocation,
+                            remotePunch: !!company.remotePunch,
+                          },
+                        };
+                      }
+                      return { ...prev, attendanceExceptions: { ...prev.attendanceExceptions, overrideGlobal: v } };
+                    })}
                   />
                 </div>
+                {form.attendanceExceptions.overrideGlobal && globalSettings?.attendance && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Company rule: location {globalSettings.attendance.requireLocation ? "required" : "not required"}, remote punch{" "}
+                    {globalSettings.attendance.remotePunch ? "allowed" : "not allowed"}. Change only what should be different for this employee.
+                  </p>
+                )}
                 {form.attendanceExceptions.overrideGlobal && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 rounded-xl border border-border/50 bg-muted/20">
                     <div className="flex items-center justify-between">
@@ -1201,8 +1296,8 @@ function AddEmployeePage() {
             <Button
               type="button"
               variant="ghost"
-              onClick={() => navigate({ to: "/employees" })}
-              className="h-10 w-full rounded-xl text-muted-foreground font-semibold text-[13px] hover:bg-muted"
+              onClick={discard}
+              className="h-11 w-full rounded-xl text-muted-foreground font-semibold text-[13px] hover:bg-muted"
             >
               Discard Changes
             </Button>

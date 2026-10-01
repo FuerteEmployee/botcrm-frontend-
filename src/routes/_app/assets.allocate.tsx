@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import * as Icons from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
+import { DeleteDialog } from "@/components/shared/delete-dialog";
 import { formatINRFull } from "@/lib/format";
 
 type AssetAllocateSearch = {
@@ -53,6 +54,13 @@ const DEVICE_TYPES = [
   { label: "Tablet", value: "Tablet", icon: Tablet },
 ];
 
+// Today as YYYY-MM-DD on this device's calendar (toISOString is the UTC day,
+// which in India is still yesterday before 5:30 am).
+function todayKey() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 const getIconByName = (name: string) => {
   const lowerName = name.toLowerCase();
   if (lowerName.includes("laptop")) return Icons.Laptop;
@@ -71,73 +79,143 @@ const getIconByName = (name: string) => {
   return Icons.LayoutGrid;
 };
 
-function CategoryManager({ 
-  categories, 
-  onCreate, 
-  onUpdate, 
-  onDelete 
-}: { 
-  categories: AssetCategory[], 
+function CategoryManager({
+  categories,
+  onCreate,
+  onUpdate,
+  onDelete,
+  canCreate,
+  canEdit,
+  canDelete,
+}: {
+  categories: AssetCategory[],
   onCreate: (v: any) => Promise<any>,
   onUpdate: (id: string, v: any) => Promise<any>,
-  onDelete: (id: string) => Promise<any>
+  onDelete: (id: string) => Promise<any>,
+  canCreate: boolean,
+  canEdit: boolean,
+  canDelete: boolean,
 }) {
   const [name, setName] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<AssetCategory | null>(null);
 
   const handleSave = async () => {
-    if (!name.trim()) return;
-    if (editingId) {
-      await onUpdate(editingId, { name });
-      setEditingId(null);
-    } else {
-      await onCreate({ name, icon: "Monitor" });
+    const trimmed = name.trim();
+    if (!trimmed) {
+      toast.error("Please enter a category name.");
+      return;
     }
-    setName("");
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (editingId) {
+        await onUpdate(editingId, { name: trimmed });
+        setEditingId(null);
+      } else {
+        await onCreate({ name: trimmed, icon: "Monitor" });
+      }
+      setName("");
+    } catch {
+      // The service has said why (e.g. "There is already a category ...").
+    } finally {
+      setBusy(false);
+    }
   };
 
-  return (
-    <div className="space-y-4 py-4">
-      <div className="flex items-center gap-2">
-        <FormInput 
-          label="New Category"
-          placeholder="e.g. Printer, Tablet"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          containerClassName="flex-1 space-y-1"
-        />
-        <Button onClick={handleSave} className="mt-6 h-10 px-4">
-          {editingId ? "Update" : "Add"}
-        </Button>
-      </div>
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setBusy(true);
+    try {
+      await onDelete(deleteTarget._id);
+    } catch {
+      // The service has said why (e.g. still used by device records).
+    } finally {
+      setBusy(false);
+      setDeleteTarget(null);
+    }
+  };
 
-      <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
+  const canSave = editingId ? canEdit : canCreate;
+
+  return (
+    <div className="space-y-4 py-2">
+      {(canCreate || editingId) && (
+        <form
+          className="flex items-end gap-2"
+          onSubmit={(e) => { e.preventDefault(); handleSave(); }}
+        >
+          <FormInput
+            label={editingId ? "Rename category" : "New category"}
+            placeholder="e.g. Printer, SIM card"
+            value={name}
+            maxLength={40}
+            onChange={(e) => setName(e.target.value)}
+            containerClassName="flex-1 space-y-1"
+          />
+          <Button type="submit" disabled={busy || !canSave} className="h-10 px-4">
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : editingId ? "Save" : "Add"}
+          </Button>
+          {editingId && (
+            <Button type="button" variant="ghost" className="h-10 px-3" onClick={() => { setEditingId(null); setName(""); }}>
+              Cancel
+            </Button>
+          )}
+        </form>
+      )}
+      {editingId && (
+        <p className="text-[12px] text-muted-foreground">Device records in this category move to the new name.</p>
+      )}
+
+      <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+        {categories.length === 0 && (
+          <p className="text-[13px] text-muted-foreground text-center py-4">No categories yet.</p>
+        )}
         {categories.map((cat) => (
-          <div key={cat._id} className="flex items-center justify-between p-3 rounded-xl border border-border/60 bg-muted/5 group">
-            <div className="flex items-center gap-3">
-              <div className="h-8 w-8 rounded-lg bg-white shadow-sm flex items-center justify-center">
+          <div key={cat._id} className="flex items-center justify-between gap-2 p-2 pl-3 rounded-xl border border-border/60 bg-muted/5">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="h-8 w-8 shrink-0 rounded-lg bg-card shadow-sm flex items-center justify-center">
                 {(() => {
                   const Icon = getIconByName(cat.name);
                   return <Icon className="h-4 w-4 text-primary" />;
                 })()}
               </div>
-              <span className="text-[13px] font-bold">{cat.name}</span>
+              <span className="text-[13px] font-bold truncate">{cat.name}</span>
             </div>
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              <ActionButton
-                variant="edit"
-                tooltip="Edit"
-                onClick={() => { setEditingId(cat._id); setName(cat.name); }}
-              />
-              <ActionButton
-                variant="delete"
-                tooltip="Delete"
-                onClick={() => onDelete(cat._id)}
-              />
+            <div className="flex items-center gap-1 shrink-0">
+              {canEdit && (
+                <ActionButton
+                  variant="edit"
+                  tooltip="Rename"
+                  aria-label={`Rename ${cat.name}`}
+                  className="h-10 w-10"
+                  onClick={() => { setEditingId(cat._id); setName(cat.name); }}
+                />
+              )}
+              {canDelete && (
+                <ActionButton
+                  variant="delete"
+                  tooltip="Delete"
+                  aria-label={`Delete ${cat.name}`}
+                  className="h-10 w-10"
+                  onClick={() => setDeleteTarget(cat)}
+                />
+              )}
             </div>
           </div>
         ))}
       </div>
+
+      <DeleteDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => { if (!o && !busy) setDeleteTarget(null); }}
+        onConfirm={confirmDelete}
+        isLoading={busy}
+        title="Delete this category?"
+        description={deleteTarget ? `"${deleteTarget.name}" will be removed from the list. A category still used by a device record cannot be deleted.` : ""}
+        confirmText="Delete"
+      />
     </div>
   );
 }
@@ -155,6 +233,7 @@ function SectionTitle({ title, icon: Icon, className }: { title: string; icon: a
 
 interface DeviceEntry {
   tempId: number;
+  deviceName?: string;
   deviceType: string;
   brand: string;
   model: string;
@@ -170,8 +249,9 @@ interface DeviceEntry {
 function AssetAllocatePage() {
   const { assetId, employeeId: initialEmployeeId } = Route.useSearch();
   const navigate = useNavigate();
-  const { assets, createAsset, updateAsset, isCreating, isUpdating } = useAssetService();
-  const { employees } = useEmployeeService();
+  const { assets, isLoading: assetsLoading, createAsset, updateAsset, isCreating, isUpdating } = useAssetService({ silent: true });
+  // Active employees only: the server refuses a device for an inactive one.
+  const { employees } = useEmployeeService({ status: "active" });
   const {
     categories,
     createCategory,
@@ -181,17 +261,14 @@ function AssetAllocatePage() {
   const { can } = usePermission();
   // New allocation = create right; editing an existing allocation = edit right
   const canAllocate = assetId ? can("assets", "edit") : can("assets", "create");
+  const [submitting, setSubmitting] = useState(false);
 
   const [employeeId, setEmployeeId] = useState<string>(initialEmployeeId || "");
   const [devices, setDevices] = useState<DeviceEntry[]>([]);
 
-  // Seed default categories if none exist
-  useEffect(() => {
-    if (categories.length === 0) {
-      const defaults = ["Laptop", "Mobile", "Monitor", "Headset", "Keyboard", "Mouse", "Tablet"];
-      defaults.forEach(name => createCategory({ name, icon: "Monitor" }));
-    }
-  }, [categories.length]);
+  // The starter categories are created by the server on the first read.
+  // (This page used to create them in an effect that ran while the list was
+  // still loading, so every visit fired seven POSTs that came back 400.)
 
   // Sync employeeId from search params
   useEffect(() => {
@@ -200,20 +277,25 @@ function AssetAllocatePage() {
     }
   }, [initialEmployeeId]);
 
-  const categoryOptions = categories.map(cat => ({
-    label: cat.name,
-    value: cat.name,
-    icon: getIconByName(cat.name)
-  }));
-
-  const employeeOptions = employees.map(e => ({
-    label: e.name,
-    value: e._id,
-    subLabel: e.phone
-  }));
+  const categoryOptionsFor = (current: string) => {
+    const opts = categories.map(cat => ({ label: cat.name, value: cat.name, icon: getIconByName(cat.name) }));
+    // A record saved under a category that has since gone keeps its value.
+    if (current && !opts.some((o) => o.value === current)) opts.unshift({ label: current, value: current, icon: getIconByName(current) });
+    return opts;
+  };
 
   const isEditing = !!assetId;
-  const isSubmitting = isCreating || isUpdating;
+  const editingAsset = isEditing ? assets.find(a => a._id === assetId) : undefined;
+  const isSubmitting = submitting || isCreating || isUpdating;
+
+  // The employee holding the device being edited may have left since; keep
+  // them in the picker so the record can still be marked returned.
+  const employeeOptions = employees.map(e => ({ label: e.name, value: e._id, subLabel: e.phone }));
+  if (editingAsset && !employees.some(e => e._id === editingAsset.employeeId)) {
+    employeeOptions.unshift({ label: `${editingAsset.employeeName} (inactive)`, value: editingAsset.employeeId, subLabel: "" });
+  }
+  const selectedEmployee = employees.find(e => e._id === employeeId);
+  const selectedName = selectedEmployee?.name || (editingAsset && editingAsset.employeeId === employeeId ? editingAsset.employeeName : "");
 
   useEffect(() => {
     if (isEditing && assets.length > 0) {
@@ -229,9 +311,9 @@ function AssetAllocatePage() {
           serialNumber: asset.serialNumber,
           allocatedAt: asset.allocatedAt.split("T")[0],
           status: asset.status,
-          unlockCredentials: (asset as any).unlockCredentials || "",
-          unlockType: (asset as any).unlockType || "password",
-          patternSize: (asset as any).patternSize || 3,
+          unlockCredentials: asset.unlockCredentials || "",
+          unlockType: asset.unlockType || "password",
+          patternSize: asset.patternSize || 3,
         }]);
         setEmployeeId(asset.employeeId);
       }
@@ -244,7 +326,7 @@ function AssetAllocatePage() {
         deviceName: "",
         amount: "",
         serialNumber: "",
-        allocatedAt: new Date().toISOString().split("T")[0],
+        allocatedAt: todayKey(),
         status: "active",
         unlockCredentials: "",
         unlockType: "password",
@@ -262,7 +344,7 @@ function AssetAllocatePage() {
       deviceName: "",
       amount: "",
       serialNumber: "",
-      allocatedAt: new Date().toISOString().split("T")[0],
+      allocatedAt: todayKey(),
       status: "active",
       unlockCredentials: "",
       unlockType: "password",
@@ -281,44 +363,80 @@ function AssetAllocatePage() {
 
   const totalValue = devices.reduce((sum, d) => sum + (Number(d.amount) || 0), 0);
 
+  const validate = (): string | null => {
+    if (!employeeId) return "Please choose the employee who gets the device.";
+    const seen = new Set<string>();
+    for (const [i, d] of devices.entries()) {
+      const n = devices.length > 1 ? ` for item ${i + 1}` : "";
+      if (!d.deviceType) return `Please pick the device category${n}.`;
+      if (!d.brand.trim()) return `Please enter the brand${n}.`;
+      if (!d.model.trim()) return `Please enter the model${n}.`;
+      if (!d.serialNumber.trim()) return `Please enter the serial number${n}.`;
+      const key = d.serialNumber.trim().toLowerCase();
+      if (seen.has(key)) return `Serial number "${d.serialNumber.trim()}" is entered twice.`;
+      seen.add(key);
+      if (String(d.amount).trim() === "") return `Please enter the device value${n}.`;
+      const amt = Number(String(d.amount).replace(/,/g, ""));
+      if (!Number.isFinite(amt) || amt < 0) return `The device value${n} cannot be less than ₹0.`;
+      if (amt > 10000000) return `The device value${n} is too large (at most ₹1 crore).`;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(d.allocatedAt)) return `Please pick the date the device was given${n}.`;
+      if (d.allocatedAt > todayKey()) return `The date the device was given${n} cannot be in the future.`;
+      if (d.unlockType === "pin" && d.unlockCredentials && !/^\d{4,16}$/.test(d.unlockCredentials)) return `A PIN can only have digits (4 to 16)${n}.`;
+    }
+    return null;
+  };
+
+  const payloadOf = (d: DeviceEntry) => ({
+    employeeId,
+    deviceType: d.deviceType,
+    brand: d.brand.trim(),
+    model: d.model.trim(),
+    serialNumber: d.serialNumber.trim(),
+    amount: Number(String(d.amount).replace(/,/g, "")),
+    allocatedAt: d.allocatedAt,
+    status: d.status,
+    unlockType: d.unlockType,
+    unlockCredentials: d.unlockCredentials,
+    patternSize: d.patternSize || 3,
+  });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const emp = employees.find(e => e._id === employeeId);
-    if (!emp) return toast.error("Please select an employee");
+    if (isSubmitting) return;
+    const problem = validate();
+    if (problem) {
+      toast.error(problem);
+      return;
+    }
 
+    setSubmitting(true);
     try {
       if (isEditing && assetId) {
-        const d = devices[0];
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { tempId, ...cleanDevice } = d;
-        await updateAsset({ 
-          id: assetId, 
-          data: {
-            ...cleanDevice,
-            deviceInfo: cleanDevice.brand + " " + cleanDevice.model,
-            employeeId,
-            employeeName: emp.name,
-            deviceName: `${d.brand} ${d.model}`,
-            amount: Number(d.amount) || 0,
-          } 
-        });
-      } else {
-        for (const d of devices) {
-          // eslint-disable-next-line @typescript-eslint/no-unused-vars
-          const { tempId, ...cleanDevice } = d;
-          await createAsset({
-            ...cleanDevice,
-            deviceInfo: cleanDevice.brand + " " + cleanDevice.model,
-            employeeId,
-            employeeName: emp.name,
-            deviceName: `${d.brand} ${d.model}`,
-            amount: Number(d.amount) || 0,
-          });
+        await updateAsset({ id: assetId, data: payloadOf(devices[0]) });
+        toast.success("Device record saved");
+        navigate({ to: "/assets" });
+        return;
+      }
+      // One at a time, so a refused item (say, a serial already given to
+      // someone else) stops here with the ones before it saved -- and taken
+      // off this list, so pressing the button again does not add them twice.
+      let saved = 0;
+      for (const d of devices) {
+        try {
+          await createAsset(payloadOf(d));
+          saved++;
+          setDevices(prev => prev.filter(x => x.tempId !== d.tempId));
+        } catch {
+          if (saved > 0) toast.message(`${saved} device${saved === 1 ? "" : "s"} saved. Fix the item left on the list and press the button again.`);
+          return;
         }
       }
+      toast.success(saved === 1 ? `Device given to ${selectedName}` : `${saved} devices given to ${selectedName}`);
       navigate({ to: "/assets" });
-    } catch (error) {
-      console.error(error);
+    } catch {
+      // The service has said why.
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -341,6 +459,18 @@ function AssetAllocatePage() {
     );
   }
 
+  if (isEditing && !assetsLoading && !editingAsset) {
+    return (
+      <div className="flex flex-col items-center justify-center py-24 gap-3 text-center">
+        <p className="text-[14px] font-bold text-foreground">This device record was not found</p>
+        <p className="text-[13px] text-muted-foreground max-w-[300px]">It may have been deleted. Go back to the list and try again.</p>
+        <Button variant="outline" onClick={() => navigate({ to: "/assets" })} className="mt-2 h-10 rounded-xl px-4 text-[13px] font-semibold">
+          <ChevronLeft className="h-4 w-4 mr-1" /> Back to Assets
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4 pb-20">
       <div className="flex items-center gap-3">
@@ -348,20 +478,21 @@ function AssetAllocatePage() {
           variant="outline"
           size="icon"
           onClick={() => navigate({ to: "/assets" })}
-          className="h-8 w-8 rounded-lg border-border/60 hover:bg-muted"
+          aria-label="Back to Assets"
+          className="h-10 w-10 rounded-lg border-border/60 hover:bg-muted"
         >
           <ChevronLeft className="h-4 w-4" />
         </Button>
         <PageHeader
-          title={isEditing ? "Edit Allocation" : "Bulk Asset Assignment"}
-          description={isEditing ? "Update hardware details" : "Allocate hardware to an employee"}
+          title={isEditing ? "Edit Device Record" : "Give Devices"}
+          description={isEditing ? "Change the details, or mark it returned or damaged" : "Record one or more devices given to an employee"}
         />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-8 space-y-5">
           {/* Employee Selection */}
-          <Card className="p-4 border border-border/60 bg-white rounded-xl shadow-sm">
+          <Card className="p-4 border border-border/60 bg-card rounded-xl shadow-sm">
             <SectionTitle title="Assignment Target" icon={User} className="mb-3" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <FormSelect
@@ -378,13 +509,13 @@ function AssetAllocatePage() {
                     <Icons.Mail className="h-4 w-4 text-primary" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-none mb-1">Contact Info</p>
+                    <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest leading-none mb-1">Contact Info</p>
                     <div className="flex flex-col">
                       <p className="text-[12px] font-bold truncate">
-                        {employees.find(e => e._id === employeeId)?.email || "No Email Provided"}
+                        {selectedEmployee?.email || (selectedEmployee ? "No email" : selectedName)}
                       </p>
                       <p className="text-[11px] text-muted-foreground">
-                        {employees.find(e => e._id === employeeId)?.phone}
+                        {selectedEmployee?.phone}
                       </p>
                     </div>
                   </div>
@@ -395,7 +526,7 @@ function AssetAllocatePage() {
                     <User className="h-4 w-4 text-muted-foreground" />
                   </div>
                   <div>
-                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest leading-none mb-1">Status</p>
+                    <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest leading-none mb-1">Status</p>
                     <p className="text-[13px] font-bold text-muted-foreground">Awaiting Selection</p>
                   </div>
                 </div>
@@ -408,7 +539,7 @@ function AssetAllocatePage() {
             <div className="flex items-center justify-between px-1">
               <div className="flex items-center gap-2">
                 <h4 className="font-semibold text-[11px] text-muted-foreground uppercase tracking-wider">Device List</h4>
-                <Badge variant="outline" className="rounded-full px-1.5 py-0 h-4 bg-primary/5 text-primary border-primary/20 text-[9px] font-bold">
+                <Badge variant="outline" className="rounded-full px-1.5 py-0 h-4 bg-primary/5 text-primary border-primary/20 text-[11px] font-bold">
                   {devices.length}
                 </Badge>
               </div>
@@ -431,9 +562,9 @@ function AssetAllocatePage() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.98 }}
                 >
-                  <Card className="p-4 border border-border/60 bg-white rounded-xl shadow-sm hover:border-primary/20 transition-all relative group overflow-hidden">
+                  <Card className="p-4 border border-border/60 bg-card rounded-xl shadow-sm hover:border-primary/20 transition-all relative group overflow-hidden">
                     <div className="absolute top-0 right-0 p-2.5 flex items-center gap-2">
-                      <Badge className="bg-muted/50 text-muted-foreground border-border/40 text-[9px] font-medium rounded px-1.5 py-0">
+                      <Badge className="bg-muted/50 text-muted-foreground border-border/40 text-[11px] font-medium rounded px-1.5 py-0">
                         #{index + 1}
                       </Badge>
                       {devices.length > 1 && !isEditing && (
@@ -456,9 +587,9 @@ function AssetAllocatePage() {
                                 type="button" 
                                 variant="outline" 
                                 size="sm" 
-                                className="h-7 rounded-lg border-primary/20 text-primary bg-primary/5 hover:bg-primary/10 font-bold text-[10px] gap-1 px-2"
+                                className="h-9 rounded-lg border-primary/20 text-primary bg-primary/5 hover:bg-primary/10 font-bold text-[12px] gap-1 px-3"
                               >
-                                <Plus className="h-3 w-3" /> Add
+                                <Plus className="h-3 w-3" /> Manage
                               </Button>
                             </DialogTrigger>
                             <DialogContent className="sm:max-w-[425px]">
@@ -466,11 +597,14 @@ function AssetAllocatePage() {
                                 <DialogTitle>Manage Categories</DialogTitle>
                                 <DialogDescription>Add, edit or remove device categories.</DialogDescription>
                               </DialogHeader>
-                              <CategoryManager 
+                              <CategoryManager
                                 categories={categories}
                                 onCreate={createCategory}
-                                onUpdate={updateCategory}
+                                onUpdate={(id, data) => updateCategory({ id, data })}
                                 onDelete={deleteCategory}
+                                canCreate={can("assets", "create")}
+                                canEdit={can("assets", "edit")}
+                                canDelete={can("assets", "delete")}
                               />
                             </DialogContent>
                           </Dialog>
@@ -479,16 +613,18 @@ function AssetAllocatePage() {
                           label=""
                           value={device.deviceType}
                           onValueChange={(v) => updateDevice(device.tempId, { deviceType: v })}
-                          options={categoryOptions}
+                          options={categoryOptionsFor(device.deviceType)}
                         />
                       </div>
                       <FormInput
                         label="Asset Value (₹)"
                         type="number"
+                        inputMode="decimal"
+                        min="0"
                         icon={IndianRupee}
                         value={device.amount}
                         onChange={e => updateDevice(device.tempId, { amount: e.target.value })}
-                        placeholder="0.00"
+                        placeholder="e.g. 45000"
                         required
                       />
 
@@ -513,6 +649,7 @@ function AssetAllocatePage() {
                       <FormInput
                         label="Assign Date"
                         type="date"
+                        max={todayKey()}
                         icon={Calendar}
                         value={device.allocatedAt}
                         onChange={e => updateDevice(device.tempId, { allocatedAt: e.target.value })}
@@ -524,7 +661,8 @@ function AssetAllocatePage() {
                         icon={Hash}
                         value={device.serialNumber}
                         onChange={e => updateDevice(device.tempId, { serialNumber: e.target.value })}
-                        placeholder="Hardware ID"
+                        maxLength={80}
+                        placeholder="From the sticker or box"
                         required
                       />
                       <FormSelect
@@ -532,9 +670,9 @@ function AssetAllocatePage() {
                         value={device.status}
                         onValueChange={(v) => updateDevice(device.tempId, { status: v as any })}
                         options={[
-                          { label: "Active", value: "active" },
-                          { label: "Returned", value: "returned" },
+                          { label: "With employee", value: "active" },
                           { label: "Damaged", value: "damaged" },
+                          { label: "Returned", value: "returned" },
                         ]}
                       />
 
@@ -544,14 +682,14 @@ function AssetAllocatePage() {
                             <Lock className="h-3.5 w-3.5 text-primary/70" />
                             <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Device Security & Unlock Credentials</Label>
                           </div>
-                          <Badge variant="outline" className="text-[9px] font-bold bg-primary/5 border-primary/20 text-primary uppercase">
+                          <Badge variant="outline" className="text-[11px] font-bold bg-primary/5 border-primary/20 text-primary uppercase">
                             {device.unlockType} Secured
                           </Badge>
                         </div>
                         
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                           <div className="md:col-span-1 flex flex-col gap-2">
-                            <Label className="text-[10px] font-bold text-muted-foreground ml-1">Unlock Method</Label>
+                            <Label className="text-[11px] font-bold text-muted-foreground ml-1">Unlock Method</Label>
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                               {[
                                 { id: 'password', label: 'Pass', icon: Lock },
@@ -570,7 +708,7 @@ function AssetAllocatePage() {
                                   )}
                                 >
                                   <t.icon className={cn("h-3.5 w-3.5", device.unlockType === t.id ? "text-primary" : "text-muted-foreground")} />
-                                  <span className={cn("text-[9px] font-bold uppercase", device.unlockType === t.id ? "text-primary" : "text-foreground/70")}>{t.label}</span>
+                                  <span className={cn("text-[11px] font-bold uppercase", device.unlockType === t.id ? "text-primary" : "text-foreground/70")}>{t.label}</span>
                                 </button>
                               ))}
                             </div>
@@ -580,7 +718,7 @@ function AssetAllocatePage() {
                             {device.unlockType === 'pattern' ? (
                               <div className="flex flex-col items-center gap-3 p-4 rounded-2xl border border-dashed border-primary/20 bg-primary/5 animate-in fade-in zoom-in-95 duration-300">
                                 <div className="w-full flex items-center justify-between mb-2">
-                                  <Label className="text-[10px] font-bold text-primary tracking-widest uppercase">Grid Size</Label>
+                                  <Label className="text-[11px] font-bold text-primary tracking-widest uppercase">Grid Size</Label>
                                   <div className="flex bg-white/50 p-0.5 rounded-lg border border-primary/10">
                                     {[3, 4].map(size => (
                                       <button
@@ -588,7 +726,7 @@ function AssetAllocatePage() {
                                         type="button"
                                         onClick={() => updateDevice(device.tempId, { patternSize: size as 3 | 4, unlockCredentials: "" })}
                                         className={cn(
-                                          "px-2 py-0.5 rounded text-[10px] font-bold transition-all",
+                                          "px-2 py-0.5 rounded text-[11px] font-bold transition-all",
                                           device.patternSize === size 
                                             ? "bg-primary text-white shadow-sm" 
                                             : "text-muted-foreground hover:text-primary"
@@ -661,7 +799,7 @@ function AssetAllocatePage() {
                                   </svg>
 
                                   <div className={cn(
-                                    "grid gap-6 sm:gap-12 relative z-20",
+                                    "grid gap-8 sm:gap-12 relative z-20",
                                     device.patternSize === 4 ? "grid-cols-4" : "grid-cols-3"
                                   )}>
                                     {Array.from({ length: (device.patternSize || 3) * (device.patternSize || 3) }).map((_, i) => {
@@ -681,10 +819,11 @@ function AssetAllocatePage() {
                                               updateDevice(device.tempId, { unlockCredentials: [...parts, String(num)].join('-') });
                                             }
                                           }}
+                                          aria-label={`Pattern dot ${num}`}
                                           className="h-2 w-2 relative flex items-center justify-center group"
                                         >
                                           {/* Touch Target Area */}
-                                          <div className="absolute inset-[-12px] rounded-full cursor-pointer hover:bg-primary/5 transition-colors" />
+                                          <div className="absolute inset-[-16px] rounded-full cursor-pointer hover:bg-primary/5 transition-colors" />
                                           
                                           {/* The Dot */}
                                           <motion.div 
@@ -701,7 +840,7 @@ function AssetAllocatePage() {
                                             <motion.span 
                                               initial={{ opacity: 0, y: 5 }}
                                               animate={{ opacity: 1, y: 0 }}
-                                              className="absolute -top-4 text-[8px] font-bold text-primary/60"
+                                              className="absolute -top-4 text-[11px] font-bold text-primary/60"
                                             >
                                               {order}
                                             </motion.span>
@@ -713,14 +852,14 @@ function AssetAllocatePage() {
                                 </div>
 
                                 <div className="w-full flex items-center justify-between mt-1">
-                                  <p className="text-[9px] font-bold text-primary tracking-widest uppercase opacity-80">
+                                  <p className="text-[11px] font-bold text-primary tracking-widest uppercase opacity-80">
                                     {device.unlockCredentials ? `Seq: ${device.unlockCredentials}` : "Define Pattern"}
                                   </p>
                                   <Button 
                                     type="button" 
                                     variant="ghost" 
                                     size="sm" 
-                                    className="h-6 text-[9px] font-bold text-destructive hover:bg-destructive/5 rounded-lg px-2"
+                                    className="h-6 text-[11px] font-bold text-destructive hover:bg-destructive/5 rounded-lg px-2"
                                     onClick={() => updateDevice(device.tempId, { unlockCredentials: "" })}
                                   >
                                     Reset
@@ -729,12 +868,14 @@ function AssetAllocatePage() {
                               </div>
                             ) : (
                               <div className="flex flex-col gap-2">
-                                <Label className="text-[10px] font-bold text-muted-foreground ml-1">
+                                <Label className="text-[11px] font-bold text-muted-foreground ml-1">
                                   {device.unlockType === 'pin' ? "Security PIN" : "Unlock Password"}
                                 </Label>
                                 <FormInput
                                   icon={device.unlockType === 'pin' ? Hash : VenetianMask}
-                                  type={device.unlockType === 'pin' ? "number" : "text"}
+                                  type="text"
+                                  inputMode={device.unlockType === 'pin' ? "numeric" : "text"}
+                                  maxLength={device.unlockType === 'pin' ? 16 : 100}
                                   value={device.unlockCredentials}
                                   onChange={e => updateDevice(device.tempId, { unlockCredentials: e.target.value })}
                                   placeholder={device.unlockType === 'pin' ? "e.g. 1234" : "Enter password"}
@@ -746,18 +887,6 @@ function AssetAllocatePage() {
                       </div>
                     </div>
 
-                    <div className="mt-4 pt-4 border-t border-border/30">
-                      <div className="flex items-center gap-3">
-                        <div className="h-12 w-16 rounded-lg border border-dashed border-border/50 bg-muted/10 flex flex-col items-center justify-center gap-1 cursor-pointer hover:bg-muted/20 shrink-0">
-                          <ImageIcon className="h-3.5 w-3.5 text-muted-foreground/30" />
-                          <span className="text-[8px] font-bold text-muted-foreground tracking-tighter uppercase">Photo</span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-[11px] font-semibold text-foreground">Hardware Verification</p>
-                          <p className="text-[10px] text-muted-foreground leading-tight">Attach device photo for audit records.</p>
-                        </div>
-                      </div>
-                    </div>
                   </Card>
                 </motion.div>
               ))}
@@ -766,7 +895,7 @@ function AssetAllocatePage() {
         </div>
 
         <div className="lg:col-span-4 space-y-6">
-          <Card className="p-4 border border-border/60 bg-white rounded-xl shadow-sm sticky top-5">
+          <Card className="p-4 border border-border/60 bg-card rounded-xl shadow-sm sticky top-5">
             <h3 className="font-semibold text-[13px] mb-4 flex items-center gap-2">
               <CheckCircle2 className="h-3.5 w-3.5 text-primary/70" />
               Summary
@@ -775,7 +904,7 @@ function AssetAllocatePage() {
             <div className="space-y-3 mb-6">
               <div className="flex items-center justify-between p-3 rounded-xl bg-muted/20 border border-border/40">
                 <span className="text-[11px] font-bold text-muted-foreground uppercase">Target Employee</span>
-                <span className="text-[12px] font-bold text-foreground">{employees.find(e => e._id === employeeId)?.name || "—"}</span>
+                <span className="text-[12px] font-bold text-foreground text-right truncate">{selectedName || "—"}</span>
               </div>
               <div className="flex items-center justify-between p-3 rounded-xl bg-muted/20 border border-border/40">
                 <span className="text-[11px] font-bold text-muted-foreground uppercase">Total Items</span>
@@ -792,7 +921,7 @@ function AssetAllocatePage() {
             <div className="flex flex-col gap-2.5">
               <Button
                 type="submit"
-                disabled={isSubmitting || !employeeId}
+                disabled={isSubmitting}
                 onClick={handleSubmit}
                 className="h-11 w-full rounded-xl bg-primary text-white hover:opacity-95 shadow-md font-bold text-[14px] gap-2 group"
               >
@@ -800,7 +929,7 @@ function AssetAllocatePage() {
                   <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
                   <>
-                    {isEditing ? "Update Allocation" : "Finalize Assignment"}
+                    {isEditing ? "Save Changes" : devices.length > 1 ? `Give ${devices.length} Devices` : "Give Device"}
                     <ArrowRight className="h-4 w-4 group-hover:translate-x-0.5 transition-transform" />
                   </>
                 )}
@@ -811,14 +940,14 @@ function AssetAllocatePage() {
                 onClick={() => navigate({ to: "/assets" })}
                 className="h-10 w-full rounded-xl text-muted-foreground font-semibold text-[13px] hover:bg-muted"
               >
-                Discard Changes
+                Cancel
               </Button>
             </div>
 
             <div className="mt-6 flex items-start gap-2.5 p-3 rounded-lg bg-primary/5 border border-primary/10">
               <AlertCircle className="h-3.5 w-3.5 text-primary/60 shrink-0 mt-0.5" />
-              <p className="text-[10px] text-primary/70 leading-relaxed font-medium">
-                Please verify serial numbers. Assignment will be logged in history.
+              <p className="text-[11px] text-primary/70 leading-relaxed font-medium">
+                Check the serial numbers against the device. Each record stays in the employee's device history, even after it is returned.
               </p>
             </div>
           </Card>

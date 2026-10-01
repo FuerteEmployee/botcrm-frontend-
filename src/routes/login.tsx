@@ -1,12 +1,25 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Phone, Loader2, ArrowRight, ShieldCheck, CheckCircle2, Clock, LogOut, User, AlertTriangle } from "lucide-react";
+import {
+  Phone,
+  Loader2,
+  ArrowRight,
+  ShieldCheck,
+  CheckCircle2,
+  Clock,
+  LogOut,
+  User,
+  AlertTriangle,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { setSession, getSession, clearSession } from "@/lib/auth";
+import { setSession, getSession } from "@/lib/auth";
 import type { Session } from "@/lib/auth";
+import { logoutAndClear } from "@/lib/logout";
+import { panelHomeFor } from "@/lib/panel-home";
+import { isNativeApp } from "@/lib/geolocation";
 import { toast } from "sonner";
 import logo from "@/assets/bot-logo.png";
 import bgImage from "@/assets/login-bg.png";
@@ -16,10 +29,24 @@ export const Route = createFileRoute("/login")({
   component: LoginPage,
 });
 
-function maskPhone(phone: string) {
-  const cleaned = phone.replace(/\D/g, "");
-  if (cleaned.length < 4) return cleaned;
-  return cleaned.slice(0, 2) + "x".repeat(cleaned.length - 4) + cleaned.slice(-2);
+const RESEND_SECONDS = 30;
+const EMPTY_OTP = ["", "", "", "", "", ""];
+
+/**
+ * The 10-digit number from whatever was typed or pasted. People paste
+ * "+91 98765 43210" or "098765 43210"; keeping only the first ten digits of
+ * those gave "9198765432", a different (usually unregistered) number.
+ * The server normalises the same way, so both sides agree.
+ */
+function normalizePhoneInput(raw: string): string {
+  let digits = raw.replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+  else if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+  return digits.slice(0, 10);
+}
+
+function formatPhone(digits: string) {
+  return digits.length > 5 ? `${digits.slice(0, 5)} ${digits.slice(5)}` : digits;
 }
 
 function roleLabel(role: Session["role"]) {
@@ -29,63 +56,148 @@ function roleLabel(role: Session["role"]) {
   return "Employee";
 }
 
-function roleDashboard(role: Session["role"]) {
+// A sub-admin lands on the first page they may view, not always /dashboard:
+// one without the dashboard right got a "no access" toast on every sign-in.
+function roleDashboard(role: Session["role"], permissions?: Session["permissions"]) {
   if (role === "superadmin") return "/super/overview";
-  if (role === "admin" || role === "subadmin") return "/dashboard";
+  if (role === "admin" || role === "subadmin") return panelHomeFor({ role, permissions });
   return "/user";
+}
+
+const firstName = (name?: string) => (name || "").trim().split(/\s+/)[0] || "";
+
+type ApiError = {
+  response?: {
+    status?: number;
+    data?: { code?: string; message?: unknown; name?: string; employeeName?: string };
+  };
+};
+
+/**
+ * One sentence for a failed login call. Most people signing in read little
+ * English, so: no response means the phone could not reach us (say so, plainly);
+ * a gateway error means the server is down; a 4xx carries the server's own
+ * sentence, written for people; anything else gets the caller's fallback,
+ * never an exception's text.
+ */
+function plainError(error: unknown, fallback: string): string {
+  const res = (error as ApiError)?.response;
+  if (!res) return "Could not connect. Check your internet and try again.";
+  const status = res.status ?? 0;
+  if (status === 502 || status === 503 || status === 504) {
+    return "The server is not answering right now. Please try again in a few minutes.";
+  }
+  const message = typeof res.data?.message === "string" ? res.data.message.trim() : "";
+  if (status >= 400 && status < 500 && message) return message;
+  return fallback;
+}
+
+/**
+ * A refusal that is about the account or the company, not the code: shown as
+ * a red notice on the phone step, because typing again will not help.
+ */
+function refusalNotice(error: unknown): string | null {
+  const res = (error as ApiError)?.response;
+  const data = res?.data;
+  if (!data) return null;
+  const message = typeof data.message === "string" ? data.message.trim() : "";
+  const code = data.code;
+  if (
+    code === "account_inactive" ||
+    code === "company_inactive" ||
+    code === "company_subscription" ||
+    code === "inactive" ||
+    code === "employee_inactive"
+  ) {
+    return message || "This account cannot sign in right now. Please contact your admin.";
+  }
+  if (res?.status === 403 && /inactive|deactivat|switched off/i.test(message)) return message;
+  return null;
+}
+
+function readStorage(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+function dropStorage(key: string) {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    /* private mode */
+  }
+}
+
+/** Why the last session ended, written by api-client's 401 handler. Read once. */
+function takeLogoutNotice(): string | null {
+  const reason = readStorage("bot_logout_reason");
+  if (!reason) return null;
+  const message = readStorage("bot_logout_message");
+  dropStorage("bot_logout_reason");
+  dropStorage("bot_logout_message");
+  if (reason === "inactive")
+    return message || "Your account has been switched off. Please contact your admin.";
+  if (reason === "another_device")
+    return "You were signed out because your account was signed in on another phone.";
+  return null;
 }
 
 function LoginPage() {
   const navigate = useNavigate();
 
-  // Detect existing session on mount
   const [existingSession, setExistingSession] = useState<Session | null>(null);
   const [step, setStep] = useState<"session" | "phone" | "otp">("phone");
-  const [logoutReason, setLogoutReason] = useState<"another_device" | "inactive" | null>(null);
-  const [inactiveName, setInactiveName] = useState<string | undefined>(undefined);
-  const [inactiveMessage, setInactiveMessage] = useState<string | undefined>(undefined);
+  const stepRef = useRef(step);
+  stepRef.current = step;
+
+  // A red notice on the phone step: the account or company cannot sign in.
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const [phone, setPhone] = useState("");
+  const [sentPhone, setSentPhone] = useState("");
+  const [phoneError, setPhoneError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [otp, setOtp] = useState(EMPTY_OTP);
+  const [generatedOtp, setGeneratedOtp] = useState("");
+  const [resendIn, setResendIn] = useState(RESEND_SECONDS);
+  const [otpError, setOtpError] = useState("");
+  const [liveMessage, setLiveMessage] = useState("");
+
+  const phoneRef = useRef<HTMLInputElement>(null);
+  const sendBoxRef = useRef<HTMLDivElement>(null);
+  const verifyBoxRef = useRef<HTMLDivElement>(null);
+  const inputsRef = useRef<Array<HTMLInputElement | null>>([]);
+  // Blocks a second verify while one is in flight: the last digit auto-submits,
+  // and a tap on the button a moment later used to send the same code again,
+  // which then failed as "expired" on top of the successful sign-in.
+  const submittingRef = useRef(false);
 
   useEffect(() => {
-    const reason = window.localStorage.getItem("bot_logout_reason");
-    if (reason === "another_device" || reason === "inactive") {
-      setLogoutReason(reason);
-      if (reason === "inactive") {
-        const msg = window.localStorage.getItem("bot_logout_message");
-        if (msg) setInactiveMessage(msg);
-      }
-      window.localStorage.removeItem("bot_logout_reason");
-      window.localStorage.removeItem("bot_logout_message");
-    }
+    const reason = takeLogoutNotice();
+    if (reason) setNotice(reason);
     const s = getSession();
     if (s) {
       setExistingSession(s);
       setStep("session");
     }
+
+    // The root route re-checks a stored session with the server on load. When
+    // that session is dead (user deleted, switched off) the 401 handler clears
+    // it -- this screen then must stop offering "Continue as ...".
+    const onAuthChange = () => {
+      if (getSession()) return;
+      setExistingSession(null);
+      setStep((st) => (st === "session" ? "phone" : st));
+      const why = takeLogoutNotice();
+      if (why) setNotice(why);
+    };
+    window.addEventListener("bot-auth-change", onAuthChange);
+    return () => window.removeEventListener("bot-auth-change", onAuthChange);
   }, []);
-
-  // Backend sends { code: 'account_inactive', message, name } when the account
-  // is deactivated — message may be a custom reason the admin set per employee.
-  const readInactiveError = (error: any): { name?: string; message?: string } | null => {
-    const data = error?.response?.data;
-    if (!data) return null;
-    const isInactiveCode = data.code === "inactive" || data.code === "employee_inactive" || data.code === "account_inactive";
-    const isInactiveMessage = typeof data.message === "string" && /inactive|deactivat/i.test(data.message);
-    if (!isInactiveCode && !isInactiveMessage) return null;
-    return { name: data.name || data.employeeName, message: data.message };
-  };
-
-  const companyLogo = existingSession?.companyLogo || logo;
-
-  const [phone, setPhone] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [otp, setOtp] = useState(["", "", "", "", "", ""]);
-  const [generatedOtp, setGeneratedOtp] = useState("");
-  const [resendIn, setResendIn] = useState(30);
-  const [otpStatus, setOtpStatus] = useState<"idle" | "error">("idle");
-  const [liveMessage, setLiveMessage] = useState("");
-
-  const phoneRef = useRef<HTMLInputElement>(null);
-  const inputsRef = useRef<Array<HTMLInputElement | null>>([]);
 
   useEffect(() => {
     if (step === "phone") phoneRef.current?.focus();
@@ -97,34 +209,69 @@ function LoginPage() {
     return () => clearInterval(t);
   }, [step]);
 
+  // Android's Back button. Without a handler, Capacitor went back in history --
+  // from the OTP step that left the screen, and after a sign-out it could land
+  // on a signed-in page that bounced straight back here. On the OTP step Back
+  // returns to the number; otherwise the app goes to the background.
+  useEffect(() => {
+    if (!isNativeApp()) return;
+    let remove: (() => void) | undefined;
+    let disposed = false;
+    import("@capacitor/app")
+      .then(({ App }) =>
+        App.addListener("backButton", () => {
+          if (stepRef.current === "otp") {
+            goBackToPhone();
+            return;
+          }
+          void App.minimizeApp();
+        }),
+      )
+      .then((h) => {
+        if (disposed) void h.remove();
+        else remove = () => void h.remove();
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      remove?.();
+    };
+  }, []);
+
+  // With the keyboard open a 600px phone has ~340px left, and the button sat
+  // under the keyboard. Bring it into view once the keyboard has opened.
+  const keepVisible = (el: HTMLElement | null) => {
+    window.setTimeout(() => el?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 350);
+  };
+
+  const companyLogo = existingSession?.companyLogo || logo;
+
   // ─── Send OTP ──────────────────────────────────────────────────────────────
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleaned = phone.replace(/\D/g, "");
-    if (cleaned.length < 10) {
-      toast.error("Enter a valid 10-digit phone number");
+    if (loading) return;
+    const digits = normalizePhoneInput(phone);
+    if (digits.length !== 10) {
+      setPhoneError("Please enter your 10-digit mobile number.");
+      phoneRef.current?.focus();
       return;
     }
     setLoading(true);
-    setLogoutReason(null);
+    setNotice(null);
+    setPhoneError("");
     try {
-      const { data } = await apiClient.post("/users/login-request", { phone: cleaned });
+      const { data } = await apiClient.post("/users/login-request", { phone: digits });
+      setSentPhone(digits);
       setGeneratedOtp(data.otp || "");
+      setOtp(EMPTY_OTP);
+      setOtpError("");
+      setResendIn(RESEND_SECONDS);
       setStep("otp");
-      setResendIn(30);
-      setOtp(["", "", "", "", "", ""]);
-      setOtpStatus("idle");
-      setLiveMessage("OTP sent. Enter the 6-digit code.");
-      toast.success("OTP sent successfully");
-    } catch (error: any) {
-      const inactive = readInactiveError(error);
-      if (inactive) {
-        setLogoutReason("inactive");
-        setInactiveName(inactive.name);
-        setInactiveMessage(inactive.message);
-      } else {
-        toast.error(error.response?.data?.message || "Failed to send OTP");
-      }
+      setLiveMessage("OTP sent. Enter the 6-digit OTP.");
+    } catch (error) {
+      const refusal = refusalNotice(error);
+      if (refusal) setNotice(refusal);
+      else setPhoneError(plainError(error, "Could not send the OTP. Please try again."));
     } finally {
       setLoading(false);
     }
@@ -132,73 +279,42 @@ function LoginPage() {
 
   // ─── Resend OTP ───────────────────────────────────────────────────────────
   const handleResendOtp = async () => {
-    const cleaned = phone.replace(/\D/g, "");
-    setResendIn(30);
-    setOtp(["", "", "", "", "", ""]);
-    setOtpStatus("idle");
-    setTimeout(() => inputsRef.current[0]?.focus(), 50);
+    if (resending || loading || resendIn > 0) return;
+    setResending(true);
+    setOtpError("");
     try {
-      const { data } = await apiClient.post("/users/login-request", { phone: cleaned });
+      const { data } = await apiClient.post("/users/login-request", { phone: sentPhone });
       setGeneratedOtp(data.otp || "");
+      setOtp(EMPTY_OTP);
+      setResendIn(RESEND_SECONDS);
       setLiveMessage("New OTP sent.");
-      toast.success("OTP resent successfully");
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || "Failed to resend OTP");
-    }
-  };
-
-  // ─── OTP digit change ─────────────────────────────────────────────────────
-  const handleOtpChange = (index: number, value: string) => {
-    const digit = value.slice(-1);
-    if (!/^\d?$/.test(digit)) return;
-    const next = [...otp];
-    next[index] = digit;
-    setOtp(next);
-    setOtpStatus("idle");
-    if (digit && index < 5) inputsRef.current[index + 1]?.focus();
-    if (digit && next.every((d) => d !== "")) submitOtp(next.join(""));
-  };
-
-  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Backspace") {
-      if (otp[index]) {
-        const next = [...otp];
-        next[index] = "";
-        setOtp(next);
-      } else if (index > 0) {
-        inputsRef.current[index - 1]?.focus();
+      toast.success("New OTP sent");
+      setTimeout(() => inputsRef.current[0]?.focus(), 50);
+    } catch (error) {
+      const refusal = refusalNotice(error);
+      if (refusal) {
+        setNotice(refusal);
+        setStep("phone");
+      } else {
+        setOtpError(plainError(error, "Could not send a new OTP. Please try again."));
       }
+    } finally {
+      setResending(false);
     }
-    if (e.key === "ArrowLeft" && index > 0) inputsRef.current[index - 1]?.focus();
-    if (e.key === "ArrowRight" && index < 5) inputsRef.current[index + 1]?.focus();
-  };
-
-  const handleOtpPaste = (e: React.ClipboardEvent<HTMLInputElement>) => {
-    e.preventDefault();
-    const text = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
-    if (!text) return;
-    const next = [...otp];
-    for (let i = 0; i < 6; i++) next[i] = text[i] ?? "";
-    setOtp(next);
-    inputsRef.current[Math.min(text.length, 5)]?.focus();
-    if (text.length === 6) submitOtp(text);
   };
 
   // ─── Core OTP submission ───────────────────────────────────────────────────
   const submitOtp = async (code: string) => {
-    if (code.length !== 6) {
-      toast.error("Enter the full 6-digit OTP");
+    if (submittingRef.current) return;
+    if (!/^\d{6}$/.test(code)) {
+      setOtpError("Please enter all 6 numbers of the OTP.");
       return;
     }
-
-    const cleaned = phone.replace(/\D/g, "");
-
+    submittingRef.current = true;
     setLoading(true);
+    setOtpError("");
     try {
-      const { data } = await apiClient.post("/users/verify-otp", {
-        phone: cleaned,
-        otp: code,
-      });
+      const { data } = await apiClient.post("/users/verify-otp", { phone: sentPhone, otp: code });
 
       setSession({
         phone: `+91 ${data.phone}`,
@@ -214,27 +330,80 @@ function LoginPage() {
         permissions: data.permissions,
       });
 
-      setLiveMessage("Verification successful. Signing in.");
-      toast.success("Welcome back!");
-      navigate({ to: roleDashboard(data.role) });
-    } catch (error: any) {
-      const inactive = readInactiveError(error);
-      if (inactive) {
-        setLogoutReason("inactive");
-        setInactiveName(inactive.name);
-        setInactiveMessage(inactive.message);
+      setLiveMessage("Signed in.");
+      toast.success(firstName(data.name) ? `Welcome, ${firstName(data.name)}!` : "Welcome!");
+      navigate({ to: roleDashboard(data.role, data.permissions) });
+    } catch (error) {
+      const refusal = refusalNotice(error);
+      if (refusal) {
+        setNotice(refusal);
         setStep("phone");
-        setOtp(["", "", "", "", "", ""]);
+        setOtp(EMPTY_OTP);
         return;
       }
-      setOtpStatus("error");
-      setOtp(["", "", "", "", "", ""]);
+      const code = (error as ApiError)?.response?.data?.code;
+      // A dead code cannot be retried: offer a new one straight away.
+      if (code === "otp_locked" || code === "otp_expired") setResendIn(0);
+      setOtp(EMPTY_OTP);
+      const text = plainError(error, "Could not sign you in. Please try again.");
+      setOtpError(text);
+      setLiveMessage(text);
       setTimeout(() => inputsRef.current[0]?.focus(), 50);
-      setLiveMessage("Incorrect OTP. Please try again.");
-      toast.error(error.response?.data?.message || "Invalid OTP");
     } finally {
+      submittingRef.current = false;
       setLoading(false);
     }
+  };
+
+  // ─── OTP boxes ────────────────────────────────────────────────────────────
+  const fillOtp = (start: number, text: string) => {
+    const digits = text.replace(/\D/g, "").slice(0, 6);
+    if (!digits) return;
+    // A whole code always means the whole code, wherever it was dropped.
+    const from = digits.length === 6 ? 0 : start;
+    const next = [...otp];
+    for (let i = 0; i < digits.length && from + i < 6; i++) next[from + i] = digits[i];
+    setOtp(next);
+    setOtpError("");
+    const firstEmpty = next.findIndex((d) => d === "");
+    inputsRef.current[firstEmpty === -1 ? 5 : firstEmpty]?.focus();
+    if (next.every((d) => d !== "")) submitOtp(next.join(""));
+  };
+
+  const handleOtpChange = (index: number, value: string) => {
+    let digits = value.replace(/\D/g, "");
+    if (value && !digits) return; // a letter: ignore it
+    const old = otp[index];
+    // Typing over a filled box gives two characters: keep the new one.
+    if (old && digits.length === 2) digits = digits[0] === old ? digits[1] : digits[0];
+    // Keyboard OTP suggestions and autofill drop the whole code into one box.
+    if (digits.length > 1) {
+      fillOtp(index, digits);
+      return;
+    }
+    const next = [...otp];
+    next[index] = digits;
+    setOtp(next);
+    setOtpError("");
+    if (digits && index < 5) inputsRef.current[index + 1]?.focus();
+    if (digits && next.every((d) => d !== "")) submitOtp(next.join(""));
+  };
+
+  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Backspace" && !otp[index] && index > 0) {
+      e.preventDefault();
+      const next = [...otp];
+      next[index - 1] = "";
+      setOtp(next);
+      inputsRef.current[index - 1]?.focus();
+    }
+    if (e.key === "ArrowLeft" && index > 0) inputsRef.current[index - 1]?.focus();
+    if (e.key === "ArrowRight" && index < 5) inputsRef.current[index + 1]?.focus();
+  };
+
+  const handleOtpPaste = (index: number, e: React.ClipboardEvent<HTMLInputElement>) => {
+    e.preventDefault();
+    fillOtp(index, e.clipboardData.getData("text"));
   };
 
   const handleVerify = (e: React.FormEvent) => {
@@ -242,27 +411,49 @@ function LoginPage() {
     submitOtp(otp.join(""));
   };
 
-  const handleGoBack = () => {
+  function goBackToPhone() {
     setStep("phone");
-    setOtp(["", "", "", "", "", ""]);
-    setOtpStatus("idle");
+    setOtp(EMPTY_OTP);
+    setOtpError("");
+  }
+
+  const handleSignOut = async () => {
+    if (signingOut) return;
+    setSigningOut(true);
+    // Through the server, so the access log records the sign-out.
+    await logoutAndClear();
+    setSigningOut(false);
+    setExistingSession(null);
+    setStep("phone");
   };
 
   const otpInputClass = [
-    "h-12 w-10 sm:h-14 sm:w-12 rounded-xl border bg-white text-center text-xl font-extrabold",
-    "focus:ring-4 outline-none transition-all shadow-sm select-none",
-    otpStatus === "error"
+    "h-12 w-10 sm:h-14 sm:w-12 rounded-xl border bg-white text-center text-xl font-extrabold text-foreground",
+    "focus:ring-4 outline-none transition-all shadow-sm disabled:opacity-60",
+    otpError
       ? "border-destructive focus:border-destructive focus:ring-destructive/10"
       : "border-border/80 focus:border-primary focus:ring-primary/5",
   ].join(" ");
 
-  // Initials for existing session avatar
   const initials = existingSession?.name
-    ? existingSession.name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
+    ? existingSession.name
+        .split(" ")
+        .map((n) => n[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase()
     : "?";
 
+  const heading = step === "session" ? "Welcome back" : step === "otp" ? "Enter OTP" : "Sign in";
+  const subheading =
+    step === "session"
+      ? "You are already signed in on this phone."
+      : step === "otp"
+        ? "Type the 6-digit OTP shown below."
+        : "Enter your mobile number to get an OTP.";
+
   return (
-    <div className="min-h-screen w-full flex bg-white overflow-hidden">
+    <div className="min-h-[100dvh] w-full flex bg-white overflow-x-hidden">
       {/* ── Left Side: Brand panel (desktop only) ─────────────────────────── */}
       <div className="hidden lg:flex lg:w-1/2 relative bg-primary overflow-hidden items-center justify-center">
         <div className="absolute inset-0 z-0 flex items-center justify-center overflow-hidden">
@@ -287,12 +478,12 @@ function LoginPage() {
               <span className="text-white/60">with precision.</span>
             </h1>
             <p className="text-lg text-white/80 mb-12 leading-relaxed font-medium max-w-md">
-              The next generation HRMS platform designed for modern enterprises.
-              Be On Time, every time.
+              The next generation HRMS platform designed for modern enterprises. Be On Time, every
+              time.
             </p>
             <div className="grid grid-cols-2 gap-8">
               {[
-                { icon: CheckCircle2, label: "Secure Auth" },
+                { icon: CheckCircle2, label: "Phone + OTP sign-in" },
                 { icon: Clock, label: "Real-time Tracking" },
               ].map((item, i) => (
                 <div key={i} className="flex items-center gap-4 text-white/90">
@@ -313,7 +504,7 @@ function LoginPage() {
       </div>
 
       {/* ── Right Side: Login form ─────────────────────────────────────────── */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-12 bg-background relative min-h-screen">
+      <div className="w-full lg:w-1/2 flex items-start sm:items-center justify-center px-4 pt-8 pb-6 sm:p-12 bg-background relative min-h-[100dvh] overflow-hidden">
         <div className="lg:hidden absolute inset-0 bg-primary/5 -z-10" />
         <div className="lg:hidden absolute top-0 right-0 w-64 h-64 bg-primary/10 rounded-full blur-3xl -z-10 -translate-y-1/2 translate-x-1/2" />
 
@@ -327,75 +518,88 @@ function LoginPage() {
           transition={{ duration: 0.6 }}
           className="w-full max-w-md"
         >
-          <div className="lg:hidden flex justify-center mb-10">
-            <div className="h-16 w-16 rounded-2xl bg-white shadow-xl grid place-items-center p-2 border border-border/40">
-              <img src={companyLogo} alt="BOT" className="h-12 w-12" />
+          <div className="lg:hidden flex justify-center mb-5 sm:mb-10">
+            <div className="h-14 w-14 sm:h-16 sm:w-16 rounded-2xl bg-white shadow-xl grid place-items-center p-2 border border-border/40">
+              <img
+                src={companyLogo}
+                alt="BOT"
+                className="h-10 w-10 sm:h-12 sm:w-12 object-contain"
+              />
             </div>
           </div>
 
-          <div className="mb-10 text-center">
-            <h2 className="text-4xl font-extrabold tracking-tight text-foreground mb-3">
-              Welcome Back
+          <div className="mb-6 sm:mb-10 text-center">
+            <h2 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground mb-2">
+              {heading}
             </h2>
-            <p className="text-muted-foreground font-medium text-lg">
-              {step === "session" ? "You're already signed in" : "Please enter your details to sign in"}
-            </p>
+            <p className="text-muted-foreground font-medium text-base sm:text-lg">{subheading}</p>
           </div>
 
           <div className="bg-white/50 backdrop-blur-sm lg:bg-transparent rounded-3xl p-0">
             <AnimatePresence mode="wait">
-
-              {/* ── Step 0: Already logged in ─────────────────────────────── */}
+              {/* ── Step 0: Already signed in ─────────────────────────────── */}
               {step === "session" && existingSession && (
                 <motion.div
                   key="session"
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  className="space-y-6 max-w-sm mx-auto"
+                  className="space-y-5 max-w-sm mx-auto"
                 >
-                  {/* Avatar card */}
-                  <div className="bg-primary/5 rounded-2xl p-6 text-center border border-primary/10 shadow-inner space-y-3">
+                  <div className="bg-primary/5 rounded-2xl p-5 text-center border border-primary/10 shadow-inner space-y-3">
                     <div className="h-16 w-16 rounded-full bg-primary/15 flex items-center justify-center text-2xl font-extrabold text-primary mx-auto border-2 border-primary/20">
                       {initials}
                     </div>
                     <div>
-                      <p className="font-extrabold text-foreground text-xl">{existingSession.name}</p>
+                      <p className="font-extrabold text-foreground text-xl break-words">
+                        {existingSession.name}
+                      </p>
                       <p className="text-xs text-muted-foreground font-semibold uppercase tracking-widest mt-0.5">
                         {roleLabel(existingSession.role)}
                         {existingSession.companyName ? ` · ${existingSession.companyName}` : ""}
                       </p>
                     </div>
-                    <p className="text-[11px] text-muted-foreground/70 font-medium">{existingSession.phone}</p>
+                    <p className="text-sm text-muted-foreground font-medium">
+                      {existingSession.phone}
+                    </p>
                   </div>
 
-                  {/* Continue button */}
                   <Button
                     className="w-full h-14 bg-gradient-primary text-primary-foreground hover:opacity-95 shadow-xl shadow-primary/20 text-base font-bold rounded-2xl transition-all active:scale-[0.98] flex items-center justify-center gap-3"
-                    onClick={() => navigate({ to: roleDashboard(existingSession.role) })}
+                    disabled={signingOut}
+                    onClick={() =>
+                      navigate({
+                        to: roleDashboard(existingSession.role, existingSession.permissions),
+                      })
+                    }
                   >
                     <User className="h-5 w-5" />
-                    Continue to Dashboard
+                    {firstName(existingSession.name)
+                      ? `Continue as ${firstName(existingSession.name)}`
+                      : "Continue"}
                   </Button>
 
                   <div className="flex items-center gap-2">
                     <div className="h-px bg-border flex-1" />
-                    <span className="text-[11px] font-bold text-muted-foreground/50 uppercase tracking-widest px-2">or</span>
+                    <span className="text-xs font-bold text-muted-foreground/70 uppercase tracking-widest px-2">
+                      or
+                    </span>
                     <div className="h-px bg-border flex-1" />
                   </div>
 
-                  {/* Switch account */}
                   <button
                     type="button"
-                    onClick={() => {
-                      clearSession();
-                      setExistingSession(null);
-                      setStep("phone");
-                    }}
-                    className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl border border-destructive/30 text-destructive hover:bg-destructive/5 text-sm font-bold transition-all"
+                    onClick={handleSignOut}
+                    disabled={signingOut}
+                    aria-busy={signingOut}
+                    className="w-full flex items-center justify-center gap-2 h-12 rounded-2xl border border-destructive/30 text-destructive hover:bg-destructive/5 text-sm font-bold transition-all disabled:opacity-60"
                   >
-                    <LogOut className="h-4 w-4" />
-                    Sign out &amp; login as someone else
+                    {signingOut ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <LogOut className="h-4 w-4" />
+                    )}
+                    {signingOut ? "Signing out…" : "Sign out and use another number"}
                   </button>
                 </motion.div>
               )}
@@ -408,61 +612,71 @@ function LoginPage() {
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
                   onSubmit={handleSendOtp}
-                  className="space-y-6"
+                  className="space-y-5 max-w-sm mx-auto"
                   noValidate
                 >
-                  {logoutReason === "another_device" && (
-                    <div className="flex items-start gap-3 bg-orange-50 border border-orange-200 rounded-xl px-4 py-3 text-orange-800">
-                      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-orange-500" />
-                      <p className="text-xs font-semibold leading-relaxed">
-                        You were signed out because your account was logged in on another device.
-                      </p>
-                    </div>
-                  )}
-
-                  {logoutReason === "inactive" && (
-                    <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-800">
-                      <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-red-500" />
-                      <p className="text-xs font-semibold leading-relaxed">
-                        {inactiveMessage
-                          ? inactiveMessage
-                          : `${inactiveName ? `${inactiveName}'s account` : "This account"} has been deactivated. Please contact your administrator.`}
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="space-y-3">
-                    <Label
-                      htmlFor="phone"
-                      className="text-sm font-bold text-muted-foreground/80 block tracking-widest"
+                  {notice && (
+                    <div
+                      role="alert"
+                      className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-red-800"
                     >
-                      Phone Number
+                      <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5 text-red-500" />
+                      <p className="text-sm font-semibold leading-relaxed">{notice}</p>
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    <Label htmlFor="phone" className="text-sm font-bold text-foreground/80 block">
+                      Mobile number
                     </Label>
-                    <div className="relative group max-w-sm mx-auto">
-                      <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-2 text-muted-foreground group-focus-within:text-primary transition-colors border-r border-border/60 pr-3">
+                    <div className="relative group">
+                      <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-2 text-muted-foreground group-focus-within:text-primary transition-colors border-r border-border/60 pr-3 pointer-events-none">
                         <Phone className="h-4 w-4" />
-                        <span className="text-sm font-bold">+91</span>
+                        <span className="text-base font-bold">+91</span>
                       </div>
                       <Input
                         id="phone"
                         ref={phoneRef}
                         type="tel"
                         inputMode="numeric"
-                        autoComplete="tel"
-                        placeholder="88888 88888"
+                        autoComplete="tel-national"
+                        placeholder="98765 43210"
                         value={phone}
-                        onChange={(e) => setPhone(e.target.value.replace(/\D/g, "").slice(0, 10))}
-                        className="pl-[85px] pr-4 sm:pl-24 sm:pr-24 h-14 sm:h-16 text-[18px] sm:text-[28px] rounded-2xl border-border/80 focus:border-primary/40 focus:ring-4 focus:ring-primary/5 transition-all shadow-sm text-center font-bold tracking-widest sm:tracking-[0.25em]"
-                        maxLength={10}
-                        aria-describedby="phone-hint"
+                        onChange={(e) => {
+                          const raw = e.target.value;
+                          setPhone(normalizePhoneInput(raw));
+                          setPhoneError(/[a-z]/i.test(raw) ? "Please type numbers only." : "");
+                        }}
+                        onFocus={() => keepVisible(sendBoxRef.current)}
+                        aria-invalid={!!phoneError}
+                        aria-describedby="phone-hint phone-error"
+                        className={[
+                          "pl-[92px] pr-4 h-14 sm:h-16 text-xl sm:text-2xl rounded-2xl focus:ring-4 focus:ring-primary/5 transition-all shadow-sm font-bold tracking-wider",
+                          phoneError
+                            ? "border-destructive"
+                            : "border-border/80 focus:border-primary/40",
+                        ].join(" ")}
                       />
                     </div>
-                    <p id="phone-hint" className="sr-only">
-                      Enter your 10-digit Indian mobile number. Country code +91 is pre-filled.
-                    </p>
+                    {phoneError ? (
+                      <p
+                        id="phone-error"
+                        role="alert"
+                        className="text-sm font-semibold text-destructive"
+                      >
+                        {phoneError}
+                      </p>
+                    ) : (
+                      <p
+                        id="phone-hint"
+                        className="text-[13px] text-muted-foreground leading-relaxed"
+                      >
+                        Use the number your company added for you.
+                      </p>
+                    )}
                   </div>
 
-                  <div className="max-w-sm mx-auto">
+                  <div ref={sendBoxRef} className="scroll-mb-4">
                     <Button
                       type="submit"
                       disabled={loading}
@@ -476,24 +690,11 @@ function LoginPage() {
                         </>
                       ) : (
                         <>
-                          Continue to OTP <ArrowRight className="h-5 w-5" />
+                          Get OTP <ArrowRight className="h-5 w-5" />
                         </>
                       )}
                     </Button>
                   </div>
-
-                  <div className="flex items-center gap-2 justify-center py-2">
-                    <div className="h-px bg-border flex-1" />
-                    <span className="text-[11px] font-bold text-muted-foreground/60 uppercase tracking-widest px-2">
-                      Secure Access
-                    </span>
-                    <div className="h-px bg-border flex-1" />
-                  </div>
-
-                  <p className="text-xs text-muted-foreground text-center flex items-center justify-center gap-1.5 font-medium">
-                    <ShieldCheck className="h-4 w-4 text-success" />
-                    Encrypted end-to-end verification
-                  </p>
                 </motion.form>
               )}
 
@@ -505,109 +706,145 @@ function LoginPage() {
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
                   onSubmit={handleVerify}
-                  className="space-y-6 max-w-sm mx-auto"
+                  className="space-y-4 sm:space-y-5 max-w-sm mx-auto"
                   noValidate
                 >
-                  <div className="bg-primary/5 rounded-2xl p-6 text-center border border-primary/10 shadow-inner">
-                    <p className="text-sm text-muted-foreground mb-2 font-medium uppercase tracking-widest">
-                      OTP sent to
-                    </p>
-                    <p className="font-extrabold text-primary text-2xl tracking-tighter">
-                      +91 {maskPhone(phone.replace(/\D/g, ""))}
+                  <div className="bg-primary/5 rounded-2xl px-4 py-2.5 text-center border border-primary/10 shadow-inner">
+                    <p className="text-sm text-muted-foreground font-medium">
+                      OTP for{" "}
+                      <span className="font-extrabold text-primary text-lg tracking-tight whitespace-nowrap">
+                        +91 {formatPhone(sentPhone)}
+                      </span>
                     </p>
                   </div>
 
-                  {/* Dynamic OTP hint */}
-                  <div className="flex items-center justify-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-amber-800">
-                    <ShieldCheck className="h-4 w-4 shrink-0 text-amber-500" />
-                    <span className="text-xs font-semibold">
-                      Your OTP: <span className="font-extrabold tracking-widest text-sm">{generatedOtp}</span>
-                    </span>
-                  </div>
+                  {/* No SMS gateway yet: the server returns the code and it is shown here. */}
+                  {generatedOtp && (
+                    <div className="flex flex-col items-center gap-0.5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-2.5 text-amber-900">
+                      <span className="text-sm font-semibold flex items-center gap-1.5">
+                        <ShieldCheck className="h-4 w-4 shrink-0 text-amber-600" />
+                        Your OTP is
+                      </span>
+                      <span
+                        className="font-extrabold tracking-[0.3em] text-2xl"
+                        data-testid="shown-otp"
+                      >
+                        {generatedOtp}
+                      </span>
+                      <span className="text-[13px] text-amber-800/80">
+                        It works for 10 minutes.
+                      </span>
+                    </div>
+                  )}
 
-                  <div className="space-y-4">
-                    <Label className="text-sm font-bold text-muted-foreground/80 block text-center uppercase tracking-widest">
-                      Verification Code
+                  <div className="space-y-3">
+                    <Label className="text-sm font-bold text-foreground/80 block text-center">
+                      Type the OTP here
                     </Label>
-
-                    <AnimatePresence>
-                      {otpStatus === "error" && (
-                        <motion.p
-                          initial={{ opacity: 0, y: -4 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: -4 }}
-                          className="text-sm text-destructive text-center font-semibold"
-                          role="alert"
-                        >
-                          Incorrect code — please try again
-                        </motion.p>
-                      )}
-                    </AnimatePresence>
 
                     <div
                       className="flex justify-center gap-2 sm:gap-3"
                       role="group"
-                      aria-label="6-digit verification code"
+                      aria-label="6-digit OTP"
                     >
                       {otp.map((digit, i) => (
                         <input
                           key={i}
-                          ref={(el) => { inputsRef.current[i] = el; }}
+                          ref={(el) => {
+                            inputsRef.current[i] = el;
+                          }}
                           autoFocus={i === 0}
                           type="text"
                           inputMode="numeric"
+                          autoComplete={i === 0 ? "one-time-code" : "off"}
+                          pattern="[0-9]*"
                           value={digit}
-                          aria-label={`OTP digit ${i + 1}`}
+                          disabled={loading}
+                          aria-label={`OTP number ${i + 1}`}
+                          aria-invalid={!!otpError}
                           onChange={(e) => handleOtpChange(i, e.target.value)}
                           onKeyDown={(e) => handleOtpKeyDown(i, e)}
-                          onPaste={i === 0 ? handleOtpPaste : undefined}
+                          onPaste={(e) => handleOtpPaste(i, e)}
+                          onFocus={(e) => {
+                            e.currentTarget.select();
+                            keepVisible(verifyBoxRef.current);
+                          }}
                           className={otpInputClass}
                         />
                       ))}
                     </div>
+
+                    <AnimatePresence>
+                      {otpError && (
+                        <motion.p
+                          initial={{ opacity: 0, y: -4 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -4 }}
+                          className="text-sm text-destructive text-center font-semibold leading-relaxed"
+                          role="alert"
+                        >
+                          {otpError}
+                        </motion.p>
+                      )}
+                    </AnimatePresence>
                   </div>
 
-                  <Button
-                    type="submit"
-                    disabled={loading}
-                    aria-busy={loading}
-                    className="w-full h-14 bg-gradient-primary text-primary-foreground hover:opacity-95 shadow-xl shadow-primary/20 text-base font-bold rounded-2xl transition-all active:scale-[0.98]"
-                  >
-                    {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : "Verify & Sign In"}
-                  </Button>
+                  <div ref={verifyBoxRef} className="scroll-mb-4">
+                    <Button
+                      type="submit"
+                      disabled={loading}
+                      aria-busy={loading}
+                      className="w-full h-14 bg-gradient-primary text-primary-foreground hover:opacity-95 shadow-xl shadow-primary/20 text-base font-bold rounded-2xl transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+                    >
+                      {loading ? (
+                        <>
+                          <Loader2 className="h-5 w-5 animate-spin" />
+                          <span>Signing in…</span>
+                        </>
+                      ) : (
+                        "Sign in"
+                      )}
+                    </Button>
+                  </div>
 
-                  <div className="flex flex-col items-center gap-4 px-1">
+                  <div className="flex flex-col items-center gap-2 px-1">
                     {resendIn > 0 ? (
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground font-bold bg-muted/30 px-4 py-1.5 rounded-full">
+                      <div
+                        className="flex items-center gap-2 h-11 text-sm text-muted-foreground font-bold px-4"
+                        aria-live="off"
+                      >
                         <Clock className="h-4 w-4 text-primary" />
-                        Resend in <span className="text-foreground">{resendIn}s</span>
+                        Get a new OTP in{" "}
+                        <span className="text-foreground tabular-nums">{resendIn}s</span>
                       </div>
                     ) : (
                       <button
                         type="button"
                         onClick={handleResendOtp}
-                        className="text-sm text-primary font-bold hover:underline bg-primary/5 px-6 py-2 rounded-full transition-all hover:bg-primary/10"
+                        disabled={resending || loading}
+                        className="h-11 min-w-[160px] text-sm text-primary font-bold bg-primary/5 px-6 rounded-full transition-all hover:bg-primary/10 disabled:opacity-60 inline-flex items-center justify-center gap-2"
                       >
-                        Resend OTP
+                        {resending && <Loader2 className="h-4 w-4 animate-spin" />}
+                        {resending ? "Sending…" : "Send a new OTP"}
                       </button>
                     )}
 
                     <button
                       type="button"
-                      onClick={handleGoBack}
-                      className="text-sm text-muted-foreground hover:text-primary font-bold transition-colors underline underline-offset-4"
+                      onClick={goBackToPhone}
+                      disabled={loading}
+                      className="h-11 px-4 text-sm text-muted-foreground hover:text-primary font-bold transition-colors underline underline-offset-4"
                     >
-                      Change phone number
+                      Change mobile number
                     </button>
                   </div>
                 </motion.form>
               )}
-
             </AnimatePresence>
           </div>
 
-          <div className="mt-20 pt-8 border-t border-border/40 text-center lg:text-left">
-            <p className="text-[11px] font-bold text-muted-foreground/50 uppercase tracking-widest">
+          <div className="mt-8 sm:mt-20 pt-6 border-t border-border/40 text-center lg:text-left">
+            <p className="text-[11px] font-bold text-muted-foreground/70 uppercase tracking-widest">
               © {new Date().getFullYear()} BE ON TIME (BOT) Platform
             </p>
           </div>

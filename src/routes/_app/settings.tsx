@@ -30,6 +30,8 @@ import { SettingsGuide, settingsGuideLines } from "@/components/settings/setting
 import { usePermission } from "@/hooks/use-permission";
 import { useFeatureToggles } from "@/hooks/use-feature-toggles";
 import { formatINRFull } from "@/lib/format";
+import { requestErrorMessage } from "@/services/request-error";
+import { NoAccessNotice, PanelLoadError } from "@/components/settings/panel-notices";
 
 export const Route = createFileRoute("/_app/settings")({
   component: SettingsPage,
@@ -45,6 +47,27 @@ function SectionHeader({ icon: Icon, label, description }: { icon: any; label: s
         <h3 className="text-[15px] font-bold text-foreground tracking-tight">{label}</h3>
       </div>
       {description && <p className="text-[12px] text-muted-foreground ml-12">{description}</p>}
+    </div>
+  );
+}
+
+function NumField({ label, hint, value, onChange, min = 0, max, step = 1, suffix }: {
+  label: string; hint?: string; value: number; onChange: (v: number) => void;
+  min?: number; max?: number; step?: number; suffix?: string;
+}) {
+  return (
+    <div className="space-y-1">
+      <Label className="text-[11px] font-bold uppercase tracking-wide">{label}</Label>
+      <div className="relative">
+        <Input
+          type="number" min={min} max={max} step={step}
+          value={Number.isFinite(value) ? value : 0}
+          onChange={(e) => onChange(e.target.value === "" ? 0 : Number(e.target.value))}
+          className={cn("h-10 rounded-xl text-[13px]", suffix && "pr-12")}
+        />
+        {suffix && <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-bold text-muted-foreground">{suffix}</span>}
+      </div>
+      {hint && <p className="text-[11px] text-muted-foreground leading-relaxed">{hint}</p>}
     </div>
   );
 }
@@ -79,17 +102,21 @@ function SettingsPage() {
   const { branches: branchList, isLoading: branchesLoading } = useBranchService();
   const { can } = usePermission();
   const { isFeatureEnabled } = useFeatureToggles();
-  const canCreate = can("settings", "create");
+  const canView = can("settings", "view");
   const canEdit = can("settings", "edit");
-  const canDelete = can("settings", "delete");
+  // Every Settings write is one PUT /settings, which the server gates on the
+  // EDIT right alone -- so "create" or "delete" without "edit" could only ever
+  // fail. Pay-template buttons therefore also need edit.
+  const canCreate = canEdit && can("settings", "create");
+  const canDelete = canEdit && can("settings", "delete");
 
   const tabs = [
-    { id: "general", label: "Org", icon: Building2 },
+    { id: "general", label: "Company", icon: Building2 },
     { id: "branches", label: "Branches", icon: GitBranch },
     { id: "attendance", label: "Attendance", icon: Clock },
     { id: "payroll", label: "Payroll", icon: Banknote },
     { id: "salary_templates", label: "Pay Templates", icon: Receipt },
-    { id: "preferences", label: "Prefs", icon: Bell },
+    { id: "preferences", label: "Preferences", icon: Bell },
     { id: "security", label: "Security", icon: Lock },
     { id: "about", label: "About", icon: Smartphone },
   ] as const;
@@ -103,7 +130,7 @@ function SettingsPage() {
   const [newTemplateName, setNewTemplateName] = useState("");
   const [notif, setNotif] = useState({ email: true, push: true, weekly: false });
   const [accessLogsOpen, setAccessLogsOpen] = useState(false);
-  const { data: sessions, isLoading: isLogsLoading } = useLoginSessions(undefined, 100);
+  const { data: sessions, isLoading: isLogsLoading, isError: sessionsError } = useLoginSessions(undefined, 100);
   const [logsFilter, setLogsFilter] = useState<"all" | "login" | "logout">("all");
   const [logsSearch, setLogsSearch] = useState("");
   const [attendance, setAttendance] = useState({
@@ -124,6 +151,25 @@ function SettingsPage() {
     earlyGrace: 5,
     otThreshold: 9,
     otMultiplier: 1.5,
+    weeklyOT: 45,
+    blockPunchInAfterShiftEnd: true,
+    punchInGraceAfterShiftEndMins: 0,
+    correctionWindowDays: 7,
+    lunchMinGapSeconds: 60,
+    workMinGapSeconds: 60,
+    punchDebounceSeconds: 120,
+    trackingMode: "on_duty" as "on_duty" | "always",
+    officeRadius: 3000,
+    roundingInterval: 0,
+    roundingDirection: "nearest" as "nearest" | "up" | "down",
+    roundingAppliedTo: ["Punch In", "Punch Out"] as string[],
+    halfDayRules: {
+      method: "durationBased" as "durationBased" | "timeBased" | "both",
+      bothLogic: "or" as "or" | "and",
+      cutoffTime: "09:35",
+      minHours: 8,
+      deductLunch: true,
+    },
   });
   const [payroll, setPayroll] = useState({
     enabled: false,
@@ -144,13 +190,22 @@ function SettingsPage() {
     phone: "",
   });
 
-  const [fetchError, setFetchError] = useState(false);
+  // Any failed load, not only a 404. The forms below start from defaults, so
+  // showing them after a failed load meant one click on Save wrote those
+  // defaults over the company's real rules.
+  const [fetchError, setFetchError] = useState<unknown>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  // Settings.employeeSelfService.allowSensitiveEdits -- may employees change
+  // their own name, bank, PAN and Aadhaar in the app? Off unless turned on.
+  const [allowSensitiveEdits, setAllowSensitiveEdits] = useState(false);
+  const [savingSelfService, setSavingSelfService] = useState(false);
+  const [logoPending, setLogoPending] = useState(false);
 
   useEffect(() => {
     setHasMounted(true);
     const fetchSettings = async () => {
       setIsProfileLoading(true);
-      setFetchError(false);
+      setFetchError(null);
       try {
         const { data } = await apiClient.get("/settings");
         
@@ -174,7 +229,7 @@ function SettingsPage() {
           setAttendance({
             defaultShiftId: data.attendance.defaultShiftId || "",
             workDays: data.attendance.workDays || ["M", "T", "W", "Th", "F"],
-            requireLocation: data.attendance.requireLocation ?? false,
+            requireLocation: data.attendance.requireLocation ?? true,
             remotePunch: data.attendance.remotePunch ?? true,
             reqHours: data.attendance.reqHours ?? 8,
             halfDayHours: data.attendance.halfDayHours ?? 4,
@@ -189,6 +244,25 @@ function SettingsPage() {
             earlyGrace: data.attendance.earlyGrace ?? 5,
             otThreshold: data.attendance.otThreshold ?? 9,
             otMultiplier: data.attendance.otMultiplier ?? 1.5,
+            weeklyOT: data.attendance.weeklyOT ?? 45,
+            blockPunchInAfterShiftEnd: data.attendance.blockPunchInAfterShiftEnd ?? true,
+            punchInGraceAfterShiftEndMins: data.attendance.punchInGraceAfterShiftEndMins ?? 0,
+            correctionWindowDays: data.attendance.correctionWindowDays ?? 7,
+            lunchMinGapSeconds: data.attendance.lunchMinGapSeconds ?? 60,
+            workMinGapSeconds: data.attendance.workMinGapSeconds ?? 60,
+            punchDebounceSeconds: data.attendance.punchDebounceSeconds ?? 120,
+            trackingMode: data.attendance.trackingMode === "always" ? "always" : "on_duty",
+            officeRadius: data.attendance.officeRadius ?? 3000,
+            roundingInterval: data.attendance.roundingInterval ?? 0,
+            roundingDirection: data.attendance.roundingDirection || "nearest",
+            roundingAppliedTo: data.attendance.roundingAppliedTo || ["Punch In", "Punch Out"],
+            halfDayRules: {
+              method: data.attendance.halfDayRules?.method || "durationBased",
+              bothLogic: data.attendance.halfDayRules?.bothLogic || "or",
+              cutoffTime: data.attendance.halfDayRules?.cutoffTime || "09:35",
+              minHours: data.attendance.halfDayRules?.minHours ?? 8,
+              deductLunch: data.attendance.halfDayRules?.deductLunch ?? true,
+            },
           });
         }
         
@@ -205,31 +279,33 @@ function SettingsPage() {
           setSalaryTemplates(data.salaryTemplates);
         }
 
+        setAllowSensitiveEdits(data.employeeSelfService?.allowSensitiveEdits === true);
+
         if (data.appearance?.defaultLayout) {
           updateDefaultLayout(data.appearance.defaultLayout);
         }
 
         if (session) {
+          // Company branding only. The company's contact phone and email are
+          // not the signed-in person's: writing them into the session
+          // replaced the admin's own login number wherever it is shown
+          // (header, sidebar, Users) with the office number.
           setSession({
             ...session,
             companyName: data.companyName,
             companyLogo: logoUrl,
             address: data.address,
-            email: data.email,
-            phone: data.phone
           });
         }
       } catch (error: any) {
         console.error("Failed to fetch settings", error);
-        if (error.response?.status === 404) {
-          setFetchError(true);
-        }
+        setFetchError(error || new Error("load failed"));
       } finally {
         setIsProfileLoading(false);
       }
     };
     fetchSettings();
-  }, []);
+  }, [reloadKey]);
 
   const handleCreateTemplate = async () => {
     if (!newTemplateName.trim()) {
@@ -268,35 +344,44 @@ function SettingsPage() {
       setSalaryTemplates(updatedTemplates);
       setIsCreating(false);
       setNewTemplateName("");
-      toast.success("Template created successfully");
+      toast.success("Template created");
     } catch (error) {
-      toast.error("Failed to create template");
+      const message = requestErrorMessage(error, "Could not create the template. Please try again.");
+      if (message) toast.error(message);
     }
   };
 
-  const updateTemplateComponent = async (idx: number, key: string, field: string, value: any) => {
-    const updatedTemplates = [...salaryTemplates];
-    const template = updatedTemplates[idx];
-    
-    template.components = {
-      ...template.components,
-      [key]: {
-        ...template.components[key],
-        [field]: value
-      }
-    };
+  // Edits are made on a copy, so Cancel can put the template back. They used
+  // to change the saved list in place: Cancel only closed the card, and the
+  // abandoned edit was saved along with the next template anyone saved.
+  const [templatesBeforeEdit, setTemplatesBeforeEdit] = useState<{name: string; components: any}[] | null>(null);
+  const startEditTemplate = (idx: number) => {
+    setTemplatesBeforeEdit(JSON.parse(JSON.stringify(salaryTemplates)));
+    setEditingIdx(idx);
+  };
+  const cancelEditTemplate = () => {
+    if (templatesBeforeEdit) setSalaryTemplates(templatesBeforeEdit);
+    setTemplatesBeforeEdit(null);
+    setEditingIdx(null);
+  };
 
-    setSalaryTemplates(updatedTemplates);
+  const updateTemplateComponent = async (idx: number, key: string, field: string, value: any) => {
+    setSalaryTemplates((prev) => prev.map((t, i) => i !== idx ? t : {
+      ...t,
+      components: { ...t.components, [key]: { ...t.components[key], [field]: value } },
+    }));
   };
 
   const saveTemplates = async () => {
     setLoading(true);
     try {
       await apiClient.put("/settings", { salaryTemplates });
-      toast.success("Templates saved successfully");
+      toast.success("Template saved");
+      setTemplatesBeforeEdit(null);
       setEditingIdx(null);
     } catch (error) {
-      toast.error("Failed to save templates");
+      const message = requestErrorMessage(error, "Could not save the template. Please try again.");
+      if (message) toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -309,9 +394,30 @@ function SettingsPage() {
       await apiClient.put("/settings", { salaryTemplates: updatedTemplates });
       setSalaryTemplates(updatedTemplates);
       setDeleteIdx(null);
-      toast.success("Template deleted successfully");
+      toast.success("Template deleted");
     } catch (error) {
-      toast.error("Failed to delete template");
+      const message = requestErrorMessage(error, "Could not delete the template. Please try again.");
+      if (message) toast.error(message);
+    }
+  };
+
+  // Saved the moment it is switched, like a light switch, and put back if the
+  // save fails -- a single yes/no has nothing to review before saving, and a
+  // switch that shows ON while the server still says OFF would mislead.
+  const saveSelfService = async (next: boolean) => {
+    setAllowSensitiveEdits(next);
+    setSavingSelfService(true);
+    try {
+      await apiClient.put("/settings", { employeeSelfService: { allowSensitiveEdits: next } });
+      toast.success(next
+        ? "Employees can now change their bank, PAN and Aadhaar details"
+        : "Only HR can change bank, PAN and Aadhaar details now");
+    } catch (error) {
+      setAllowSensitiveEdits(!next);
+      const message = requestErrorMessage(error, "Could not save. Please try again.");
+      if (message) toast.error(message);
+    } finally {
+      setSavingSelfService(false);
     }
   };
 
@@ -333,6 +439,10 @@ function SettingsPage() {
     });
   }, [sessions, logsFilter, logsSearch]);
 
+  // The newest sign-in recorded for this person. The card used to print the
+  // current clock time as "Last Login".
+  const mySignIn = (sessions ?? []).find((s) => s.action === "login" && !!session?.phone && s.phone === session.phone) || null;
+
   if (!hasMounted) return null;
 
   const logout = async () => {
@@ -341,10 +451,35 @@ function SettingsPage() {
     navigate({ to: "/login" });
   };
 
+  if (!canView) {
+    return (
+      <div className="space-y-6 max-w-4xl mx-auto">
+        <PageHeader title="Settings" description="Company details and the rules the app follows." />
+        <NoAccessNotice
+          title="You don't have access to Settings"
+          message="Ask your company admin to give you the Settings page if you need it."
+        />
+      </div>
+    );
+  }
+
+  if (fetchError && !isProfileLoading) {
+    return (
+      <div className="space-y-6 max-w-4xl mx-auto">
+        <PageHeader title="Settings" description="Company details and the rules the app follows." />
+        <PanelLoadError
+          what="your settings"
+          message={requestErrorMessage(fetchError, "Something went wrong on our side. Please try again in a minute.")}
+          onRetry={() => setReloadKey((k) => k + 1)}
+        />
+      </div>
+    );
+  }
+
   if (isProfileLoading) {
     return (
       <div className="space-y-6 max-w-4xl mx-auto">
-        <PageHeader title="Settings" description="Loading your workspace configurations..." />
+        <PageHeader title="Settings" description="Loading your settings..." />
         <div className="flex gap-2 mb-6 border-b border-border/40 pb-px">
           {[1, 2, 3].map(i => <div key={i} className="h-10 w-32 bg-muted/20 animate-pulse rounded-t-xl" />)}
         </div>
@@ -356,9 +491,15 @@ function SettingsPage() {
   return (
     <div className="space-y-6 max-w-4xl mx-auto pb-20">
       <PageHeader
-        title="Workspace Settings"
-        description="Global configurations for your organization's HRMS environment."
+        title="Settings"
+        description="Company details and the rules the app follows for attendance and pay."
       />
+
+      {!canEdit && (
+        <div role="status" className="rounded-xl border border-border/60 bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground">
+          You can look at these settings but not change them. Ask your company admin if something needs to change.
+        </div>
+      )}
 
       {/* Modern Tab System */}
       <div className="w-full overflow-x-auto scrollbar-none -mx-2 px-2 pb-1">
@@ -402,16 +543,21 @@ function SettingsPage() {
         >
           {activeTab === "attendance" && (
             <div className="space-y-6">
-              <Card className="p-8 border border-border/60 bg-white rounded-2xl shadow-sm">
+              <Card className="p-5 sm:p-8 border border-border/60 bg-white rounded-2xl shadow-sm">
                 <form
                   onSubmit={async (e) => {
                     e.preventDefault();
                     setLoading(true);
                     try {
+                      if (attendance.workDays.length === 0) {
+                        toast.error("Pick at least one work day.");
+                        return;
+                      }
                       await apiClient.put("/settings", { attendance });
-                      toast.success("Attendance rules updated");
+                      toast.success("Attendance rules saved");
                     } catch (error) {
-                      toast.error("Failed to update attendance rules");
+                      const message = requestErrorMessage(error, "Could not save the attendance rules. Please try again.");
+                      if (message) toast.error(message);
                     } finally { setLoading(false); }
                   }}
                   className="space-y-10"
@@ -431,7 +577,7 @@ function SettingsPage() {
                         <div className="rounded-xl border border-border/50 bg-muted/20 p-3.5 space-y-1">
                           <p className="text-[12px] font-semibold text-foreground">Configured in Shift Management</p>
                           <p className="text-[11px] text-muted-foreground leading-relaxed">
-                            Shift timings, working hours, lunch break rules, and grace periods are configured directly per shift under <b>Shift Management</b>. New employees will automatically start on this default shift.
+                            Shift timings, working hours, lunch break rules, and grace periods are configured directly per shift under <b>Shift Management</b>. New employees will automatically start on this default shift. A shift that leaves grace or lunch unset falls back to the <b>Company Fallbacks</b> below.
                           </p>
                         </div>
                       </div>
@@ -439,12 +585,12 @@ function SettingsPage() {
 
                     {/* Punch Controls */}
                     <div className="space-y-6">
-                      <SectionHeader icon={ShieldCheck} label="Punch Controls" description="Security, auto punch-out and session policies." />
+                      <SectionHeader icon={ShieldCheck} label="Punch Controls" description="Where people may punch from, and how often." />
                       <div className="space-y-3">
                         <div className="flex items-center justify-between p-3.5 rounded-xl bg-muted/20 border border-border/40">
                           <div>
                             <div className="text-[13px] font-bold">Geofencing</div>
-                            <div className="text-[11px] text-muted-foreground">Require GPS for every punch.</div>
+                            <div className="text-[11px] text-muted-foreground">Punch-in and punch-out need the phone's location, checked against the employee's branch.</div>
                           </div>
                           <Switch 
                             checked={attendance.requireLocation} 
@@ -454,46 +600,272 @@ function SettingsPage() {
                         <div className="flex items-center justify-between p-3.5 rounded-xl bg-muted/20 border border-border/40">
                           <div>
                             <div className="text-[13px] font-bold">Remote Punch</div>
-                            <div className="text-[11px] text-muted-foreground">Allow clock-in from any location.</div>
+                            <div className="text-[11px] text-muted-foreground">Let employees punch in from outside their branch.</div>
                           </div>
                           <Switch 
                             checked={attendance.remotePunch} 
                             onCheckedChange={(v) => setAttendance(p => ({ ...p, remotePunch: v }))} 
                           />
                         </div>
-                        {isFeatureEnabled("geofenceAutoPunchOut") && (
-                          <div className="flex items-center justify-between p-3.5 rounded-xl bg-muted/20 border border-border/40">
-                            <div>
-                              <div className="text-[13px] font-bold">Auto Punch-Out</div>
-                              <div className="text-[11px] text-muted-foreground">Automatically close shift if employee forgets to punch out.</div>
-                            </div>
-                            <Switch 
-                              checked={attendance.autoPunchOut} 
-                              onCheckedChange={(v) => setAttendance(p => ({ ...p, autoPunchOut: v }))} 
-                            />
-                          </div>
-                        )}
                         <div className="flex items-center justify-between p-3.5 rounded-xl bg-muted/20 border border-border/40">
                           <div>
-                            <div className="text-[13px] font-bold">Multiple Sessions / Punches</div>
-                            <div className="text-[11px] text-muted-foreground">Allow employees to punch in and out multiple times daily.</div>
+                            <div className="text-[13px] font-bold">Several punches a day</div>
+                            <div className="text-[11px] text-muted-foreground">Let employees punch out and back in more than once a day.</div>
                           </div>
                           <Switch 
                             checked={attendance.allowMultiplePunches} 
                             onCheckedChange={(v) => setAttendance(p => ({ ...p, allowMultiplePunches: v }))} 
                           />
                         </div>
+                        {/* When the phone records location, for employees whose tracking is on.
+                            "Always" includes after work, so the choice is spelled out, and
+                            employees are told on their own screen. Needs APK 17 or later:
+                            older phones keep tracking only while punched in. */}
+                        <div className="p-3.5 rounded-xl bg-muted/20 border border-border/40 space-y-3">
+                          <div>
+                            <div className="text-[13px] font-bold">Location tracking</div>
+                            <div className="text-[11px] text-muted-foreground">
+                              For employees whose tracking is switched on (on the employee or their department).
+                            </div>
+                          </div>
+                          <div role="radiogroup" aria-label="Location tracking" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {([
+                              { value: "on_duty", title: "On duty only", hint: "From punch-in to punch-out, lunch included." },
+                              { value: "always", title: "Always", hint: "All the time, including after work, nights and days off." },
+                            ] as const).map((opt) => (
+                              <button
+                                key={opt.value}
+                                type="button"
+                                role="radio"
+                                aria-checked={attendance.trackingMode === opt.value}
+                                onClick={() => setAttendance(p => ({ ...p, trackingMode: opt.value }))}
+                                className={`min-h-[44px] text-left rounded-lg border px-3 py-2 transition-colors ${attendance.trackingMode === opt.value ? "border-primary bg-primary/5" : "border-border/50 hover:border-primary/40"}`}
+                              >
+                                <div className="text-[13px] font-semibold">{opt.title}</div>
+                                <div className="text-[11px] text-muted-foreground">{opt.hint}</div>
+                              </button>
+                            ))}
+                          </div>
+                          {attendance.trackingMode === "always" && (
+                            <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-400">
+                              Employees are told on their phone that their location is recorded all the time, and the phone shows a permanent
+                              "Location sharing is on" notification. Only phones on app version 17 or later can do this; older phones keep
+                              tracking only while punched in. Make sure your employees have agreed to this.
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
 
+                  {/* Company-wide values the backend still reads. They are not
+                      duplicates of the shift fields: a shift overrides each one
+                      only when it sets its own, so these are what applies to
+                      every shift that leaves a field at 0 or on "Company default". */}
                   <div className="space-y-6 border-t border-border/40 pt-8">
-                    <SectionHeader icon={CalendarDays} label="Active Work Days" description="Select the days when attendance is mandatory." />
+                    <SectionHeader icon={Timer} label="Company Fallbacks" description="Apply to any shift that does not set its own value. A shift's own grace or lunch always wins." />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <NumField label="Late arrival grace" suffix="mins" value={attendance.lateGrace}
+                        onChange={(v) => setAttendance(p => ({ ...p, lateGrace: v }))}
+                        hint="Used when the shift's Late Punch In is 0." />
+                      <NumField label="Early departure grace" suffix="mins" value={attendance.earlyGrace}
+                        onChange={(v) => setAttendance(p => ({ ...p, earlyGrace: v }))}
+                        hint="Used when the shift's Early Punch Out is 0." />
+                      <NumField label="Company default lunch" suffix="mins" value={attendance.minLunch}
+                        onChange={(v) => setAttendance(p => ({ ...p, minLunch: v }))}
+                        hint={`Deducted on shifts whose lunch is "Company default". At least this much, more if a longer break is punched.`} />
+                      <NumField label="Standard day" suffix="hrs" step={0.5} value={attendance.reqHours}
+                        onChange={(v) => setAttendance(p => ({ ...p, reqHours: v }))}
+                        hint="Sets the hourly rate for overtime, and credits daily-wage staff on a day with no punch times." />
+                      <NumField label="Half-day credit" suffix="hrs" step={0.5} value={attendance.halfDayHours}
+                        onChange={(v) => setAttendance(p => ({ ...p, halfDayHours: v }))}
+                        hint="Hours credited to daily-wage staff for a half day with no punch times." />
+                      <NumField label="Longest lunch" suffix="mins" max={600} value={attendance.maxLunch}
+                        onChange={(v) => setAttendance(p => ({ ...p, maxLunch: v }))}
+                        hint="A longer break is marked as an overrun on the Attendance page. It does not change pay." />
+                    </div>
+                  </div>
+
+                  <div className="space-y-6 border-t border-border/40 pt-8">
+                    <SectionHeader icon={CalendarDays} label="Half-Day Rules" description="Decide a half day for employees whose shift sets no grace of its own (both shift grace boxes at 0)." />
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {([
+                        { value: "durationBased", label: "Duration only", desc: "Half day if net hours worked are below the minimum." },
+                        { value: "timeBased", label: "Cut-off time only", desc: "Half day if punch-in is after the cut-off." },
+                        { value: "both", label: "Both", desc: "Combine the two rules, as set below." },
+                      ] as const).map(opt => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setAttendance(p => ({ ...p, halfDayRules: { ...p.halfDayRules, method: opt.value } }))}
+                          className={cn(
+                            "w-full text-left p-3.5 rounded-xl border-2 transition-all",
+                            attendance.halfDayRules.method === opt.value
+                              ? "border-primary bg-primary/5 text-primary"
+                              : "border-muted bg-muted/10 hover:border-primary/30"
+                          )}
+                        >
+                          <div className="text-[13px] font-bold">{opt.label}</div>
+                          <div className="text-[11px] text-muted-foreground mt-0.5">{opt.desc}</div>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      {attendance.halfDayRules.method !== "durationBased" && (
+                        <div className="space-y-1">
+                          <Label className="text-[11px] font-bold uppercase tracking-wide">Late cut-off</Label>
+                          <Input type="time" value={attendance.halfDayRules.cutoffTime}
+                            onChange={(e) => setAttendance(p => ({ ...p, halfDayRules: { ...p.halfDayRules, cutoffTime: e.target.value } }))}
+                            className="h-10 rounded-xl text-[13px]" />
+                          <p className="text-[11px] text-muted-foreground">Exactly {formatTime12h(attendance.halfDayRules.cutoffTime)} is still on time.</p>
+                        </div>
+                      )}
+                      {attendance.halfDayRules.method !== "timeBased" && (
+                        <NumField label="Minimum hours" suffix="hrs" step={0.5} value={attendance.halfDayRules.minHours}
+                          onChange={(v) => setAttendance(p => ({ ...p, halfDayRules: { ...p.halfDayRules, minHours: v } }))}
+                          hint="Net worked time below this is a half day." />
+                      )}
+                      {attendance.halfDayRules.method === "both" && (
+                        <div className="space-y-1">
+                          <Label className="text-[11px] font-bold uppercase tracking-wide">Combine with</Label>
+                          <select
+                            value={attendance.halfDayRules.bothLogic}
+                            onChange={(e) => setAttendance(p => ({ ...p, halfDayRules: { ...p.halfDayRules, bothLogic: e.target.value as "or" | "and" } }))}
+                            className="w-full h-10 rounded-xl border border-border/60 bg-muted/10 text-[13px] px-3 font-medium"
+                          >
+                            <option value="or">OR: either rule alone makes a half day</option>
+                            <option value="and">AND: both must be true</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between p-3.5 rounded-xl bg-muted/20 border border-border/40">
+                      <div>
+                        <div className="text-[13px] font-bold">Deduct lunch from worked hours</div>
+                        <div className="text-[11px] text-muted-foreground">Turning this off stops lunch being deducted for everyone, on every shift, whatever the shift's own lunch setting.</div>
+                      </div>
+                      <Switch
+                        checked={attendance.halfDayRules.deductLunch}
+                        onCheckedChange={(v) => setAttendance(p => ({ ...p, halfDayRules: { ...p.halfDayRules, deductLunch: v } }))}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-6 border-t border-border/40 pt-8">
+                    <SectionHeader icon={Banknote} label="Overtime" description="Monthly-salaried staff only. Hours beyond the threshold are paid at the multiplier on the salary run." />
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <NumField label="Daily threshold" suffix="hrs" min={1} step={0.5} value={attendance.otThreshold}
+                        onChange={(v) => setAttendance(p => ({ ...p, otThreshold: v }))}
+                        hint="Worked hours in a day above this count as overtime." />
+                      <NumField label="Pay multiplier" suffix="×" step={0.25} value={attendance.otMultiplier}
+                        onChange={(v) => setAttendance(p => ({ ...p, otMultiplier: v }))}
+                        hint="0 turns overtime pay off." />
+                      <NumField label="Weekly cap" suffix="hrs" min={1} value={attendance.weeklyOT}
+                        onChange={(v) => setAttendance(p => ({ ...p, weeklyOT: v }))}
+                        hint="The most overtime hours paid per week." />
+                    </div>
+                  </div>
+
+                  <div className="space-y-6 border-t border-border/40 pt-8">
+                    <SectionHeader icon={Clock} label="Punch Rounding & Late Punch-In" description="Rounding changes the stored punch time itself, before lateness, half-day and payroll are worked out." />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1">
+                        <Label className="text-[11px] font-bold uppercase tracking-wide">Round punches to</Label>
+                        <select
+                          value={attendance.roundingInterval}
+                          onChange={(e) => setAttendance(p => ({ ...p, roundingInterval: Number(e.target.value) }))}
+                          className="w-full h-10 rounded-xl border border-border/60 bg-muted/10 text-[13px] px-3 font-medium"
+                        >
+                          <option value={0}>Off (exact time)</option>
+                          {[1, 5, 10, 15, 30, 60].map(m => <option key={m} value={m}>{m} mins</option>)}
+                        </select>
+                      </div>
+                      {attendance.roundingInterval > 0 && (
+                        <div className="space-y-1">
+                          <Label className="text-[11px] font-bold uppercase tracking-wide">Direction</Label>
+                          <select
+                            value={attendance.roundingDirection}
+                            onChange={(e) => setAttendance(p => ({ ...p, roundingDirection: e.target.value as "nearest" | "up" | "down" }))}
+                            className="w-full h-10 rounded-xl border border-border/60 bg-muted/10 text-[13px] px-3 font-medium"
+                          >
+                            <option value="nearest">Nearest</option>
+                            <option value="up">Up</option>
+                            <option value="down">Down</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                    {attendance.roundingInterval > 0 && (
+                      <div className="flex flex-wrap gap-2">
+                        {["Punch In", "Punch Out", "Lunch In", "Lunch Out"].map(item => {
+                          const on = attendance.roundingAppliedTo.includes(item);
+                          return (
+                            <button
+                              key={item}
+                              type="button"
+                              onClick={() => setAttendance(p => ({
+                                ...p,
+                                roundingAppliedTo: on ? p.roundingAppliedTo.filter(i => i !== item) : [...p.roundingAppliedTo, item],
+                              }))}
+                              className={cn(
+                                "px-3 py-1.5 rounded-xl text-[11px] font-bold transition-all border",
+                                on ? "bg-primary/10 border-primary/30 text-primary" : "bg-muted/10 border-border/60 text-muted-foreground hover:border-primary/30"
+                              )}
+                            >
+                              {item}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between p-3.5 rounded-xl bg-muted/20 border border-border/40">
+                      <div>
+                        <div className="text-[13px] font-bold">Close punch-in after shift end</div>
+                        <div className="text-[11px] text-muted-foreground">Refuse a new punch-in once the shift is over. Punching out is never blocked. Turn off for 24/7 operations.</div>
+                      </div>
+                      <Switch
+                        checked={attendance.blockPunchInAfterShiftEnd}
+                        onCheckedChange={(v) => setAttendance(p => ({ ...p, blockPunchInAfterShiftEnd: v }))}
+                      />
+                    </div>
+                    {attendance.blockPunchInAfterShiftEnd && (
+                      <div className="max-w-xs">
+                        <NumField label="Late punch-in window" suffix="mins" value={attendance.punchInGraceAfterShiftEndMins}
+                          onChange={(v) => setAttendance(p => ({ ...p, punchInGraceAfterShiftEndMins: v }))}
+                          hint="Minutes past shift end during which a punch-in is still accepted." />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-6 border-t border-border/40 pt-8">
+                    <SectionHeader icon={ShieldCheck} label="Punch Safeguards" description="Stop accidental double taps, and set how far back a missed punch can be fixed." />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                      <NumField label="Correction window" suffix="days" min={1} max={90} value={attendance.correctionWindowDays}
+                        onChange={(v) => setAttendance(p => ({ ...p, correctionWindowDays: v }))}
+                        hint="How many days back an employee can ask to fix a forgotten punch. Admins are not limited." />
+                      <NumField label="Shortest lunch break" suffix="secs" max={3600} value={attendance.lunchMinGapSeconds}
+                        onChange={(v) => setAttendance(p => ({ ...p, lunchMinGapSeconds: v }))}
+                        hint="In the app, ending lunch sooner than this after starting it is refused. 0 turns it off." />
+                      <NumField label="Shortest work stretch" suffix="secs" max={3600} value={attendance.workMinGapSeconds}
+                        onChange={(v) => setAttendance(p => ({ ...p, workMinGapSeconds: v }))}
+                        hint="In the app, starting lunch or punching out this soon after the previous punch is refused. 0 turns it off." />
+                      <NumField label="Machine double-tap window" suffix="secs" max={3600} value={attendance.punchDebounceSeconds}
+                        onChange={(v) => setAttendance(p => ({ ...p, punchDebounceSeconds: v }))}
+                        hint="Biometric machines only: a second tap by the same person within this time is ignored. 0 turns it off." />
+                      <NumField label="Default fence radius" suffix="m" min={50} max={100000} step={50} value={attendance.officeRadius}
+                        onChange={(v) => setAttendance(p => ({ ...p, officeRadius: v }))}
+                        hint="Used by any branch that has no radius of its own." />
+                    </div>
+                  </div>
+
+                  <div className="space-y-6 border-t border-border/40 pt-8">
+                    <SectionHeader icon={CalendarDays} label="Active Work Days" description="Days people are expected at work. A shift's own work days, or an employee's weekly holidays, take priority." />
                     <div className="flex flex-wrap gap-3">
                       {["M", "T", "W", "Th", "F", "Sa", "Su"].map(day => (
                         <button
                           key={day}
                           type="button"
+                          aria-pressed={attendance.workDays.includes(day)}
                           onClick={() => {
                             const newDays = attendance.workDays.includes(day)
                               ? attendance.workDays.filter(d => d !== day)
@@ -511,6 +883,9 @@ function SettingsPage() {
                         </button>
                       ))}
                     </div>
+                    {attendance.workDays.length === 0 && (
+                      <p className="text-[12px] font-medium text-destructive">Pick at least one work day.</p>
+                    )}
                   </div>
 
                   {canEdit && (
@@ -520,7 +895,7 @@ function SettingsPage() {
                         loading={loading}
                         variant="add"
                         showLabel
-                        label="Apply Attendance Rules"
+                        label="Save Attendance Rules"
                         className="px-10 h-11 rounded-xl shadow-lg shadow-primary/20"
                       />
                     </div>
@@ -532,16 +907,17 @@ function SettingsPage() {
 
           {activeTab === "payroll" && (
             <div className="space-y-6">
-              <Card className="p-8 border border-border/60 bg-white rounded-2xl shadow-sm">
+              <Card className="p-5 sm:p-8 border border-border/60 bg-white rounded-2xl shadow-sm">
                 <form
                   onSubmit={async (e) => {
                     e.preventDefault();
                     setLoading(true);
                     try {
                       await apiClient.put("/settings", { payroll });
-                      toast.success("Payroll rules updated");
-                    } catch {
-                      toast.error("Failed to update payroll rules");
+                      toast.success("Payroll rules saved");
+                    } catch (error) {
+                      const message = requestErrorMessage(error, "Could not save the payroll rules. Please try again.");
+                      if (message) toast.error(message);
                     } finally { setLoading(false); }
                   }}
                   className="space-y-10"
@@ -549,7 +925,7 @@ function SettingsPage() {
                   {/* Master toggle */}
                   <div>
                     <SectionHeader icon={Banknote} label="Deterministic Payroll Engine"
-                      description="When ON, every rupee is derived from the 8-bucket day classification. When OFF, the legacy formula is used — safe for existing tenants." />
+                      description="When on, every day of the month is sorted into one kind (present, half day, leave, weekly off and so on) and paid by the weights below. When off, the older salary formula is used." />
                     <div className="flex items-center justify-between p-4 rounded-xl bg-muted/20 border border-border/40">
                       <div>
                         <div className="text-[13px] font-bold">Enable Payroll Engine</div>
@@ -620,9 +996,9 @@ function SettingsPage() {
                           <div className="space-y-1">
                             <Label className="text-[11px] font-bold uppercase tracking-wide">Decimal places</Label>
                             <Input
-                              type="number" min={0} max={4}
+                              type="number" min={0} max={4} step={1}
                               value={payroll.rounding.precision}
-                              onChange={(e) => setPayroll(p => ({ ...p, rounding: { ...p.rounding, precision: Number(e.target.value) } }))}
+                              onChange={(e) => setPayroll(p => ({ ...p, rounding: { ...p.rounding, precision: Math.min(4, Math.max(0, Math.round(Number(e.target.value) || 0))) } }))}
                               className="h-10 rounded-xl text-[13px]"
                             />
                           </div>
@@ -650,7 +1026,7 @@ function SettingsPage() {
                             }))}
                             className="h-10 rounded-xl text-[13px]"
                           />
-                          <div className="text-[10px] text-muted-foreground text-right font-medium">{(weight * 100).toFixed(0)}%</div>
+                          <div className="text-[11px] text-muted-foreground text-right font-medium">{(weight * 100).toFixed(0)}%</div>
                         </div>
                       ))}
                     </div>
@@ -700,7 +1076,7 @@ function SettingsPage() {
                         <h4 className="font-bold text-primary flex items-center gap-2">
                           <Plus className="h-4 w-4" /> New Template
                         </h4>
-                        <Button variant="ghost" size="sm" onClick={() => setIsCreating(false)} className="h-8 w-8 p-0 rounded-lg">
+                        <Button variant="ghost" size="sm" aria-label="Close" onClick={() => setIsCreating(false)} className="h-10 w-10 p-0 rounded-lg">
                           <X className="h-4 w-4" />
                         </Button>
                       </div>
@@ -709,6 +1085,7 @@ function SettingsPage() {
                           placeholder="Template Name (e.g. Senior Developer)" 
                           className="h-11 bg-white rounded-xl"
                           value={newTemplateName}
+                          maxLength={60}
                           onChange={(e) => setNewTemplateName(e.target.value)}
                           autoFocus
                           onKeyDown={(e) => e.key === 'Enter' && handleCreateTemplate()}
@@ -731,7 +1108,7 @@ function SettingsPage() {
                                 ? "col-span-full border-primary bg-primary/5 shadow-elegant ring-1 ring-primary/20" 
                                 : "border-border/60 bg-muted/10 hover:bg-white hover:border-primary/30 hover:shadow-md cursor-pointer group"
                             )}
-                            onClick={() => !isEditing && canEdit && setEditingIdx(idx)}
+                            onClick={() => !isEditing && canEdit && editingIdx === null && startEditTemplate(idx)}
                           >
                             <div className="flex items-center justify-between mb-4">
                               <div className="flex items-center gap-3">
@@ -744,19 +1121,19 @@ function SettingsPage() {
                                 </div>
                                 <div>
                                   <h4 className="font-black text-[15px] tracking-tight">{template.name}</h4>
-                                  {!isEditing && <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest opacity-60">0 Employees Linked</span>}
+                                  {!isEditing && canEdit && <span className="text-[11px] font-medium text-muted-foreground">Tap to edit</span>}
                                 </div>
                               </div>
                               <div className="flex gap-2">
                                 {isEditing ? (
-                                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setEditingIdx(null); }} className="h-8 w-8 p-0 rounded-lg">
+                                  <Button variant="ghost" size="sm" aria-label="Close without saving" onClick={(e) => { e.stopPropagation(); cancelEditTemplate(); }} className="h-10 w-10 p-0 rounded-lg">
                                     <X className="h-4 w-4" />
                                   </Button>
                                 ) : canDelete ? (
                                   <ActionButton
                                     icon={Trash2}
                                     variant="delete"
-                                    className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    className="h-10 w-10"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setDeleteIdx(idx);
@@ -813,7 +1190,7 @@ function SettingsPage() {
                                               className="scale-75 cursor-pointer"
                                               id={`incl-${idx}-${key}`}
                                             />
-                                            <label htmlFor={`incl-${idx}-${key}`} className="text-[9px] font-bold text-muted-foreground cursor-pointer whitespace-nowrap">Incl.</label>
+                                            <label htmlFor={`incl-${idx}-${key}`} className="text-[11px] font-bold text-muted-foreground cursor-pointer whitespace-nowrap">In total</label>
                                           </div>
                                         </div>
                                       )}
@@ -821,9 +1198,9 @@ function SettingsPage() {
                                   ))}
                                 </div>
                                 <div className="flex justify-end gap-3 pt-4 border-t border-border/40">
-                                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); setEditingIdx(null); }} className="font-bold text-[12px] rounded-xl">Cancel</Button>
+                                  <Button variant="ghost" size="sm" onClick={(e) => { e.stopPropagation(); cancelEditTemplate(); }} className="h-10 font-bold text-[12px] rounded-xl">Cancel</Button>
                                   {canEdit && (
-                                    <Button size="sm" onClick={(e) => { e.stopPropagation(); saveTemplates(); }} loading={loading} className="font-bold text-[12px] rounded-xl px-6 shadow-md shadow-primary/20">Save Template</Button>
+                                    <Button size="sm" onClick={(e) => { e.stopPropagation(); saveTemplates(); }} loading={loading} className="h-10 font-bold text-[12px] rounded-xl px-6 shadow-md shadow-primary/20">Save Template</Button>
                                   )}
                                 </div>
                               </div>
@@ -862,7 +1239,7 @@ function SettingsPage() {
                   <h3 className="text-[15px] font-bold text-foreground">Branches</h3>
                   <p className="text-[12px] text-muted-foreground mt-0.5">All office locations in your organisation</p>
                 </div>
-                <Button size="sm" onClick={() => navigate({ to: "/branches" })} className="font-bold gap-2 rounded-xl h-9 px-5 text-[13px]">
+                <Button size="sm" onClick={() => navigate({ to: "/branches" })} className="font-bold gap-2 rounded-xl h-10 px-5 text-[13px]">
                   <Plus className="h-4 w-4" /> Manage Branches
                 </Button>
               </div>
@@ -876,7 +1253,7 @@ function SettingsPage() {
                   </div>
                   <p className="text-[14px] font-semibold text-foreground mb-1">No branches yet</p>
                   <p className="text-[12px] text-muted-foreground mb-5">Add your first branch to get started.</p>
-                  <Button size="sm" onClick={() => navigate({ to: "/branches" })} className="font-bold rounded-xl h-9 px-6 text-[13px]">
+                  <Button size="sm" onClick={() => navigate({ to: "/branches" })} className="font-bold rounded-xl h-10 px-6 text-[13px]">
                     Go to Branches →
                   </Button>
                 </Card>
@@ -894,7 +1271,9 @@ function SettingsPage() {
                           <div className="flex items-center gap-3 mt-2">
                             <span className="inline-flex items-center gap-1 text-[11px] font-medium text-primary bg-primary/8 px-2 py-0.5 rounded-lg">
                               <Globe className="h-3 w-3" />
-                              {b.latitude.toFixed(2)}, {b.longitude.toFixed(2)}
+                              {b.latitude != null && b.longitude != null && Number.isFinite(Number(b.latitude)) && Number.isFinite(Number(b.longitude))
+                                ? `${Number(b.latitude).toFixed(2)}, ${Number(b.longitude).toFixed(2)}`
+                                : "No location set"}
                             </span>
                             {(b.employees ?? 0) > 0 && (
                               <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg">
@@ -904,7 +1283,7 @@ function SettingsPage() {
                           </div>
                         </div>
                       </div>
-                      <p className="text-[10px] text-muted-foreground/60 mt-3 text-right">
+                      <p className="text-[11px] text-muted-foreground mt-3 text-right">
                         Added {new Date(b.createdAt).toLocaleDateString()}
                       </p>
                     </Card>
@@ -917,7 +1296,7 @@ function SettingsPage() {
             <div className="space-y-6">
               {/* Profile Overview Card */}
               <Card className="p-0 border border-border/60 bg-white rounded-2xl shadow-sm overflow-hidden">
-                <div className="p-8 bg-linear-to-br from-primary/5 via-transparent to-transparent border-b border-border/40">
+                <div className="p-5 sm:p-8 bg-linear-to-br from-primary/5 via-transparent to-transparent border-b border-border/40">
                   <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
                     <div className="relative group">
                       <div className="h-28 w-28 rounded-3xl bg-white shadow-xl border-4 border-white overflow-hidden ring-1 ring-border/20">
@@ -936,6 +1315,8 @@ function SettingsPage() {
                       </div>
                       {canEdit && (
                         <button
+                          type="button"
+                          aria-label="Choose a new logo"
                           onClick={() => document.getElementById("logo-upload")?.click()}
                           className="absolute -bottom-2 -right-2 h-10 w-10 rounded-xl bg-white text-primary shadow-xl border border-border/60 grid place-items-center hover:scale-110 active:scale-95 transition-all"
                         >
@@ -946,10 +1327,23 @@ function SettingsPage() {
                         type="file"
                         id="logo-upload"
                         className="hidden"
-                        accept="image/*"
+                        accept="image/png,image/jpeg,image/webp"
                         onChange={(e) => {
                           const file = e.target.files?.[0];
-                          if (file) setCompany(prev => ({ ...prev, logo: URL.createObjectURL(file) }));
+                          if (!file) return;
+                          // Same limits as the server, checked before anything is sent.
+                          if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
+                            toast.error("The logo must be a JPG, PNG or WebP image.");
+                            e.target.value = "";
+                            return;
+                          }
+                          if (file.size > 2 * 1024 * 1024) {
+                            toast.error("The logo is too large. Use an image under 2 MB.");
+                            e.target.value = "";
+                            return;
+                          }
+                          setLogoPending(true);
+                          setCompany(prev => ({ ...prev, logo: URL.createObjectURL(file) }));
                         }}
                       />
                     </div>
@@ -957,18 +1351,22 @@ function SettingsPage() {
                     <div className="flex-1 space-y-1.5">
                       <h2 className="text-2xl font-black tracking-tight text-foreground">{company.name || "Set Company Name"}</h2>
                       <div className="flex flex-wrap items-center gap-3">
-                        <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 text-[10px] font-bold px-2 py-0.5 rounded-lg gap-1">
-                          <CheckCircle2 className="h-3 w-3" /> VERIFIED BUSINESS
-                        </Badge>
                         <span className="text-[12px] text-muted-foreground flex items-center gap-1.5 font-medium">
                           <MapPin className="h-3.5 w-3.5" /> {company.address || "No address set"}
                         </span>
                       </div>
+                      {canEdit && (
+                        <p className={cn("text-[12px]", logoPending ? "font-semibold text-primary" : "text-muted-foreground")}>
+                          {logoPending
+                            ? "New logo chosen. Press Save Changes to keep it."
+                            : "Logo: JPG, PNG or WebP, up to 2 MB."}
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>
 
-                <div className="p-8">
+                <div className="p-5 sm:p-8">
                   <form
                     onSubmit={async (e) => {
                       e.preventDefault();
@@ -979,8 +1377,9 @@ function SettingsPage() {
                         formData.append("address", company.address);
                         formData.append("email", company.email);
                         formData.append("phone", company.phone);
-                        formData.append("notifications", JSON.stringify(notif));
-                        formData.append("appearance", JSON.stringify({ defaultLayout }));
+                        // Only this tab's own fields. It used to send the
+                        // Preferences tab's switches too, so saving the
+                        // company name also saved whatever those showed.
                         
                         const logoFile = (document.getElementById("logo-upload") as HTMLInputElement)?.files?.[0];
                         if (logoFile) formData.append("logo", logoFile);
@@ -994,10 +1393,14 @@ function SettingsPage() {
                           : company.logo;
 
                         setCompany(prev => ({ ...prev, logo: logoUrl }));
-                        if (session) setSession({ ...session, companyName: data.companyName, companyLogo: logoUrl, address: data.address, email: data.email, phone: data.phone });
-                        toast.success("Profile updated successfully");
+                        setLogoPending(false);
+                        const input = document.getElementById("logo-upload") as HTMLInputElement | null;
+                        if (input) input.value = "";
+                        if (session) setSession({ ...session, companyName: data.companyName, companyLogo: logoUrl, address: data.address });
+                        toast.success("Company details saved");
                       } catch (error: any) {
-                        toast.error(error.response?.data?.message || "Update failed");
+                        const message = requestErrorMessage(error, "Could not save the company details. Please try again.");
+                        if (message) toast.error(message);
                       } finally { setLoading(false); }
                     }}
                     className="space-y-8"
@@ -1006,15 +1409,17 @@ function SettingsPage() {
                       <div className="space-y-6">
                         <SectionHeader icon={Building2} label="Organization Details" description="Basic identification info for your company." />
                         <FormInput 
-                          label="Company Display Name" 
-                          placeholder="e.g. Acme Corporation" 
+                          label="Company Name"
+                          placeholder="e.g. Sharma Traders"
+                          maxLength={120} 
                           icon={Building2}
                           value={company.name} 
                           onChange={(e) => setCompany(prev => ({ ...prev, name: e.target.value }))} 
                         />
                         <FormInput 
-                          label="Headquarters Address" 
-                          placeholder="Full office address" 
+                          label="Head Office Address"
+                          placeholder="Full office address"
+                          maxLength={500} 
                           icon={MapPin}
                           value={company.address} 
                           onChange={(e) => setCompany(prev => ({ ...prev, address: e.target.value }))} 
@@ -1024,16 +1429,19 @@ function SettingsPage() {
                       <div className="space-y-6">
                         <SectionHeader icon={Mail} label="Contact Information" description="Official communication channels." />
                         <FormInput 
-                          label="Administrative Email" 
+                          label="Email"
                           type="email"
-                          placeholder="admin@company.com" 
+                          placeholder="hr@company.com"
+                          maxLength={254} 
                           icon={Mail}
                           value={company.email} 
                           onChange={(e) => setCompany(prev => ({ ...prev, email: e.target.value }))} 
                         />
                         <FormInput 
-                          label="Official Phone Number" 
-                          placeholder="+1 (555) 000-0000" 
+                          label="Phone Number"
+                          placeholder="98765 43210"
+                          inputMode="tel"
+                          maxLength={20} 
                           icon={Phone}
                           value={company.phone} 
                           onChange={(e) => setCompany(prev => ({ ...prev, phone: e.target.value }))} 
@@ -1042,8 +1450,8 @@ function SettingsPage() {
                     </div>
 
                     <div className="pt-4 flex items-center justify-between border-t border-border/40">
-                      <p className="text-[11px] text-muted-foreground font-medium max-w-xs italic">
-                        All changes to company profile will be reflected across official reports and employee dashboards.
+                      <p className="text-[12px] text-muted-foreground max-w-xs">
+                        The name and logo appear in this panel's header and on payslips.
                       </p>
                       {canEdit && (
                         <ActionButton
@@ -1065,9 +1473,12 @@ function SettingsPage() {
           {activeTab === "preferences" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Notifications Card */}
-              <Card className="p-7 border border-border/60 bg-white rounded-2xl shadow-sm">
-                <SectionHeader icon={Bell} label="Notification Channels" description="Configure how you receive system alerts." />
-                <div className="space-y-1 mt-6">
+              <Card className="p-5 sm:p-7 border border-border/60 bg-white rounded-2xl shadow-sm">
+                <SectionHeader icon={Bell} label="Email and push alerts" description="Not available yet." />
+                <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
+                  No email, SMS or push service is connected yet, so the app does not send any alerts. These switches will be turned on once alerts are available.
+                </p>
+                <div className="space-y-1 mt-4 opacity-60" aria-disabled="true">
                   {[
                     { key: "email" as const, title: "Email Broadcasts", desc: "Daily summary of employee activities." },
                     { key: "push" as const, title: "Desktop Push", desc: "Immediate browser notifications for alerts." },
@@ -1076,15 +1487,13 @@ function SettingsPage() {
                     <div key={key}>
                       <div className="flex items-center justify-between py-4 hover:bg-muted/5 px-2 -mx-2 rounded-xl transition-colors">
                         <div className="space-y-0.5">
-                          <div className="text-[13px] font-black text-foreground uppercase tracking-tight">{title}</div>
+                          <div className="text-[13px] font-bold text-foreground">{title}</div>
                           <div className="text-[11px] text-muted-foreground font-medium">{desc}</div>
                         </div>
                         <Switch
                           checked={notif[key]}
-                          onCheckedChange={(v) => {
-                            setNotif(prev => ({ ...prev, [key]: v }));
-                            toast.info(`${title} ${v ? 'enabled' : 'disabled'}`);
-                          }}
+                          disabled
+                          aria-label={`${title} (not available yet)`}
                         />
                       </div>
                       {i < arr.length - 1 && <Separator className="bg-border/30 opacity-50" />}
@@ -1094,11 +1503,11 @@ function SettingsPage() {
               </Card>
 
               {/* Appearance Card */}
-              <Card className="p-7 border border-border/60 bg-white rounded-2xl shadow-sm">
-                <SectionHeader icon={Palette} label="Global Interface" description="Set your default viewing preferences." />
+              <Card className="p-5 sm:p-7 border border-border/60 bg-white rounded-2xl shadow-sm">
+                <SectionHeader icon={Palette} label="Default view" description="How lists such as Employees and Branches open: as a list or as cards." />
                 <div className="mt-8 space-y-6">
                   <div>
-                    <Label className="text-[11px] font-black text-muted-foreground uppercase tracking-widest mb-4 block">Default Data Presentation</Label>
+                    <Label className="text-[11px] font-black text-muted-foreground uppercase tracking-widest mb-4 block">Open lists as</Label>
                     <div className="grid grid-cols-2 gap-4">
                       {[
                         { id: 'list', label: 'Compact List', icon: List, desc: 'Maximum data density' },
@@ -1107,9 +1516,24 @@ function SettingsPage() {
                         <button
                           key={v.id}
                           type="button"
-                          onClick={() => {
+                          aria-pressed={defaultLayout === v.id}
+                          onClick={async () => {
                             updateDefaultLayout(v.id as any);
-                            toast.success(`Default layout set to ${v.label}`);
+                            // Saved for the company too: opening Settings
+                            // applies the company's saved view, so a choice
+                            // kept only in this browser was undone the next
+                            // time anyone opened this page.
+                            if (!canEdit) {
+                              toast.success(`${v.label} chosen for this device`);
+                              return;
+                            }
+                            try {
+                              await apiClient.put("/settings", { appearance: { defaultLayout: v.id } });
+                              toast.success(`Lists now open as ${v.label}`);
+                            } catch (error) {
+                              const message = requestErrorMessage(error, "Could not save the default view. Please try again.");
+                              if (message) toast.error(message);
+                            }
                           }}
                           className={cn(
                             "flex flex-col items-center p-4 rounded-2xl border-2 transition-all group relative overflow-hidden text-center",
@@ -1125,7 +1549,7 @@ function SettingsPage() {
                             <v.icon className="h-6 w-6" />
                           </div>
                           <span className="text-[13px] font-black uppercase tracking-tight mb-1">{v.label}</span>
-                          <span className="text-[10px] opacity-60 font-medium">{v.desc}</span>
+                          <span className="text-[11px] text-muted-foreground font-medium">{v.desc}</span>
                         </button>
                       ))}
                     </div>
@@ -1144,8 +1568,8 @@ function SettingsPage() {
                       <ShieldCheck className="h-8 w-8" />
                     </div>
                     <div>
-                      <h3 className="text-lg font-black text-foreground tracking-tight">Active Administration Session</h3>
-                      <p className="text-[13px] text-muted-foreground font-medium">Logged in as <span className="text-foreground font-bold">{session?.name}</span> • Super Admin</p>
+                      <h3 className="text-lg font-black text-foreground tracking-tight">You are signed in</h3>
+                      <p className="text-[13px] text-muted-foreground font-medium">As <span className="text-foreground font-bold">{session?.name}</span> · {session?.role === "subadmin" ? "Sub-admin" : "Admin"}</p>
                     </div>
                   </div>
                   
@@ -1155,34 +1579,57 @@ function SettingsPage() {
                       className="h-11 px-8 rounded-xl bg-destructive/5 text-destructive hover:bg-destructive hover:text-white border border-destructive/20 font-black text-[14px] transition-all duration-300 shadow-sm"
                       onClick={logout}
                     >
-                      <LogOut className="h-4 w-4 mr-2" /> End Current Session
+                      <LogOut className="h-4 w-4 mr-2" /> Log out
                     </Button>
-                    <p className="text-[10px] text-center text-muted-foreground font-bold uppercase tracking-widest opacity-50">Last Login: {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</p>
+                    {mySignIn && (
+                      <p className="text-[11px] text-center text-muted-foreground font-medium">
+                        Signed in {new Date(mySignIn.createdAt).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" })}
+                      </p>
+                    )}
                   </div>
                 </div>
               </Card>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <Card className="p-6 border border-border/60 bg-muted/5 rounded-2xl opacity-60 grayscale hover:grayscale-0 hover:opacity-100 transition-all cursor-not-allowed group">
-                  <div className="flex items-center gap-3 mb-2">
-                    <Lock className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
-                    <span className="text-[13px] font-black uppercase tracking-tight">Change Password</span>
-                    <Badge variant="secondary" className="text-[9px] font-bold py-0 h-4">SOON</Badge>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground font-medium">Enhanced security with 2FA and password rotation policies.</p>
-                </Card>
-                <Card 
-                  onClick={() => setAccessLogsOpen(true)}
-                  className="p-6 border border-border/60 bg-white hover:border-primary/30 hover:shadow-elegant rounded-2xl transition-all cursor-pointer group"
+              {/* What employees may change about themselves in the app. Here
+                  rather than under Org because it is about who can redirect
+                  a salary: the bank account on file is where pay goes. */}
+              <Card className="p-6 sm:p-8 border border-border/60 bg-white rounded-2xl shadow-sm">
+                <SectionHeader icon={User} label="Employee App" description="What employees can change about themselves." />
+                <label
+                  htmlFor="allow-sensitive-edits"
+                  className={cn(
+                    "flex items-center justify-between gap-4 p-4 rounded-xl bg-muted/20 border border-border/40",
+                    canEdit && !savingSelfService ? "cursor-pointer" : "cursor-not-allowed"
+                  )}
                 >
-                  <div className="flex items-center gap-3 mb-2">
-                    <Bell className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
-                    <span className="text-[13px] font-black uppercase tracking-tight text-foreground">Access Logs</span>
-                    <Badge variant="outline" className="text-[9px] font-bold py-0 h-4 bg-emerald-50 text-emerald-600 border-emerald-200">ACTIVE</Badge>
+                  <div className="min-w-0">
+                    <div className="text-[13px] font-bold">Let employees change their bank, PAN and Aadhaar details</div>
+                    <div className="text-[12px] text-muted-foreground leading-relaxed mt-0.5">
+                      When this is off, only HR can change an employee's name, bank account, PAN or Aadhaar.
+                    </div>
                   </div>
-                  <p className="text-[11px] text-muted-foreground font-medium">Monitor all administrative login attempts and IP addresses.</p>
-                </Card>
-              </div>
+                  <Switch
+                    id="allow-sensitive-edits"
+                    checked={allowSensitiveEdits}
+                    disabled={!canEdit || savingSelfService}
+                    onCheckedChange={saveSelfService}
+                  />
+                </label>
+              </Card>
+
+              {/* Sign-in is by a one-time code, so there is no password to
+                  change; the "Change Password - SOON" card promised one. */}
+              <button
+                type="button"
+                onClick={() => setAccessLogsOpen(true)}
+                className="w-full text-left p-6 border border-border/60 bg-white hover:border-primary/30 hover:shadow-elegant rounded-2xl transition-all cursor-pointer group"
+              >
+                <div className="flex items-center gap-3 mb-2">
+                  <Lock className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                  <span className="text-[13px] font-bold text-foreground">Sign-in history</span>
+                </div>
+                <p className="text-[12px] text-muted-foreground">See who in your company signed in and out, when, and from which device.</p>
+              </button>
             </div>
           )}
 
@@ -1201,7 +1648,7 @@ function SettingsPage() {
               animation, so it can never fall out of step with the tab it
               describes. */}
           <SettingsGuide
-            lines={settingsGuideLines(activeTab, {
+            lines={correctGuideLines(activeTab, settingsGuideLines(activeTab, {
               shiftName: shifts.find((s) => s._id === attendance.defaultShiftId)?.name || null,
               shiftCount: shifts.length,
               branchCount: branchList?.length || 0,
@@ -1218,7 +1665,8 @@ function SettingsPage() {
               notifPush: notif.push,
               notifWeekly: notif.weekly,
               companyName: company.name || null,
-            })}
+              allowSensitiveEdits,
+            }))}
           />
         </motion.div>
       </AnimatePresence>
@@ -1232,16 +1680,16 @@ function SettingsPage() {
       />
 
       <Dialog open={accessLogsOpen} onOpenChange={setAccessLogsOpen}>
-        <DialogContent className="rounded-3xl p-6 md:p-8 border border-border/40 shadow-elegant max-w-2xl bg-white focus:outline-hidden max-h-[90vh] flex flex-col">
+        <DialogContent className="rounded-3xl p-4 sm:p-6 md:p-8 border border-border/40 shadow-elegant max-w-2xl bg-white focus:outline-hidden max-h-[90vh] flex flex-col">
           <DialogHeader className="space-y-1 mb-4 shrink-0">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary grid place-items-center">
                 <Bell className="h-5 w-5" />
               </div>
               <div>
-                <DialogTitle className="text-xl font-black tracking-tight text-foreground uppercase">System Access Logs</DialogTitle>
+                <DialogTitle className="text-xl font-black tracking-tight text-foreground">Sign-in history</DialogTitle>
                 <DialogDescription className="text-[12px] text-muted-foreground font-medium">
-                  Real-time monitor of administrative authentication events and client IP addresses.
+                  The latest 100 sign-ins and sign-outs in your company, newest first. Recorded by the server.
                 </DialogDescription>
               </div>
             </div>
@@ -1253,7 +1701,7 @@ function SettingsPage() {
             <div className="relative flex-1">
               <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground/60" />
               <Input
-                placeholder="Search by name, role, or IP address..."
+                placeholder="Search by name, phone or IP address"
                 className="pl-10 h-10 rounded-xl bg-muted/20 border-border/60 text-[13px] font-medium"
                 value={logsSearch}
                 onChange={(e) => setLogsSearch(e.target.value)}
@@ -1261,7 +1709,7 @@ function SettingsPage() {
               {logsSearch && (
                 <button
                   onClick={() => setLogsSearch("")}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground text-xs font-bold"
+                  className="absolute right-1 top-1/2 -translate-y-1/2 h-10 px-2 text-muted-foreground hover:text-foreground text-xs font-bold"
                 >
                   Clear
                 </button>
@@ -1274,13 +1722,13 @@ function SettingsPage() {
                   key={filter}
                   onClick={() => setLogsFilter(filter)}
                   className={cn(
-                    "px-3 py-1 rounded-lg text-[11px] font-bold uppercase transition-all cursor-pointer",
+                    "h-10 min-w-10 px-3 rounded-lg text-[12px] font-bold transition-all cursor-pointer",
                     logsFilter === filter
                       ? "bg-white text-primary shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  {filter}
+                  {filter === "all" ? "All" : filter === "login" ? "Sign-ins" : "Sign-outs"}
                 </button>
               ))}
             </div>
@@ -1291,7 +1739,7 @@ function SettingsPage() {
             {isLogsLoading ? (
               <div className="py-12 flex flex-col items-center justify-center gap-2">
                 <Loader2 className="h-6 w-6 animate-spin text-primary" />
-                <p className="text-[12px] text-muted-foreground font-medium">Loading access logs...</p>
+                <p className="text-[12px] text-muted-foreground font-medium">Loading sign-in history...</p>
               </div>
             ) : filteredLogs.length > 0 ? (
               filteredLogs.map((log) => {
@@ -1317,8 +1765,8 @@ function SettingsPage() {
                       <div className="space-y-0.5">
                         <div className="flex items-center gap-2">
                           <span className="text-[13px] font-black text-foreground">{log.name || "Unknown"}</span>
-                          <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 bg-muted/40 px-1.5 py-0.5 rounded-md">
-                            {log.role || "User"}
+                          <span className="text-[11px] font-bold text-muted-foreground bg-muted/40 px-1.5 py-0.5 rounded-md">
+                            {log.role === "subadmin" ? "Sub-admin" : log.role === "admin" ? "Admin" : log.role === "employee" ? "Employee" : log.role === "superadmin" ? "Platform" : "User"}
                           </span>
                         </div>
                         <p className="text-[11px] text-muted-foreground font-medium flex items-center gap-1">
@@ -1346,8 +1794,8 @@ function SettingsPage() {
                       ) : (
                         <span className="text-[11px] text-muted-foreground font-medium">—</span>
                       )}
-                      <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-tight">
-                        {dateString} at {timeString}
+                      <p className="text-[11px] text-muted-foreground font-bold">
+                        {isLogin ? "Signed in" : "Signed out"} {dateString} at {timeString}
                       </p>
                     </div>
                   </div>
@@ -1357,12 +1805,14 @@ function SettingsPage() {
               <div className="text-center py-12 border border-dashed border-border/60 rounded-2xl bg-muted/5 px-4">
                 <Bell className="h-10 w-10 text-muted-foreground/30 mx-auto mb-2" />
                 <p className="text-[13px] font-bold text-foreground">
-                  {sessions && sessions.length === 0 ? "No login sessions recorded yet" : "No access logs found"}
+                  {sessionsError ? "Could not load the sign-in history" : sessions && sessions.length === 0 ? "No sign-ins recorded yet" : "Nothing matches your search"}
                 </p>
                 <p className="text-[11px] text-muted-foreground mt-0.5 max-w-sm mx-auto">
-                  {sessions && sessions.length === 0
-                    ? "Logins only started being recorded now, so this will remain empty until team members sign in again."
-                    : "Try adjusting your filters or search query."}
+                  {sessionsError
+                    ? "Check your internet connection, then close and open this window again."
+                    : sessions && sessions.length === 0
+                      ? "Sign-ins appear here as people sign in to the app or this panel."
+                      : "Try another name, or choose All."}
                 </p>
               </div>
             )}
@@ -1371,8 +1821,8 @@ function SettingsPage() {
 
           <div className="mt-6 flex justify-end items-center border-t border-border/40 pt-4 shrink-0">
             <DialogClose asChild>
-              <Button className="h-9 px-6 rounded-xl font-bold text-[12px] cursor-pointer">
-                Close Window
+              <Button className="h-10 px-6 rounded-xl font-bold text-[13px] cursor-pointer">
+                Close
               </Button>
             </DialogClose>
           </div>
@@ -1380,6 +1830,30 @@ function SettingsPage() {
       </Dialog>
     </div>
   );
+}
+
+/**
+ * settings-guide.tsx is shared with the Shifts page, so its Settings lines are
+ * corrected here rather than there. Each replacement states what this page
+ * really does: there is no password (sign-in is by code), no date or timezone
+ * control, alerts are not sent, and late grace and lunch DO have company
+ * fallbacks on the Attendance tab.
+ */
+function correctGuideLines(tab: string, lines: { text: string; tone?: "on" | "off" | "info" | "warn" }[]) {
+  return lines
+    .filter((l) => !(tab === "preferences" && l.text.startsWith("Date, time and timezone")))
+    .map((l) => {
+      if (tab === "security" && l.text.startsWith("Change your password")) {
+        return { ...l, text: "Review where your company's accounts have been signed in. There is no password: everyone signs in with a one-time code." };
+      }
+      if (tab === "attendance" && l.text.startsWith("Lunch, late grace and half-day limits are NOT here")) {
+        return { ...l, text: "Lunch, late grace and half-day limits are set on each shift under Shift Management. The Company Fallbacks here apply only to a shift that leaves its own value at 0 or on Company default." };
+      }
+      if (tab === "preferences" && l.text.startsWith("Per-tenant display")) {
+        return { ...l, text: "The default view is saved for the whole company. Alerts are not sent yet." };
+      }
+      return l;
+    });
 }
 
 function Badge({ children, variant = "primary", className }: { children: React.ReactNode; variant?: "primary" | "secondary" | "outline"; className?: string }) {
@@ -1404,8 +1878,10 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button 
       onClick={handleCopy}
-      className="p-1.5 rounded-lg border border-border/50 hover:bg-muted bg-white transition-all text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
-      title="Copy IP Address"
+      type="button"
+      className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-border/50 hover:bg-muted bg-white transition-all text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+      title="Copy IP address"
+      aria-label="Copy IP address"
     >
       {copied ? <Check className="h-3 w-3 text-success animate-in zoom-in" /> : <Copy className="h-3 w-3" />}
     </button>

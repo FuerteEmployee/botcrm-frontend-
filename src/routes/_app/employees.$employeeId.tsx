@@ -29,8 +29,6 @@ import {
   GraduationCap,
   ShieldCheck,
   FileText,
-  Play,
-  Square,
   ArrowLeft,
   ChevronDown,
   ListChecks,
@@ -62,6 +60,31 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { statusLabel, statusClass } from "@/lib/attendance-status";
 import { DeviceTab } from "@/components/employees/device-tab";
 import { formatINR, formatINRFull } from "@/lib/format";
+import { usePermission } from "@/hooks/use-permission";
+
+// A stored calendar date (DOB, joining date) as people read it. Printed raw,
+// these showed as "2026-09-01T00:00:00.000Z". Read in IST, which gives the
+// intended day whether the value was saved at UTC or at IST midnight.
+const formatCalendarDate = (value?: string) => {
+  if (!value) return undefined;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return undefined;
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
+};
+
+// Worked time for one day: the server's lunch-deducted total when it has one,
+// else the sum of closed sessions. Whole hours from punch-in to punch-out
+// counted the lunch break as work and rounded 8h40 up to 9h.
+const workedMsOf = (log: AttendanceRecord, punchOut?: string | null) => {
+  if (typeof log.totalWorkMs === "number") return log.totalWorkMs;
+  const sessions = log.shifts?.length ? log.shifts : [{ punchIn: log.punchIn, punchOut: punchOut ?? log.punchOut }];
+  return sessions.reduce((sum, sess) => (sess.punchIn && sess.punchOut
+    ? sum + Math.max(0, new Date(sess.punchOut).getTime() - new Date(sess.punchIn).getTime())
+    : sum), 0);
+};
+const formatHm = (ms: number) => `${Math.floor(ms / 3600000)}h ${String(Math.floor((ms % 3600000) / 60000)).padStart(2, "0")}m`;
+
+const EMPLOYMENT_LABELS: Record<string, string> = { monthly: "Monthly pay", daily: "Daily wage", hourly: "Hourly pay" };
 
 export const Route = createFileRoute("/_app/employees/$employeeId")({
   component: EmployeeDetailsPage,
@@ -85,7 +108,7 @@ function EmployeeDetailsPage() {
     undefined, 
     employeeId
   );
-  const { lunchIn, lunchOut } = useAttendanceService();
+  const { can } = usePermission();
 
   const isLoading = empLoading || deptLoading || branchLoading;
 
@@ -143,10 +166,6 @@ function EmployeeDetailsPage() {
   };
   const isSameMonth = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
 
-  // Drives the "Start/End Lunch" control in the log header — always about
-  // *today's* punch, independent of whatever month is currently browsed.
-  const todayLog = allAttendance.find((l) => isRecordToday(l.date));
-
   const monthLogs = useMemo(
     () =>
       [...allAttendance]
@@ -162,20 +181,10 @@ function EmployeeDetailsPage() {
     wfh: monthLogs.filter((l) => l.isWFH).length,
   }), [monthLogs]);
 
-  const totalWorkingHours = useMemo(() => {
-    const totalMs = monthLogs.reduce((sum, log) => {
-      const sessions = log.shifts?.length ? log.shifts : [{ punchIn: log.punchIn, punchOut: log.punchOut }];
-      return sum + sessions.reduce((s, sess) => {
-        if (sess.punchIn && sess.punchOut) {
-          return s + (new Date(sess.punchOut).getTime() - new Date(sess.punchIn).getTime());
-        }
-        return s;
-      }, 0);
-    }, 0);
-    const hours = Math.floor(totalMs / (1000 * 60 * 60));
-    const minutes = Math.floor((totalMs % (1000 * 60 * 60)) / (1000 * 60));
-    return `${hours} : ${String(minutes).padStart(2, "0")} h`;
-  }, [monthLogs]);
+  const totalWorkingHours = useMemo(
+    () => formatHm(monthLogs.reduce((sum, log) => sum + workedMsOf(log), 0)),
+    [monthLogs]
+  );
 
   const isCurrentMonth = isSameMonth(currentMonth, new Date());
   const monthLabel = currentMonth.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
@@ -351,23 +360,21 @@ function EmployeeDetailsPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 sm:gap-3">
-          <ActionButton
-            variant="download"
-            showLabel
-            label="Export"
-            className="flex-1 sm:flex-none h-10"
-          />
-          <ActionButton
-            variant="edit"
-            showLabel
-            label="Edit Profile"
-            className="flex-1 sm:flex-none h-10 shadow-lg shadow-primary/20"
-            asChild
-          >
-            <Link to={`/employees/create`} search={{ employeeId: employee._id }} />
-          </ActionButton>
-        </div>
+        {/* "Export" sat here with no handler at all. Edit is offered only
+            to someone who may edit; the form would bounce anyone else. */}
+        {can("employees", "edit") && (
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ActionButton
+              variant="edit"
+              showLabel
+              label="Edit Profile"
+              className="flex-1 sm:flex-none h-11 shadow-lg shadow-primary/20"
+              asChild
+            >
+              <Link to={`/employees/create`} search={{ employeeId: employee._id }} />
+            </ActionButton>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -422,18 +429,28 @@ function EmployeeDetailsPage() {
                 </div>
                 <CardContent className="relative pt-0 flex flex-col items-center text-center pb-6 px-4">
                   <div className="-mt-16 mb-4 z-10 relative">
+                    {/* The photo the employee uploaded, else initials drawn here.
+                        This used to fetch an avatar from api.dicebear.com with
+                        the employee's full name in the URL -- sending every
+                        viewed name to a third party -- and ignored the photo. */}
                     <div className="h-32 w-32 rounded-full border-4 border-card bg-card overflow-hidden shadow-lg relative group">
-                      <img
-                        src={`https://api.dicebear.com/7.x/initials/svg?seed=${employee.name}&backgroundColor=8b0a7a,2e1065,4c1d95&textColor=ffffff`}
-                        alt={employee.name}
-                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      />
+                      {employee.profileImage ? (
+                        <img
+                          src={employee.profileImage}
+                          alt={employee.name}
+                          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-gradient-primary text-3xl font-black uppercase text-white">
+                          {employee.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}
+                        </div>
+                      )}
                     </div>
                   </div>
                   
                   <div className="space-y-1 mb-6">
                     <h3 className="text-xl font-bold text-foreground tracking-tight">{employee.name}</h3>
-                    <p className="text-xs font-semibold text-primary tracking-wide uppercase">{employee.designation}</p>
+                    <p className="text-xs font-semibold text-primary tracking-wide uppercase">{EMPLOYMENT_LABELS[employee.employmentType || "monthly"]}</p>
                     <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-widest bg-muted/50 px-2 py-1 rounded mt-2">
                       Tenure: <span className="text-foreground">{workDuration}</span>
                     </p>
@@ -446,7 +463,7 @@ function EmployeeDetailsPage() {
                       </div>
                       <div className="flex flex-col text-left">
                         <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">Birthday</span>
-                        <span className="text-xs font-semibold text-foreground/90">{employee.dob ? new Date(employee.dob).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : "N/A"}</span>
+                        <span className="text-xs font-semibold text-foreground/90">{employee.dob ? new Date(employee.dob).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' }) : "N/A"}</span>
                       </div>
                     </div>
 
@@ -456,24 +473,37 @@ function EmployeeDetailsPage() {
                       </div>
                       <div className="flex flex-col text-left">
                         <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">Anniversary</span>
-                        <span className="text-xs font-semibold text-foreground/90">{employee.joiningDate ? new Date(employee.joiningDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : "N/A"}</span>
+                        <span className="text-xs font-semibold text-foreground/90">{employee.joiningDate ? new Date(employee.joiningDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' }) : "N/A"}</span>
                       </div>
                     </div>
                   </div>
 
+                  {/* Opens the scan the employee uploaded. These two buttons had
+                      no handler; now they are disabled when nothing is on file. */}
                   <div className="w-full grid grid-cols-2 gap-2 mt-5">
-                    <ActionButton
-                      variant="download"
-                      showLabel
-                      label="PAN"
-                      className="h-9 border-primary/20 text-primary hover:bg-primary/5"
-                    />
-                    <ActionButton
-                      variant="download"
-                      showLabel
-                      label="Aadhaar"
-                      className="h-9 border-primary/20 text-primary hover:bg-primary/5"
-                    />
+                    {([["PAN", employee.panCardUrls], ["Aadhaar", employee.aadhaarCardUrls]] as const).map(([label, urls]) =>
+                      urls?.length ? (
+                        <ActionButton
+                          key={label}
+                          variant="download"
+                          showLabel
+                          label={label}
+                          className="h-11 border-primary/20 text-primary hover:bg-primary/5"
+                          asChild
+                        >
+                          <a href={urls[0]} target="_blank" rel="noopener noreferrer" />
+                        </ActionButton>
+                      ) : (
+                        <ActionButton
+                          key={label}
+                          variant="download"
+                          showLabel
+                          label={`No ${label}`}
+                          disabled
+                          className="h-11 border-border/40 text-muted-foreground"
+                        />
+                      )
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -528,8 +558,8 @@ function EmployeeDetailsPage() {
                           { label: "Local Address", value: employee.address, icon: MapPin },
                           { label: "Branch(es)", value: getBranchNames(), icon: MapPin },
                           { label: "Shift(s)", value: getShiftNames(), icon: Clock },
-                          { label: "Date of Birth", value: employee.dob, icon: Calendar },
-                          { label: "Date of Joining", value: employee.joiningDate, icon: Clock },
+                          { label: "Date of Birth", value: formatCalendarDate(employee.dob), icon: Calendar },
+                          { label: "Date of Joining", value: formatCalendarDate(employee.joiningDate), icon: Clock },
                         ].map((item, i) => (
                           <div key={i} className="flex items-center gap-3.5 group">
                             <div className="h-8 w-8 rounded-lg bg-muted/50 flex items-center justify-center group-hover:bg-primary/5 transition-colors">
@@ -682,22 +712,41 @@ function EmployeeDetailsPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-6">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {["Aadhar Card", "PAN Card", "Educational", "Experience"].map((doc, i) => (
-                      <div key={i} className="flex items-center justify-between p-3.5 rounded-xl border border-border/60 hover:border-primary/30 hover:bg-primary/2 transition-all cursor-pointer group">
-                        <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 rounded-lg bg-muted/50 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
-                            <Download className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
-                          </div>
-                          <div>
-                            <span className="text-[12px] font-semibold text-foreground/80 group-hover:text-primary transition-colors">{doc}</span>
-                            <p className="text-[9px] text-muted-foreground font-medium uppercase tracking-widest">PDF • 2MB</p>
-                          </div>
-                        </div>
-                        <Badge variant="secondary" className="bg-success/5 text-success border-none text-[8px] font-bold px-1.5 py-0 rounded-sm">VERIFIED</Badge>
+                  {/* What is actually on file. This card used to list four
+                      invented documents ("Educational", "Experience"), each
+                      "PDF • 2MB" and badged VERIFIED, for every employee --
+                      including ones who had uploaded nothing. */}
+                  {(() => {
+                    const docs = [
+                      ...(employee.panCardUrls || []).map((url, i, all) => ({ url, label: all.length > 1 ? `PAN card (${i === 0 ? "front" : "back"})` : "PAN card" })),
+                      ...(employee.aadhaarCardUrls || []).map((url, i, all) => ({ url, label: all.length > 1 ? `Aadhaar card (${i === 0 ? "front" : "back"})` : "Aadhaar card" })),
+                    ];
+                    if (docs.length === 0) {
+                      return (
+                        <p className="text-[12px] text-muted-foreground">
+                          No documents uploaded yet. The employee can add PAN and Aadhaar scans from their app (Account).
+                        </p>
+                      );
+                    }
+                    return (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {docs.map((doc) => (
+                          <a
+                            key={doc.url}
+                            href={doc.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex min-h-11 items-center gap-3 p-3.5 rounded-xl border border-border/60 hover:border-primary/30 hover:bg-primary/2 transition-all group"
+                          >
+                            <div className="h-9 w-9 rounded-lg bg-muted/50 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+                              <Download className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                            </div>
+                            <span className="text-[12px] font-semibold text-foreground/80 group-hover:text-primary transition-colors">{doc.label}</span>
+                          </a>
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })()}
                 </CardContent>
               </Card>
             </div>
@@ -743,32 +792,11 @@ function EmployeeDetailsPage() {
                       </CardTitle>
                       <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Track punch-in, breaks, and punch-out history.</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {todayLog?.punchIn && !todayLog?.punchOut && (
-                        <>
-                          {!(todayLog.lunchInTime && !todayLog.lunchOutTime) ? (
-                            <ActionButton
-                              variant="approve"
-                              showLabel
-                              label="START LUNCH"
-                              icon={Play}
-                              className="h-7 bg-amber-500 hover:bg-amber-600 border-none text-[10px]"
-                              onClick={() => lunchIn({ employeeId: employee._id })}
-                            />
-                          ) : (
-                            <ActionButton
-                              variant="destructive"
-                              showLabel
-                              label="END LUNCH"
-                              icon={Square}
-                              className="h-7 bg-slate-800 hover:bg-slate-900 border-none text-[10px]"
-                              onClick={() => lunchOut({ employeeId: employee._id })}
-                            />
-                          )}
-                        </>
-                      )}
-                      <Badge variant="outline" className="bg-primary/5 text-primary h-7">{monthLabel}</Badge>
-                    </div>
+                    {/* START/END LUNCH used to sit here. The server takes the
+                        employee from the caller's own token, never the body,
+                        so those buttons tried to start the ADMIN's lunch.
+                        Corrections go through Attendance / regularization. */}
+                    <Badge variant="outline" className="bg-primary/5 text-primary h-7">{monthLabel}</Badge>
                   </CardHeader>
                   <CardContent className="p-0">
                     <div className="overflow-x-auto">
@@ -787,7 +815,7 @@ function EmployeeDetailsPage() {
                           {monthLogs.length === 0 && (
                             <tr>
                               <td colSpan={6} className="px-6 py-10 text-center text-xs font-medium text-muted-foreground">
-                                No attendance records for {monthLabel}.
+                                {attLoading ? "Loading attendance..." : `No attendance records for ${monthLabel}.`}
                               </td>
                             </tr>
                           )}
@@ -814,7 +842,7 @@ function EmployeeDetailsPage() {
                                 <td className="px-6 py-4 text-center text-muted-foreground font-medium text-xs">{formatTime(getDisplayPunchOut(log) ?? undefined)}</td>
                                 <td className="px-6 py-4 text-center">
                                   <Badge variant="secondary" className="font-medium text-[9px] px-1.5 py-0 bg-muted/50 text-muted-foreground border-none">
-                                    {log.punchIn && getDisplayPunchOut(log) ? `${Math.round((new Date(getDisplayPunchOut(log)!).getTime() - new Date(log.punchIn).getTime()) / (1000 * 60 * 60))}h` : "0h"}
+                                    {log.punchIn && getDisplayPunchOut(log) ? formatHm(workedMsOf(log, getDisplayPunchOut(log))) : "—"}
                                   </Badge>
                                 </td>
                                 <td className="px-6 py-4 text-right">
@@ -881,33 +909,17 @@ function EmployeeDetailsPage() {
                         <span className="text-muted-foreground font-medium">Total Working Hours</span>
                         <span className="font-bold text-primary">{totalWorkingHours}</span>
                       </div>
+                      {/* It said "Estimated Net Salary" over the plain monthly
+                          base -- no deductions, no attendance. Payroll lives
+                          on the Salary page; this is only the base. */}
                       <div className="flex items-center justify-between gap-2 text-sm">
-                        <span className="text-muted-foreground font-medium shrink-0">Estimated Net Salary</span>
-                        <span className="font-bold text-success truncate min-w-0">{formatINR(employee.salary)}</span>
+                        <span className="text-muted-foreground font-medium shrink-0">Monthly Salary</span>
+                        <span className="font-bold text-success truncate min-w-0">{formatINRFull(employee.salary)}</span>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className="border-none shadow-elegant bg-primary/5 border border-primary/10">
-                  <CardContent className="p-6">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                        <Mail className="h-5 w-5 text-primary" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-bold">Need assistance?</h4>
-                        <p className="text-xs text-muted-foreground">Contact HR regarding attendance</p>
-                      </div>
-                    </div>
-                    <ActionButton
-                      variant="add"
-                      showLabel
-                      label="Raise Ticket"
-                      className="w-full"
-                    />
-                  </CardContent>
-                </Card>
               </div>
             </div>
           </motion.div>

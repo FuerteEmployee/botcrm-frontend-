@@ -5,6 +5,7 @@ import { AppSidebar } from "./app-sidebar";
 import { AppHeader } from "./app-header";
 import { SubscriptionGate } from "./subscription-gate";
 import { useAuth } from "@/hooks/use-auth";
+import { useFeatureToggles, featureKeyForPath } from "@/hooks/use-feature-toggles";
 import { toast } from "sonner";
 
 // Pages a sub-admin may never reach regardless of their permission map.
@@ -47,6 +48,18 @@ export function AppLayout() {
     }
   }, [isMounted, isAuthenticated, session, navigate, pathname]);
 
+  // A page whose feature the super admin switched off for this tenant is
+  // hidden from the sidebar; this stops it being reached by URL too. Waits for
+  // the server's answer so the defaults never bounce anyone.
+  const { isFeatureEnabled, isLoaded: togglesLoaded } = useFeatureToggles();
+  useEffect(() => {
+    if (!isMounted || !togglesLoaded) return;
+    const key = featureKeyForPath(pathname);
+    if (key && !isFeatureEnabled(key)) {
+      toast.error("That feature is not enabled for your organisation");
+      navigate({ to: "/dashboard" });
+    }
+  }, [isMounted, togglesLoaded, pathname, isFeatureEnabled, navigate]);
 
 
   return (

@@ -1,6 +1,7 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
+import { requestErrorMessage } from "@/services/request-error";
 
 export interface AttendanceRecord {
   _id: string;
@@ -65,6 +66,20 @@ export interface AttendanceRecord {
   punchOutCoordinates?: { lat?: number; lng?: number } | null;
   punchInFixAt?: string | null;
   punchOutFixAt?: string | null;
+  /** Reconciliation bookkeeping: which punch fields a device tap last derived. */
+  derivedFields?: string[];
+  /**
+   * The Full-Day bar this day is graded against, computed server-side by the
+   * same functions that grade it (reports only; null when there is no shift).
+   */
+  grading?: DayGrading | null;
+}
+
+export interface DayGrading {
+  requiredMs: number | null;
+  lunchMs: number;
+  graceInMs: number;
+  graceOutMs: number;
 }
 
 export type PunchChannel = 'app' | 'lens' | 'biometric' | 'system' | 'admin';
@@ -100,7 +115,10 @@ export interface AttendanceSession {
 }
 
 export interface AttendanceStats {
+  /** The IST day these figures are for, YYYY-MM-DD. */
   date: string;
+  /** Every active employee is in exactly one of present / halfDay / needsReview / onLeave / weeklyOff / holiday / absent. */
+  activeEmployees?: number;
   presentToday: number;
   halfDayToday: number;
   /** Days carrying a real punch that could not be measured. Not absence. */
@@ -108,6 +126,10 @@ export interface AttendanceStats {
   lateArrivals: number;
   missingPunch: number;
   absentToday: number;
+  onLeaveToday?: number;
+  weeklyOffToday?: number;
+  holidayToday?: number;
+  holidayName?: string | null;
   pendingRegularizations: number;
 }
 
@@ -119,28 +141,62 @@ export interface AbsentEmployee {
   branchId?: { _id: string; branchName: string };
 }
 
-export function useAttendanceService(startDate?: string, endDate?: string, employeeId?: string) {
+/**
+ * What the admin "Modify Punch Time" dialog sends. Times are IST wall clock
+ * ("YYYY-MM-DDTHH:mm", no offset — the server parses them as IST); "" clears
+ * a time. `status: "auto"` (the default) lets the server grade the day from the
+ * times with the same rules as a real punch-out; any other status overrides.
+ */
+export interface AttendanceEdit {
+  punchIn?: string;
+  punchOut?: string;
+  lunchInTime?: string;
+  lunchOutTime?: string;
+  status?: AttendanceRecord["status"] | "auto";
+  isWFH?: boolean;
+  remarks?: string;
+}
+
+/** Every query an admin edit of a day can change. */
+const DAY_DEPENDENT_QUERIES = ["attendance", "attendance-stats", "absent-today", "punch-log", "user-history", "regularizations"];
+
+export function useAttendanceService(
+  startDate?: string,
+  endDate?: string,
+  employeeId?: string,
+  // keepPrevious: show the last result while a new date range loads, instead of
+  // blanking the page to a skeleton on every day step.
+  { keepPrevious = false }: { keepPrevious?: boolean } = {},
+) {
   const queryClient = useQueryClient();
 
-  const { data: records = [], isLoading } = useQuery<AttendanceRecord[]>({
+  const { data: records = [], isLoading, isError, isFetching, refetch } = useQuery<AttendanceRecord[]>({
     queryKey: ["attendance", startDate, endDate, employeeId],
     queryFn: async () => {
       const { data } = await apiClient.get("/attendance/reports", {
         params: { startDate, endDate, employeeId }
       });
-      return data;
-    }
+      // A non-list reply (a proxy's `{}`) must not reach `.filter` in a page.
+      return Array.isArray(data) ? data : [];
+    },
+    placeholderData: keepPrevious ? keepPreviousData : undefined,
   });
 
   const updateAttendance = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: Partial<AttendanceRecord> }) => {
+    mutationFn: async ({ id, data }: { id: string; data: AttendanceEdit }) => {
       const { data: response } = await apiClient.put(`/attendance/${id}`, data);
       return response;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["attendance"] });
+      for (const key of DAY_DEPENDENT_QUERIES) queryClient.invalidateQueries({ queryKey: [key] });
       toast.success("Attendance updated successfully");
-    }
+    },
+    // It used to have no error handler at all, so a refused edit (or a network
+    // failure) closed nothing, said nothing, and looked like a dead button.
+    onError: (error) => {
+      const msg = requestErrorMessage(error, "Could not save the change. Please try again.");
+      if (msg) toast.error(msg);
+    },
   });
 
   const lunchIn = useMutation({
@@ -171,19 +227,21 @@ export function useAttendanceService(startDate?: string, endDate?: string, emplo
       return response;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["attendance"] });
-      queryClient.invalidateQueries({ queryKey: ["attendance-stats"] });
-      queryClient.invalidateQueries({ queryKey: ["absent-today"] });
+      for (const key of DAY_DEPENDENT_QUERIES) queryClient.invalidateQueries({ queryKey: [key] });
       toast.success("Marked absent");
     },
-    onError: (error: any) => {
-      toast.error(error.response?.data?.message || "Failed to mark absent");
+    onError: (error) => {
+      const msg = requestErrorMessage(error, "Failed to mark absent");
+      if (msg) toast.error(msg);
     }
   });
 
   return {
     records,
     isLoading,
+    isError,
+    isFetching,
+    refetch,
     updateAttendance: updateAttendance.mutateAsync,
     isUpdating: updateAttendance.isPending,
     lunchIn: lunchIn.mutateAsync,
@@ -204,12 +262,13 @@ export function useAttendanceStats(date?: string) {
   return { stats, isLoading };
 }
 
-export function useAbsentToday() {
+/** Who is absent on one IST day (today when no date): the people behind the Absent card. */
+export function useAbsentToday(date?: string) {
   const { data: absentees = [], isLoading } = useQuery<AbsentEmployee[]>({
-    queryKey: ["absent-today"],
+    queryKey: ["absent-today", date],
     queryFn: async () => {
-      const { data } = await apiClient.get("/attendance/absent-today");
-      return data;
+      const { data } = await apiClient.get("/attendance/absent-today", { params: { date } });
+      return Array.isArray(data) ? data : [];
     },
   });
 

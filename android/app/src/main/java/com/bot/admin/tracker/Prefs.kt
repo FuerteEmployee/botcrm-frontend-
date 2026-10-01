@@ -19,6 +19,10 @@ object Prefs {
     private const val KEY_LAST_FIX_AT = "lastFixAt"
     private const val KEY_INSTALL_ID  = "installId"
     private const val KEY_BOOT_PROOF  = "bootRestartAt"
+    // The company's "track always" choice, as last told by the web layer at start
+    // or by the server's /attendance/today answer. Decides whether the service may
+    // keep running with no open shift, and what the notification says.
+    private const val KEY_TRACK_ALWAYS = "trackAlways"
 
     private fun sp(ctx: Context) =
         ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE)
@@ -72,6 +76,10 @@ object Prefs {
     fun isActive(ctx: Context): Boolean  = sp(ctx).getBoolean(KEY_ACTIVE, false)
     fun lastFixAt(ctx: Context): Long    = sp(ctx).getLong(KEY_LAST_FIX_AT, 0L)
     fun installId(ctx: Context): String  = sp(ctx).getString(KEY_INSTALL_ID, "") ?: ""
+    fun trackAlways(ctx: Context): Boolean = sp(ctx).getBoolean(KEY_TRACK_ALWAYS, false)
+    fun setTrackAlways(ctx: Context, value: Boolean) {
+        sp(ctx).edit().putBoolean(KEY_TRACK_ALWAYS, value).apply()
+    }
     /** 0 when we have never observed a successful restart after a reboot. */
     fun bootRestartAt(ctx: Context): Long = sp(ctx).getLong(KEY_BOOT_PROOF, 0L)
 }

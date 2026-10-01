@@ -1,158 +1,346 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
-import { useAuth } from "@/hooks/use-auth";
-import { 
-  Plus, Ticket, CheckCircle, Clock, XCircle, Info, RefreshCw, Filter, Calendar
+import {
+  Plus,
+  Info,
+  RefreshCw,
+  Calendar,
+  LogIn,
+  LogOut,
+  HelpCircle,
+  MessageSquareWarning,
+  CheckCircle2,
+  XCircle,
+  ArrowRight,
 } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
+import { Card } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
+import { requestErrorMessage } from "@/services/request-error";
+import { LoadError } from "@/components/user/load-error";
+import { DIALOG_CLOSE_40 } from "@/components/pages/reject-reason-dialog";
+import { isNativeApp } from "@/lib/geolocation";
+import { cn } from "@/lib/utils";
+import { TICKET_TYPE_LABELS, isCorrectionTicket, type Ticket } from "@/services/ticket-service";
+import {
+  PunchCorrectionFields,
+  type PunchCorrectionValue,
+} from "@/components/tickets/punch-correction-fields";
+import { fmt12 } from "@/components/tickets/punch-correction-rules";
 
 export const Route = createFileRoute("/user/tickets")({
   component: UserTickets,
 });
 
-interface SupportTicket {
-  _id: string;
-  type: "Correction" | "Query" | "Complaint" | "Leave";
-  reason: string;
-  status: "pending" | "approved" | "rejected";
-  adminRemark?: string;
-  createdAt: string;
+type SupportTicket = Omit<Ticket, "employeeId">;
+
+type NewTicketType = "ForgotPunchIn" | "ForgotPunchOut" | "Query" | "Complaint";
+
+// Big, plain choices instead of a dropdown: a first-time user sees every
+// option at once and taps one.
+const NEW_TYPES: { value: NewTicketType; label: string; icon: typeof LogIn }[] = [
+  { value: "ForgotPunchIn", label: "Forgot to punch in", icon: LogIn },
+  { value: "ForgotPunchOut", label: "Forgot to punch out", icon: LogOut },
+  { value: "Query", label: "Question for HR", icon: HelpCircle },
+  { value: "Complaint", label: "Complaint", icon: MessageSquareWarning },
+];
+
+const PLACEHOLDERS: Record<string, string> = {
+  ForgotPunchIn: "Example: I reached at 9:30 but the app did not open. (You can leave this empty.)",
+  ForgotPunchOut:
+    "Example: I left at 6:30 and forgot to press Punch Out. (You can leave this empty.)",
+  Query: "Example: How many casual leaves do I have left?",
+  Complaint: "Tell us what went wrong.",
+};
+
+// Match the server's limits, so the box stops rather than the server refusing.
+const MAX_REASON = 2000;
+const MAX_CORRECTION_REASON = 300;
+
+const PUNCH_TYPES = ["ForgotPunchIn", "ForgotPunchOut", "Correction"];
+
+const fmtDayLong = (iso?: string | null) =>
+  iso
+    ? new Date(iso).toLocaleDateString("en-IN", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        timeZone: "Asia/Kolkata",
+      })
+    : "";
+
+/** The correction part of a punch ticket: what was punched, what was asked, and the answer. */
+function CorrectionSummary({ ticket }: { ticket: SupportTicket }) {
+  const c = ticket.correction;
+  if (!c?.field) return null;
+  const isIn = c.field === "punchIn";
+  const noun = isIn ? "punch-in" : "punch-out";
+  // What was actually applied: the admin may have approved an edited time.
+  const applied =
+    c.appliedTime ||
+    (isIn ? ticket.regularization?.requestedPunchIn : ticket.regularization?.requestedPunchOut) ||
+    c.requestedTime;
+  return (
+    <div className="space-y-2">
+      <p className="text-[13px] font-semibold text-slate-600 dark:text-slate-300">
+        For {fmtDayLong(c.date)}
+      </p>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px]">
+        <span className="text-slate-600 dark:text-slate-300">
+          You {isIn ? "punched in" : "punched out"} at{" "}
+          <b className="text-slate-900 dark:text-white">
+            {c.recordedTime ? fmt12(c.recordedTime) : "no time"}
+          </b>
+        </span>
+        <ArrowRight className="h-4 w-4 text-slate-400" />
+        <span className="text-slate-600 dark:text-slate-300">
+          you asked for <b className="text-slate-900 dark:text-white">{fmt12(c.requestedTime)}</b>
+        </span>
+      </div>
+      {ticket.status === "approved" && (
+        <p className="flex items-start gap-2 rounded-xl bg-emerald-50 px-3 py-2.5 text-[14px] font-bold text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300">
+          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+          Approved: your {noun} is now {fmt12(applied)}
+        </p>
+      )}
+      {ticket.status === "rejected" && (
+        <p className="flex items-start gap-2 rounded-xl bg-rose-50 px-3 py-2.5 text-[14px] font-bold text-rose-800 dark:bg-rose-500/10 dark:text-rose-300">
+          <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          Not approved. Your {noun} stays {c.recordedTime ? fmt12(c.recordedTime) : "as it was"}.
+        </p>
+      )}
+    </div>
+  );
 }
 
 function UserTickets() {
-  const { session } = useAuth();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [ticketType, setTicketType] = useState<string>("Correction");
-  const [description, setDescription] = useState<string>("Punch Correction: ");
-  
-  // Category switch state
+  const [ticketType, setTicketType] = useState<NewTicketType>("ForgotPunchIn");
+  // No pre-filled text: it made the Submit button live on an untouched form,
+  // so empty tickets reached HR.
+  const [description, setDescription] = useState<string>("");
+  const [correction, setCorrection] = useState<PunchCorrectionValue | null>(null);
+  // A ref, not state: a double tap fires both clicks before React re-renders
+  // the button as disabled, and each click raised its own ticket.
+  const submittingRef = useRef(false);
+
   const [ticketFilter, setTicketFilter] = useState<string>("all");
 
-  // 1. Fetch User Tickets
-  const { data: tickets = [], isLoading } = useQuery<SupportTicket[]>({
+  const isCorrection = isCorrectionTicket(ticketType);
+  const reasonMax = isCorrection ? MAX_CORRECTION_REASON : MAX_REASON;
+
+  const {
+    data: rawTickets,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isFetching,
+  } = useQuery<SupportTicket[]>({
     queryKey: ["user-tickets"],
     queryFn: async () => {
       const { data } = await apiClient.get("/tickets/my-tickets");
       return data;
     },
   });
+  // A 200 that is not a list (captive portal, proxy page) must not blank the page.
+  const tickets: SupportTicket[] = Array.isArray(rawTickets) ? rawTickets : [];
 
-  // Filter out leave tickets since they go to the Leaves portal
-  const supportTickets = tickets.filter(t => t.type !== "Leave");
+  // The admin answers from the office; show it when the app comes back to the
+  // front. React Query's focus refetch is off app-wide and Capacitor sends no
+  // focus event.
+  useEffect(() => {
+    const refresh = () => queryClient.invalidateQueries({ queryKey: ["user-tickets"] });
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    let removeAppListener: (() => void) | undefined;
+    let disposed = false;
+    if (isNativeApp()) {
+      import("@capacitor/app")
+        .then(({ App }) =>
+          App.addListener("appStateChange", ({ isActive }) => {
+            if (isActive) refresh();
+          }),
+        )
+        .then((h) => {
+          if (disposed) void h.remove();
+          else removeAppListener = () => void h.remove();
+        })
+        .catch(() => {});
+    }
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      removeAppListener?.();
+    };
+  }, [queryClient]);
 
-  // Filter based on toggle tab
-  const filteredTickets = supportTickets.filter(t => {
+  // Leave tickets go to the Leaves page.
+  const supportTickets = tickets.filter((t) => t.type !== "Leave");
+
+  const filteredTickets = supportTickets.filter((t) => {
     if (ticketFilter === "all") return true;
-    return t.type.toLowerCase() === ticketFilter.toLowerCase();
+    if (ticketFilter === "punch") return PUNCH_TYPES.includes(t.type);
+    return t.type.toLowerCase() === ticketFilter;
   });
 
-  // Raise Ticket Mutation
   const createTicketMutation = useMutation({
     mutationFn: async () => {
-      const payload = {
-        type: ticketType,
-        reason: description,
-      };
+      const payload = isCorrection
+        ? {
+            type: ticketType,
+            date: correction?.date,
+            time: correction?.time,
+            reason: description.trim(),
+          }
+        : { type: ticketType, reason: description.trim() };
       const { data } = await apiClient.post("/tickets", payload);
       return data;
     },
     onSuccess: () => {
-      toast.success("Support Ticket Raised Successfully!");
+      toast.success(
+        isCorrection
+          ? "Sent to your admin. You will see the answer here."
+          : "Ticket sent to HR. You will see their reply here.",
+      );
       queryClient.invalidateQueries({ queryKey: ["user-tickets"] });
+      queryClient.invalidateQueries({ queryKey: ["ticket-correction-context"] });
       setOpen(false);
-      // Reset
-      setDescription(ticketType === "Correction" ? "Punch Correction: " : "");
+      setDescription("");
     },
-    onError: (err: any) => {
-      toast.error(err.response?.data?.message || "Submit Failed");
-    }
+    onError: (err) => {
+      const message = requestErrorMessage(err, "Your ticket could not be sent. Please try again.");
+      if (message) toast.error(message);
+      // The day may have changed meanwhile (another request, an approval).
+      queryClient.invalidateQueries({ queryKey: ["ticket-correction-context"] });
+    },
+    onSettled: () => {
+      submittingRef.current = false;
+    },
   });
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
+  const canSend = isCorrection
+    ? !!correction && !correction.blocker && !!correction.time
+    : !!description.trim();
+
+  const submit = () => {
+    if (submittingRef.current || createTicketMutation.isPending || !canSend) return;
+    submittingRef.current = true;
+    createTicketMutation.mutate();
+  };
+
+  const openNew = () => {
+    setTicketType("ForgotPunchIn");
+    setDescription("");
+    setCorrection(null);
+    setOpen(true);
+  };
+
+  const getStatusBadge = (t: SupportTicket) => {
+    const punch = isCorrectionTicket(t.type);
+    switch (t.status) {
       case "approved":
-        return <Badge className="bg-emerald-550/10 text-emerald-500 hover:bg-emerald-550/20 border-none rounded-full text-[8.5px] font-bold px-2.5 py-0.5">Resolved</Badge>;
+        return (
+          <Badge className="bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 border-none rounded-full text-[12px] font-bold px-2.5 py-0.5">
+            {punch ? "Approved" : "Resolved"}
+          </Badge>
+        );
       case "rejected":
-        return <Badge className="bg-rose-550/10 text-rose-500 hover:bg-rose-550/20 border-none rounded-full text-[8.5px] font-bold px-2.5 py-0.5">Rejected</Badge>;
+        return (
+          <Badge className="bg-rose-500/10 text-rose-700 hover:bg-rose-500/20 border-none rounded-full text-[12px] font-bold px-2.5 py-0.5">
+            {punch ? "Not approved" : "Rejected"}
+          </Badge>
+        );
       default:
-        return <Badge className="bg-amber-550/10 text-amber-500 hover:bg-amber-550/20 border-none rounded-full text-[8.5px] font-bold px-2.5 py-0.5">Pending</Badge>;
+        return (
+          <Badge className="bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 border-none rounded-full text-[12px] font-bold px-2.5 py-0.5">
+            Waiting
+          </Badge>
+        );
     }
   };
 
+  const loadFailed = isError && tickets.length === 0;
+
   return (
     <div className="w-full space-y-6">
-      
-      {/* Title Row */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 text-left">
         <div>
-          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Helpdesk Support</h2>
-          <p className="text-xs text-slate-500">
-            Request manual adjustments, query HR configurations, or report system issues.
+          <h2 className="text-lg font-bold text-slate-800 dark:text-slate-100">Help Desk</h2>
+          <p className="text-[13px] text-slate-500">
+            Fix a missed punch, ask HR a question, or make a complaint.
           </p>
         </div>
-        
-        <Button 
-          onClick={() => setOpen(true)}
-          className="w-full sm:w-auto bg-gradient-primary hover:opacity-95 text-white font-bold rounded-2xl h-11 px-5 border-none shadow-md shadow-primary/20 text-xs gap-2 flex items-center justify-center cursor-pointer shrink-0"
+
+        <Button
+          onClick={openNew}
+          className="w-full sm:w-auto bg-gradient-primary hover:opacity-95 text-white font-bold rounded-2xl h-12 px-5 border-none shadow-md shadow-primary/20 text-sm gap-2 flex items-center justify-center cursor-pointer shrink-0"
         >
           <Plus className="h-4 w-4" />
           <span>Raise Ticket</span>
         </Button>
       </div>
 
-      {/* QUICK METRICS GRID ROW */}
-      <div className="grid grid-cols-3 gap-2 sm:gap-4 max-w-4xl mx-auto">
-        <Card className="border border-slate-100/50 dark:border-white/5 shadow-xs bg-white/70 dark:bg-slate-900/40 backdrop-blur-md rounded-2xl p-4 text-center">
-          <span className="text-[8px] font-bold text-slate-400 block uppercase tracking-widest">Total Raised</span>
-          <span className="text-lg font-bold text-slate-850 dark:text-white mt-1 block">{supportTickets.length}</span>
-        </Card>
-        <Card className="border border-slate-100/50 dark:border-white/5 shadow-xs bg-white/70 dark:bg-slate-900/40 backdrop-blur-md rounded-2xl p-4 text-center relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1 h-full bg-amber-500" />
-          <span className="text-[8px] font-bold text-slate-400 block uppercase tracking-widest pl-1">Pending</span>
-          <span className="text-lg font-bold text-slate-850 dark:text-white mt-1 block pl-1">
-            {supportTickets.filter(t => t.status === "pending").length}
-          </span>
-        </Card>
-        <Card className="border border-slate-100/50 dark:border-white/5 shadow-xs bg-white/70 dark:bg-slate-900/40 backdrop-blur-md rounded-2xl p-4 text-center relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500" />
-          <span className="text-[8px] font-bold text-slate-400 block uppercase tracking-widest pl-1">Resolved</span>
-          <span className="text-lg font-bold text-slate-850 dark:text-white mt-1 block pl-1">
-            {supportTickets.filter(t => t.status === "approved").length}
-          </span>
-        </Card>
-      </div>
+      {!loadFailed && (
+        <div className="grid grid-cols-3 gap-2 sm:gap-4 max-w-4xl mx-auto">
+          <Card className="border border-slate-100/50 dark:border-white/5 shadow-xs bg-white/70 dark:bg-slate-900/40 backdrop-blur-md rounded-2xl p-3 sm:p-4 text-center">
+            <span className="text-[11px] font-bold text-slate-500 block uppercase tracking-wide">
+              Total
+            </span>
+            <span className="text-lg font-bold text-slate-850 dark:text-white mt-1 block">
+              {supportTickets.length}
+            </span>
+          </Card>
+          <Card className="border border-slate-100/50 dark:border-white/5 shadow-xs bg-white/70 dark:bg-slate-900/40 backdrop-blur-md rounded-2xl p-3 sm:p-4 text-center relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-1 h-full bg-amber-500" />
+            <span className="text-[11px] font-bold text-slate-500 block uppercase tracking-wide pl-1">
+              Waiting
+            </span>
+            <span className="text-lg font-bold text-slate-850 dark:text-white mt-1 block pl-1">
+              {supportTickets.filter((t) => t.status === "pending").length}
+            </span>
+          </Card>
+          <Card className="border border-slate-100/50 dark:border-white/5 shadow-xs bg-white/70 dark:bg-slate-900/40 backdrop-blur-md rounded-2xl p-3 sm:p-4 text-center relative overflow-hidden">
+            <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500" />
+            <span className="text-[11px] font-bold text-slate-500 block uppercase tracking-wide pl-1">
+              Answered
+            </span>
+            <span className="text-lg font-bold text-slate-850 dark:text-white mt-1 block pl-1">
+              {supportTickets.filter((t) => t.status !== "pending").length}
+            </span>
+          </Card>
+        </div>
+      )}
 
-      {/* CHRONOLOGICAL TICKET FEED & CATEGORIZED FILTERS ROW */}
       <div className="max-w-4xl mx-auto space-y-4">
-        
-        {/* Quick Category Switcher */}
-        <div className="flex items-center gap-2 bg-white/70 dark:bg-slate-900/40 backdrop-blur-md px-4 sm:px-5 py-3 rounded-2xl shadow-xs border border-slate-100/50 dark:border-white/5 overflow-x-auto whitespace-nowrap scrollbar-none max-w-full">
-          <span className="text-[9.5px] font-bold uppercase text-slate-400 dark:text-slate-500 mr-2 flex items-center gap-1.5 shrink-0">
-            <Filter className="h-3.5 w-3.5 text-primary/70" /> Toggle View:
-          </span>
-          
+        <div className="flex items-center gap-2 bg-white/70 dark:bg-slate-900/40 backdrop-blur-md px-3 sm:px-5 py-2.5 rounded-2xl shadow-xs border border-slate-100/50 dark:border-white/5 overflow-x-auto whitespace-nowrap scrollbar-none max-w-full">
           {[
-            { value: "all", label: "All Tickets" },
-            { value: "correction", label: "Punch Corrections" },
-            { value: "query", label: "IT Queries" },
+            { value: "all", label: "All" },
+            { value: "punch", label: "Punch fixes" },
+            { value: "query", label: "Questions" },
             { value: "complaint", label: "Complaints" },
-          ].map(f => (
+          ].map((f) => (
             <button
               key={f.value}
               onClick={() => setTicketFilter(f.value)}
-              className={`px-3.5 py-1.5 rounded-xl text-[9px] font-bold uppercase tracking-wider transition-all cursor-pointer shrink-0 ${
+              aria-pressed={ticketFilter === f.value}
+              className={`h-10 px-4 rounded-xl text-[13px] font-bold transition-all cursor-pointer shrink-0 ${
                 ticketFilter === f.value
                   ? "bg-[#501537] text-white shadow-sm"
                   : "bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-400"
@@ -163,123 +351,211 @@ function UserTickets() {
           ))}
         </div>
 
-        {/* List display */}
         {isLoading ? (
-          <div className="space-y-3.5 animate-pulse">
+          <div className="space-y-3.5 animate-pulse" aria-label="Loading your tickets">
             {Array.from({ length: 3 }).map((_, idx) => (
-              <div key={idx} className="p-5 bg-slate-200 dark:bg-slate-800/40 rounded-[24px] h-[100px]" />
+              <div
+                key={idx}
+                className="p-5 bg-slate-200 dark:bg-slate-800/40 rounded-[24px] h-[100px]"
+              />
             ))}
           </div>
+        ) : loadFailed ? (
+          <LoadError
+            what="your tickets"
+            error={error}
+            onRetry={() => refetch()}
+            retrying={isFetching}
+          />
         ) : filteredTickets.length > 0 ? (
           <div className="space-y-3.5">
-            {filteredTickets.map((ticket) => (
-              <motion.div
-                key={ticket._id}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="p-5 bg-white/70 dark:bg-slate-900/40 backdrop-blur-md rounded-[24px] shadow-xs border border-slate-100/50 dark:border-white/5 flex items-start justify-between gap-4 hover:shadow-soft hover:border-primary/20 dark:hover:border-white/10 transition-all duration-300 relative overflow-hidden"
-              >
-                <div className={`absolute top-0 left-0 w-1.5 h-full rounded-r-full ${
-                  ticket.status === "approved" ? "bg-emerald-500" : ticket.status === "rejected" ? "bg-rose-500" : "bg-amber-500"
-                }`} />
-                
-                <div className="space-y-2 flex-1 text-left pl-2">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Badge variant="outline" className="text-[8px] font-bold uppercase tracking-wider bg-slate-50 dark:bg-slate-805 text-slate-650 dark:text-slate-400 border-slate-200 dark:border-slate-800 px-2 py-0">
-                      {ticket.type}
-                    </Badge>
-                    <span className="text-[9.5px] text-slate-400 font-bold flex items-center gap-1">
-                      <Calendar className="h-3.5 w-3.5 text-primary/70" />
-                      {new Date(ticket.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                    </span>
-                  </div>
-                  
-                  <h4 className="text-[12px] font-semibold text-slate-800 dark:text-slate-100 leading-relaxed">
-                    {ticket.reason}
-                  </h4>
-                  
-                  {ticket.adminRemark && (
-                    <div className="mt-2.5 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800 text-[10px] leading-relaxed">
-                      <span className="font-bold text-[#501537] dark:text-[#7B2453] uppercase block tracking-wider text-[7.5px] mb-0.5">Admin Remark</span>
-                      <span className="text-slate-600 dark:text-slate-350 font-medium italic">"{ticket.adminRemark}"</span>
-                    </div>
-                  )}
-                </div>
+            {filteredTickets.map((ticket) => {
+              const punch = isCorrectionTicket(ticket.type);
+              // A punch ticket's reason defaults to its own label; don't repeat it.
+              const ownWords = !punch || ticket.reason !== TICKET_TYPE_LABELS[ticket.type];
+              return (
+                <motion.div
+                  key={ticket._id}
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="p-5 bg-white/70 dark:bg-slate-900/40 backdrop-blur-md rounded-[24px] shadow-xs border border-slate-100/50 dark:border-white/5 flex items-start justify-between gap-3 transition-all duration-300 relative overflow-hidden"
+                >
+                  <div
+                    className={`absolute top-0 left-0 w-1.5 h-full rounded-r-full ${
+                      ticket.status === "approved"
+                        ? "bg-emerald-500"
+                        : ticket.status === "rejected"
+                          ? "bg-rose-500"
+                          : "bg-amber-500"
+                    }`}
+                  />
 
-                <div className="shrink-0 pt-0.5">
-                  {getStatusBadge(ticket.status)}
-                </div>
-              </motion.div>
-            ))}
+                  <div className="space-y-2 flex-1 min-w-0 text-left pl-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <Badge
+                        variant="outline"
+                        className="text-[12px] font-bold bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 px-2 py-0"
+                      >
+                        {TICKET_TYPE_LABELS[ticket.type] ?? ticket.type}
+                      </Badge>
+                      <span className="text-[12px] text-slate-500 font-semibold flex items-center gap-1">
+                        <Calendar className="h-3.5 w-3.5 text-primary/70" />
+                        Sent{" "}
+                        {new Date(ticket.createdAt).toLocaleDateString("en-IN", {
+                          day: "numeric",
+                          month: "short",
+                          timeZone: "Asia/Kolkata",
+                        })}
+                      </span>
+                    </div>
+
+                    {punch && <CorrectionSummary ticket={ticket} />}
+
+                    {ownWords && (
+                      <p className="text-[14px] font-semibold text-slate-800 dark:text-slate-100 leading-relaxed whitespace-pre-line break-words">
+                        {ticket.reason}
+                      </p>
+                    )}
+
+                    {ticket.adminRemark && (
+                      <div className="mt-2.5 p-3 bg-slate-50 dark:bg-slate-800/50 rounded-xl border border-slate-100 dark:border-slate-800 text-[14px] leading-relaxed">
+                        <span className="font-bold text-[#501537] dark:text-[#e0a6c6] block text-[12px] mb-0.5">
+                          {ticket.status === "rejected" ? "Reason from HR" : "Reply from HR"}
+                        </span>
+                        <span className="text-slate-700 dark:text-slate-300 font-medium break-words">
+                          {ticket.adminRemark}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="shrink-0 pt-0.5">{getStatusBadge(ticket)}</div>
+                </motion.div>
+              );
+            })}
           </div>
         ) : (
           <div className="p-8 text-center bg-white/70 dark:bg-slate-900/40 backdrop-blur-md border border-slate-100/50 dark:border-white/5 rounded-[24px]">
             <Info className="h-7 w-7 text-slate-300 mx-auto mb-2" />
-            <p className="text-xs text-slate-400 font-medium">No tickets raised for this category yet.</p>
+            <p className="text-[14px] text-slate-500 font-medium">
+              {supportTickets.length === 0
+                ? "You have not raised any tickets yet."
+                : "No tickets of this kind yet."}
+            </p>
           </div>
         )}
       </div>
 
-      {/* Raise Ticket Dialog */}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-[340px] sm:max-w-md rounded-3xl p-6 overflow-hidden border border-slate-100 dark:border-slate-800 dark:bg-slate-900 text-left">
-          <DialogHeader className="text-left">
+      {/* Radix Dialog portals to <body>, so the bottom nav cannot paint over
+          it, and closes on Escape -- which is what Android Back sends. */}
+      <Dialog
+        open={open}
+        onOpenChange={(o) => {
+          if (!createTicketMutation.isPending) setOpen(o);
+        }}
+      >
+        <DialogContent
+          className={cn(
+            "w-[calc(100vw-24px)] max-w-md rounded-3xl p-5 sm:p-6 max-h-[90dvh] overflow-y-auto border border-slate-100 dark:border-slate-800 dark:bg-slate-900 text-left",
+            DIALOG_CLOSE_40,
+          )}
+        >
+          <DialogHeader className="text-left pr-8">
             <DialogTitle className="text-base font-bold tracking-tight text-slate-800 dark:text-slate-100">
-              Raise Support Ticket
+              Raise a Ticket
             </DialogTitle>
-            <DialogDescription className="text-xs text-slate-500">
-              Select ticket category and state your request description.
+            <DialogDescription className="text-[13px] text-slate-500">
+              {isCorrection
+                ? "Pick the day and the real time. Your admin will check it."
+                : "Choose what it is about and write your message. HR will reply here."}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-3 text-left">
-            {/* Ticket Category */}
+          <div className="space-y-4 py-2 text-left">
             <div className="space-y-1.5">
-              <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Category</Label>
-              <Select 
-                value={ticketType} 
-                onValueChange={(val) => {
-                  setTicketType(val);
-                  setDescription(val === "Correction" ? "Punch Correction: " : "");
-                }}
+              <span
+                className="text-[13px] font-bold text-slate-600 dark:text-slate-300"
+                id="ticket-kind"
               >
-                <SelectTrigger className="rounded-xl border-slate-200 dark:border-slate-800 h-10 text-xs">
-                  <SelectValue placeholder="Select type" />
-                </SelectTrigger>
-                <SelectContent className="rounded-xl">
-                  <SelectItem value="Correction">Punch Correction</SelectItem>
-                  <SelectItem value="Query">HR Query</SelectItem>
-                  <SelectItem value="Complaint">System Complaint</SelectItem>
-                </SelectContent>
-              </Select>
+                What is it about?
+              </span>
+              <div
+                className="grid grid-cols-2 gap-2"
+                role="radiogroup"
+                aria-labelledby="ticket-kind"
+              >
+                {NEW_TYPES.map(({ value, label, icon: Icon }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    role="radio"
+                    aria-checked={ticketType === value}
+                    onClick={() => setTicketType(value)}
+                    className={cn(
+                      "min-h-12 rounded-xl border px-3 py-2 text-left text-[13px] font-bold leading-tight flex items-center gap-2 transition-colors",
+                      ticketType === value
+                        ? "border-[#501537] bg-[#501537] text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200",
+                    )}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            {/* Description details */}
-            <div className="space-y-1.5">
-              <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Request Description</Label>
-              <Textarea 
-                placeholder="Include date, approximate times and reason for correction request..." 
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="rounded-xl border-slate-200 dark:border-slate-800 min-h-[85px] text-xs px-3 focus-visible:ring-1 focus-visible:ring-primary"
+            {isCorrection && (
+              // Keyed by type: switching in <-> out starts the picker afresh.
+              <PunchCorrectionFields
+                key={ticketType}
+                field={ticketType === "ForgotPunchIn" ? "punchIn" : "punchOut"}
+                onChange={setCorrection}
               />
+            )}
+
+            <div className="space-y-1.5">
+              <label
+                htmlFor="ticket-message"
+                className="text-[13px] font-bold text-slate-600 dark:text-slate-300"
+              >
+                {isCorrection ? "Reason (you can leave this empty)" : "Your message"}
+              </label>
+              <Textarea
+                id="ticket-message"
+                placeholder={PLACEHOLDERS[ticketType] ?? "Write your message"}
+                value={description}
+                maxLength={reasonMax}
+                onChange={(e) => setDescription(e.target.value)}
+                className="rounded-xl border-slate-200 dark:border-slate-800 min-h-[90px] text-[16px] px-3 focus-visible:ring-1 focus-visible:ring-primary"
+              />
+              {isCorrection && (
+                <p className="text-right text-[12px] text-slate-500">
+                  {description.length}/{reasonMax}
+                </p>
+              )}
             </div>
           </div>
 
-          <DialogFooter className="flex-row gap-2 mt-2">
-            <Button 
-              variant="ghost" 
+          <DialogFooter className="flex-row gap-2 mt-1">
+            <Button
+              variant="ghost"
               onClick={() => setOpen(false)}
-              className="flex-1 rounded-xl h-10 text-xs font-bold hover:bg-slate-50 dark:hover:bg-slate-800"
+              disabled={createTicketMutation.isPending}
+              className="flex-1 rounded-xl h-12 text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-800"
             >
               Cancel
             </Button>
-            <Button 
-              onClick={() => createTicketMutation.mutate()}
-              disabled={createTicketMutation.isPending || !description.trim()}
-              className="flex-1 bg-gradient-primary text-white font-bold rounded-xl h-10 border-none shadow-md shadow-primary/20 text-xs"
+            <Button
+              onClick={submit}
+              disabled={createTicketMutation.isPending || !canSend}
+              className="flex-1 bg-gradient-primary text-white font-bold rounded-xl h-12 border-none shadow-md shadow-primary/20 text-sm"
             >
-              {createTicketMutation.isPending ? <RefreshCw className="h-4 w-4 animate-spin" /> : "Submit Request"}
+              {createTicketMutation.isPending ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                "Send"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

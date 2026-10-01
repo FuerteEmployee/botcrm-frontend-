@@ -47,7 +47,7 @@ const ICONS: Record<StepId, typeof MapPin> = {
   autostart: Power,
 };
 
-export function TrackingSetupGate({ setup }: { setup: TrackingSetup }) {
+export function TrackingSetupGate({ setup, alwaysOn = false }: { setup: TrackingSetup; alwaysOn?: boolean }) {
   const [busy, setBusy] = useState<StepId | null>(null);
 
   const act = async (step: SetupStep) => {
@@ -89,13 +89,12 @@ export function TrackingSetupGate({ setup }: { setup: TrackingSetup }) {
             <AlertTriangle className="h-4.5 w-4.5 text-warning-foreground" />
           </div>
           <div className="min-w-0">
-            <p className="text-[14px] font-black tracking-tight text-foreground">
+            <p className="text-[16px] font-black tracking-tight text-foreground">
               Finish setup to start punching in
             </p>
-            <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
-              Your attendance is recorded from your location while you are punched in. Android needs
-              these {total} settings, or recording stops the moment your screen locks — and your hours
-              would go missing without either of us noticing.
+            <p className="mt-0.5 text-[13px] leading-relaxed text-muted-foreground">
+              Turn on these {total} phone settings, one by one. Without them your phone stops
+              recording your work hours when the screen locks.
             </p>
           </div>
         </div>
@@ -107,7 +106,7 @@ export function TrackingSetupGate({ setup }: { setup: TrackingSetup }) {
               style={{ width: `${total ? (doneCount / total) * 100 : 0}%` }}
             />
           </div>
-          <span className="text-[11px] font-black tabular-nums text-muted-foreground">
+          <span className="text-[13px] font-black tabular-nums text-muted-foreground">
             {doneCount}/{total}
           </span>
         </div>
@@ -144,14 +143,14 @@ export function TrackingSetupGate({ setup }: { setup: TrackingSetup }) {
 
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-[13px] font-black tracking-tight">{step.title}</p>
+                    <p className="text-[15px] font-black tracking-tight">{step.title}</p>
                     {step.selfDeclared && !step.done && (
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-muted-foreground">
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-bold text-muted-foreground">
                         We can't check this
                       </span>
                     )}
                   </div>
-                  <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                  <p className="mt-0.5 text-[13px] leading-relaxed text-muted-foreground">
                     {step.detail}
                   </p>
 
@@ -167,12 +166,12 @@ export function TrackingSetupGate({ setup }: { setup: TrackingSetup }) {
                     if (!oem) return null;
                     return (
                       <div className="mt-2.5 rounded-xl border border-border/50 bg-muted/30 p-2.5 space-y-2">
-                        <p className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">
+                        <p className="text-[12px] font-black text-muted-foreground">
                           On your phone ({oem.skin})
                         </p>
                         <ol className="space-y-1">
                           {oem.whitelist.map((line, i) => (
-                            <li key={i} className="flex gap-1.5 text-[11px] leading-relaxed text-foreground/80">
+                            <li key={i} className="flex gap-1.5 text-[13px] leading-relaxed text-foreground/80">
                               <span className="shrink-0 font-black text-primary">{i + 1}.</span>
                               <span>{line}</span>
                             </li>
@@ -180,12 +179,12 @@ export function TrackingSetupGate({ setup }: { setup: TrackingSetup }) {
                         </ol>
                         {oem.vendor.length > 0 && (
                           <div className="border-t border-border/40 pt-2 space-y-1">
-                            <p className="text-[10px] font-bold text-muted-foreground">
+                            <p className="text-[12px] font-bold text-muted-foreground">
                               Also do these — we cannot check them, but without them your phone
                               stops recording anyway:
                             </p>
                             {oem.vendor.map((line, i) => (
-                              <p key={i} className="text-[11px] leading-relaxed text-foreground/70">
+                              <p key={i} className="text-[13px] leading-relaxed text-foreground/70">
                                 • {line}
                               </p>
                             ))}
@@ -199,7 +198,7 @@ export function TrackingSetupGate({ setup }: { setup: TrackingSetup }) {
                     <div className="mt-2.5 flex flex-wrap gap-2">
                       <Button
                         size="sm"
-                        className="h-8 rounded-lg px-3 text-[11px] font-black"
+                        className="h-11 rounded-xl px-5 text-[14px] font-black"
                         disabled={busy === step.id}
                         onClick={() => act(step)}
                       >
@@ -216,10 +215,10 @@ export function TrackingSetupGate({ setup }: { setup: TrackingSetup }) {
                         <Button
                           size="sm"
                           variant="outline"
-                          className="h-8 rounded-lg px-3 text-[11px] font-black"
+                          className="h-11 rounded-xl px-5 text-[14px] font-black"
                           onClick={setup.confirmAutostart}
                         >
-                          I've enabled it
+                          I turned it on
                         </Button>
                       )}
                     </div>
@@ -235,12 +234,12 @@ export function TrackingSetupGate({ setup }: { setup: TrackingSetup }) {
         <Button
           size="sm"
           variant="outline"
-          className="h-8 rounded-lg px-3 text-[11px] font-black gap-1.5"
+          className="h-11 rounded-xl px-4 text-[14px] font-black gap-1.5"
           onClick={() => setup.refresh()}
           disabled={setup.loading}
         >
-          <RefreshCw className={cn("h-3.5 w-3.5", setup.loading && "animate-spin")} />
-          Re-check
+          <RefreshCw className={cn("h-4 w-4", setup.loading && "animate-spin")} />
+          Check again
         </Button>
         {/* Android permanently blocks the permission dialog after two denials.
             When that has happened, the only route left is the app's own
@@ -248,17 +247,18 @@ export function TrackingSetupGate({ setup }: { setup: TrackingSetup }) {
         <Button
           size="sm"
           variant="ghost"
-          className="h-8 rounded-lg px-3 text-[11px] font-bold text-muted-foreground"
+          className="h-11 rounded-xl px-4 text-[13px] font-bold text-muted-foreground"
           onClick={() => openAppSettings()}
         >
           Open app settings instead
         </Button>
       </div>
 
-      <p className="flex items-start gap-1.5 text-[10px] leading-relaxed text-muted-foreground/80">
+      <p className="flex items-start gap-1.5 text-[12px] leading-relaxed text-muted-foreground/80">
         <ShieldCheck className="mt-0.5 h-3 w-3 shrink-0" />
-        Your location is recorded only between punch-in and punch-out, and is used solely to confirm
-        attendance at your branch.
+        {alwaysOn
+          ? "Your company has chosen to record your location all the time, including after work. Ask your admin if you have questions."
+          : "Your location is recorded only between punch-in and punch-out, and is used solely to confirm attendance at your branch."}
       </p>
     </div>
   );

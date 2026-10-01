@@ -468,7 +468,7 @@ export function DeviceTab({ employeeId }: { employeeId: string }) {
   const { data: errors } = useClientErrors(employeeId);
 
   const sorted = useMemo(
-    () => [...(devices ?? [])].sort((a, b) => +new Date(b.lastSeenAt) - +new Date(a.lastSeenAt)),
+    () => [...(Array.isArray(devices) ? devices : [])].sort((a, b) => +new Date(b.lastSeenAt) - +new Date(a.lastSeenAt)),
     [devices],
   );
   const current = sorted[0];
@@ -533,7 +533,7 @@ export function DeviceTab({ employeeId }: { employeeId: string }) {
                 <TableCell className="text-xs text-muted-foreground">
                   {d.platform ?? "—"} {d.osVersion ?? ""}
                 </TableCell>
-                <TableCell className="text-xs text-right tabular-nums">{d.appOpenCount.toLocaleString()}</TableCell>
+                <TableCell className="text-xs text-right tabular-nums">{(d.appOpenCount ?? 0).toLocaleString()}</TableCell>
                 <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{fmtDateTime(d.firstSeenAt)}</TableCell>
                 <TableCell className="text-xs text-muted-foreground whitespace-nowrap">{fmtDateTime(d.lastSeenAt)}</TableCell>
               </TableRow>

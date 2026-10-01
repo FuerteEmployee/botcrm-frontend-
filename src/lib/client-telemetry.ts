@@ -98,9 +98,23 @@ async function readLocationPermissions(): Promise<{
 }
 
 async function readCameraPermission(): Promise<PermissionState> {
-  // No camera plugin is installed, so there's no native state to query. The web
-  // Permissions API is the only signal available and is itself optional — some
-  // Android WebViews reject the 'camera' name entirely.
+  // APK 19+ reports the real Android grant. The WebView's own answer is a
+  // separate grant and said "prompt" on phones where the camera was allowed
+  // and in use, so it is only the fallback for older builds and the browser.
+  // Not granted reads "prompt", not "denied": Android does not say whether it
+  // was refused or simply never asked.
+  try {
+    const { checkAllPermissions, available } = await import("@/plugins/background-tracker");
+    if (available()) {
+      const r = await checkAllPermissions();
+      if (r && typeof r.camera === "boolean") return r.camera ? "granted" : "prompt";
+    }
+  } catch {
+    /* fall through to the web reading */
+  }
+
+  // Older APKs: the web Permissions API is the only signal, and is itself
+  // optional -- some Android WebViews reject the 'camera' name entirely.
   try {
     const anyNav = navigator as any;
     if (!anyNav.permissions?.query) return "unknown";
@@ -291,6 +305,7 @@ async function isTrackerReady(): Promise<boolean> {
 }
 
 let lastReportAt = 0;
+let lastReportedState = "";
 let cachedInfo: ClientInfo | null = null;
 
 /**
@@ -298,16 +313,27 @@ let cachedInfo: ClientInfo | null = null;
  * every app resume, and an employee switching apps repeatedly shouldn't
  * generate a request per switch. `force` bypasses it for login, where the row
  * needs to exist immediately.
+ *
+ * Inside the throttle window a report still goes out when what the admin page
+ * shows has CHANGED. The login report is sent before the employee has seen the
+ * permission screens, and every return from Android settings during setup fell
+ * inside the window, so a phone that granted everything kept showing "Denied"
+ * and "Not asked yet" until the next resume after ten minutes, which for an
+ * employee who then just works may be never (seen 2026-10-01: punched in and
+ * tracking with a 7 m GPS fix while the page said location was never asked).
  */
 export async function reportClient(force = false): Promise<void> {
   if (!getSession()?.token) return; // the route needs the employee's own JWT
-  if (!force && Date.now() - lastReportAt < REPORT_THROTTLE_MS) return;
+  const throttled = !force && Date.now() - lastReportAt < REPORT_THROTTLE_MS;
 
   try {
     const info = await collectClientInfo();
     cachedInfo = info;
+    const state = JSON.stringify([info.appVersion, info.appBuild, info.permissions, info.autoStartProven, info.trackingSetupComplete]);
+    if (throttled && state === lastReportedState) return;
     await apiClient.post("/client/report", info);
     lastReportAt = Date.now();
+    lastReportedState = state;
   } catch {
     // Never surface a telemetry failure to the employee — it isn't their
     // problem and there is nothing for them to do about it.

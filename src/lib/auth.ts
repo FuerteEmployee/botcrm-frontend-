@@ -1,5 +1,5 @@
-// Tiny client-side auth store (demo only). Persists in localStorage so refresh keeps the session.
-// NOTE: This is a UI-only demo; real apps must validate sessions on the server.
+// Client-side session cache. Persists in localStorage so a refresh keeps the
+// session. Not an authority: `protect` revalidates the JWT on every request.
 
 const KEY = "bot_hrms_session";
 
@@ -26,11 +26,21 @@ export interface Session {
   permissions?: Record<string, PagePermission>;
 }
 
+const ROLES: ReadonlyArray<Session["role"]> = ["superadmin", "admin", "employee", "subadmin"];
+
+// A stored value without a token or a known role is treated as no session.
+// Returning it anyway sent "/" to /user (no role -> employee shell), which sent
+// it back to "/" (not an employee) -- a redirect loop instead of the login page.
 export function getSession(): Session | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(KEY);
-    return raw ? (JSON.parse(raw) as Session) : null;
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<Session> | null;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (typeof parsed.token !== "string" || !parsed.token) return null;
+    if (!ROLES.includes(parsed.role as Session["role"])) return null;
+    return parsed as Session;
   } catch {
     return null;
   }
@@ -38,7 +48,11 @@ export function getSession(): Session | null {
 
 export function setSession(session: Session) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(KEY, JSON.stringify(session));
+  try {
+    window.localStorage.setItem(KEY, JSON.stringify(session));
+  } catch {
+    /* storage full or blocked: the session then lasts until reload */
+  }
   window.dispatchEvent(new Event("bot-auth-change"));
 }
 
@@ -56,7 +70,11 @@ export function patchSession(patch: Partial<Session>) {
 
 export function clearSession() {
   if (typeof window === "undefined") return;
-  window.localStorage.removeItem(KEY);
+  try {
+    window.localStorage.removeItem(KEY);
+  } catch {
+    /* blocked storage: nothing to remove */
+  }
   window.dispatchEvent(new Event("bot-auth-change"));
 }
 

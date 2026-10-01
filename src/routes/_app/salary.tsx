@@ -1,8 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useMemo, useEffect } from "react";
-import { Search, Download, Wallet, Filter, CalendarDays, Loader2, Sparkles, Receipt, Info, ArrowUpRight, ArrowDownRight, Building2, MapPin, HandCoins } from "lucide-react";
+import { Search, Download, Wallet, Filter, CalendarDays, Loader2, Sparkles, Receipt, Building2, MapPin, HandCoins, RefreshCw, CheckCircle2, AlertTriangle } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
-import { Card } from "@/components/ui/card";
 import { ViewToggle } from "@/components/shared/view-toggle";
 import { FormInput } from "@/components/shared/form-input";
 import { Button } from "@/components/ui/button";
@@ -24,8 +23,10 @@ import { useSalaryService, type SalaryRecord } from "@/services/salary-service";
 import { fetchApprovedAdvancesForEmployee, type AdvanceSalaryRequest } from "@/services/advance-salary-service";
 import { fetchApprovedExpensesForEmployee, type Expense } from "@/services/expense-service";
 import { toast } from "sonner";
-import { cn, formatTime12h } from "@/lib/utils";
-import { formatINR, formatINRFull } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { formatINR } from "@/lib/format";
+import { downloadCSV } from "@/lib/export";
+import { isNativeApp } from "@/lib/geolocation";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { motion, AnimatePresence } from "framer-motion";
 import { useDepartmentService } from "@/services/department-service";
@@ -40,6 +41,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  SalarySlipDialog, money, monthLabel, statusLabel, statusClass, salaryBasis, earnedOf,
+} from "@/components/pages/salary-slip-dialog";
 
 export const Route = createFileRoute("/_app/salary")({
   component: SalaryPage,
@@ -48,6 +52,7 @@ export const Route = createFileRoute("/_app/salary")({
 
 const MONTHS = Array.from({ length: 12 }).map((_, i) => {
   const d = new Date();
+  d.setDate(1); // setMonth on the 31st skips short months (31 Oct - 1 month = 1 Oct)
   d.setMonth(d.getMonth() - i);
   const m = d.getMonth() + 1;
   const y = d.getFullYear();
@@ -58,12 +63,21 @@ const MONTHS = Array.from({ length: 12 }).map((_, i) => {
   };
 });
 
+const canPay = (r: SalaryRecord) => r.status === "pending" || r.status === "final";
+const notPaid = (r: SalaryRecord) => r.status !== "paid";
+
+function daysCell(r: SalaryRecord): string {
+  if (r.employmentType === "daily" || r.employmentType === "hourly") return "—";
+  if (r.payableDays != null) return `${r.payableDays}/${r.totalDaysInWindow ?? "—"}`;
+  return "—";
+}
+
 function SalaryPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("all");
   const [deptFilter, setDeptFilter] = useState("all");
   const [branchFilter, setBranchFilter] = useState("all");
-  const [selectedMonth, setSelectedMonth] = useState(`${new Date().getMonth() + 1}-${new Date().getFullYear()}`);
+  const [selectedMonth, setSelectedMonth] = useState(`${MONTHS[0].m}-${MONTHS[0].y}`);
   const [detailsRecord, setDetailsRecord] = useState<SalaryRecord | null>(null);
   const [advanceModalRecord, setAdvanceModalRecord] = useState<SalaryRecord | null>(null);
   const [advanceOptions, setAdvanceOptions] = useState<AdvanceSalaryRequest[]>([]);
@@ -77,6 +91,9 @@ function SalaryPage() {
   const [view, setView] = useState<"grid" | "list">(defaultLayout);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [generateOpen, setGenerateOpen] = useState(false);
+  const [payRecord, setPayRecord] = useState<SalaryRecord | null>(null);
+  const [undoRecord, setUndoRecord] = useState<SalaryRecord | null>(null);
+  const [recalcId, setRecalcId] = useState<string | null>(null);
   const { can } = usePermission();
   const canCreate = can("salary", "create");
   const canEdit = can("salary", "edit");
@@ -91,28 +108,55 @@ function SalaryPage() {
 
   const [m, y] = selectedMonth.split("-").map(Number);
   const {
-    salaryRecords: list, isLoading, updateSalary, deleteSalary, isDeleting, generateSalaries, isGenerating,
-    generateSalaryForEmployee, isGeneratingOne,
+    salaryRecords: list, isLoading, error, refetch, updateSalary, isUpdating, deleteSalary, isDeleting,
+    generateSalaries, isGenerating, generateSalaryForEmployee, isGeneratingOne,
   } = useSalaryService(m, y);
 
   const filtered = useMemo(() => list.filter((s) => {
     const name = s.employeeId?.name || "";
     const okSearch = !search || name.toLowerCase().includes(search.toLowerCase());
     const okStatus = status === "all" || s.status === status;
-    const okDept = deptFilter === "all" || (s.employeeId as any)?.departmentId?.name === deptFilter;
-    const okBranch = branchFilter === "all" || (s.employeeId as any)?.branchId?.branchName === branchFilter;
+    const okDept = deptFilter === "all" || s.employeeId?.departmentId?.name === deptFilter;
+    const okBranch = branchFilter === "all" || s.employeeId?.branchId?.branchName === branchFilter;
 
     return okSearch && okStatus && okDept && okBranch;
   }), [search, status, deptFilter, branchFilter, list]);
 
-  const total = filtered.reduce((s, r) => s + r.totalSalary, 0);
-  const paid = filtered.filter((r) => r.status === "paid").reduce((s, r) => s + r.totalSalary, 0);
-  const pending = filtered.filter((r) => r.status === "pending").reduce((s, r) => s + r.totalSalary, 0);
+  // "Not paid yet" is everything that isn't paid -- pending (month still
+  // running), final (month over) and needs review -- so the three cards add up.
+  const total = filtered.reduce((s, r) => s + (r.totalSalary || 0), 0);
+  const paid = filtered.filter((r) => r.status === "paid").reduce((s, r) => s + (r.totalSalary || 0), 0);
+  const unpaid = total - paid;
+  const reviewCount = filtered.filter((r) => r.status === "review").length;
 
-  const handlePay = async (id: string) => {
+  const confirmPay = async () => {
+    if (!payRecord) return;
     try {
-      await updateSalary({ id, status: "paid" });
-    } catch (err) { }
+      await updateSalary({ id: payRecord._id, status: "paid" });
+      setPayRecord(null);
+    } catch { /* toast shown by the service */ }
+  };
+
+  const confirmUndo = async () => {
+    if (!undoRecord) return;
+    try {
+      // Back to what generation would call it: final for a completed month,
+      // pending for the running one.
+      const now = new Date();
+      const running = undoRecord.year === now.getFullYear() && undoRecord.month === now.getMonth() + 1;
+      await updateSalary({ id: undoRecord._id, status: running ? "pending" : "final" });
+      setUndoRecord(null);
+      setDetailsRecord(null);
+    } catch { /* toast shown by the service */ }
+  };
+
+  const recalc = async (r: SalaryRecord) => {
+    setRecalcId(r._id);
+    try {
+      await generateSalaryForEmployee({ employeeId: r.employeeId._id, month: r.month, year: r.year });
+    } catch { /* toast shown by the service */ } finally {
+      setRecalcId(null);
+    }
   };
 
   const handleDelete = async () => {
@@ -120,7 +164,31 @@ function SalaryPage() {
     try {
       await deleteSalary(deleteId);
       setDeleteId(null);
-    } catch (err) { }
+    } catch { /* toast shown by the service */ }
+  };
+
+  const handleExport = () => {
+    if (isNativeApp()) {
+      toast.info("Export works in the web browser. Open the admin panel on a computer to download it.");
+      return;
+    }
+    if (filtered.length === 0) {
+      toast.info("There is nothing to export for this month.");
+      return;
+    }
+    downloadCSV(`salary-${y}-${String(m).padStart(2, "0")}`, [
+      { header: "Employee", value: (r) => r.employeeId?.name },
+      { header: "Phone", value: (r) => r.employeeId?.phone },
+      { header: "Month", value: (r) => monthLabel(r.month, r.year) },
+      { header: "Pay type", value: (r) => r.employmentType || "monthly" },
+      { header: "Salary", value: (r) => r.baseSalary },
+      { header: "Days paid", value: (r) => (r.payableDays != null ? `${r.payableDays} of ${r.totalDaysInWindow ?? ""}` : "") },
+      { header: "Earned", value: (r) => Math.round(earnedOf(r) * 100) / 100 },
+      { header: "Deductions", value: (r) => r.deductions },
+      { header: "Net pay", value: (r) => r.totalSalary },
+      { header: "Status", value: (r) => statusLabel(r.status) },
+    ], filtered);
+    toast.success(`Exported ${filtered.length} salar${filtered.length === 1 ? "y" : "ies"}`);
   };
 
   // Regeneration rewrites every active employee's record for the selected
@@ -135,7 +203,7 @@ function SalaryPage() {
     try {
       await generateSalaries({ month: m, year: y });
       setGenerateOpen(false);
-    } catch (err) { }
+    } catch { /* toast shown by the service */ }
   };
 
   const openAdvanceModal = async (record: SalaryRecord) => {
@@ -144,7 +212,7 @@ function SalaryPage() {
     setIsLoadingAdvances(true);
     try {
       const advances = await fetchApprovedAdvancesForEmployee(record.employeeId._id);
-      setAdvanceOptions(advances);
+      setAdvanceOptions(Array.isArray(advances) ? advances : []);
     } catch (err) {
       setAdvanceOptions([]);
     } finally {
@@ -171,7 +239,7 @@ function SalaryPage() {
         advanceRequestIds: Array.from(selectedAdvanceIds),
       });
       setAdvanceModalRecord(null);
-    } catch (err) { }
+    } catch { /* toast shown by the service */ }
   };
 
   const openExpenseModal = async (record: SalaryRecord) => {
@@ -180,7 +248,7 @@ function SalaryPage() {
     setIsLoadingExpenses(true);
     try {
       const expenses = await fetchApprovedExpensesForEmployee(record.employeeId._id);
-      setExpenseOptions(expenses);
+      setExpenseOptions(Array.isArray(expenses) ? expenses : []);
     } catch (err) {
       setExpenseOptions([]);
     } finally {
@@ -207,20 +275,47 @@ function SalaryPage() {
         expenseIds: Array.from(selectedExpenseIds),
       });
       setExpenseModalRecord(null);
-    } catch (err) { }
+    } catch { /* toast shown by the service */ }
   };
+
+  // Row actions, shared by the grid cards and the table rows.
+  const rowActions = (r: SalaryRecord, size: string) => (
+    <>
+      {notPaid(r) && canEdit && (
+        <ActionButton variant="comment" icon={HandCoins} tooltip="Deduct an advance" aria-label="Deduct an advance" onClick={() => openAdvanceModal(r)} className={size} />
+      )}
+      {notPaid(r) && canEdit && (
+        <ActionButton variant="comment" icon={Receipt} tooltip="Add an expense claim" aria-label="Add an expense claim" onClick={() => openExpenseModal(r)} className={size} />
+      )}
+      {canCreate && (
+        <ActionButton
+          variant="refresh"
+          icon={RefreshCw}
+          tooltip="Recalculate"
+          aria-label="Recalculate"
+          loading={recalcId === r._id}
+          disabled={isGeneratingOne}
+          onClick={() => recalc(r)}
+          className={size}
+        />
+      )}
+      {canDelete && notPaid(r) && (
+        <ActionButton variant="delete" tooltip="Delete" aria-label="Delete" onClick={() => setDeleteId(r._id)} className={size} />
+      )}
+    </>
+  );
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Salary Management"
-        description="View and manage payroll for the organization."
+        description="Work out, check and pay salaries for each month."
         actions={
           <div className="flex gap-2">
             {canCreate && (
               <Button
                 size="sm"
-                className="h-9 text-[13px] bg-gradient-primary text-primary-foreground hover:shadow-md rounded-xl transition-all font-bold gap-2"
+                className="h-10 text-[13px] bg-gradient-primary text-primary-foreground hover:shadow-md rounded-xl transition-all font-bold gap-2"
                 onClick={() => setGenerateOpen(true)}
                 disabled={isGenerating}
               >
@@ -232,7 +327,7 @@ function SalaryPage() {
                 Generate Payroll
               </Button>
             )}
-            <Button size="sm" variant="outline" className="h-9 text-[13px] rounded-lg" onClick={() => toast.success("Exported as CSV")}>
+            <Button size="sm" variant="outline" className="h-10 text-[13px] rounded-xl" onClick={handleExport}>
               <Download className="h-3.5 w-3.5 mr-1.5" /> Export
             </Button>
           </div>
@@ -246,20 +341,30 @@ function SalaryPage() {
         ) : (
           <>
             <StatCard label="Total Payroll" value={formatINR(total)} icon={Wallet} accent="primary" className="col-span-2 sm:col-span-1" />
-            <StatCard label="Paid" value={formatINR(paid)} icon={Wallet} accent="success" />
-            <StatCard label="Pending" value={formatINR(pending)} icon={Wallet} accent="warning" />
+            <StatCard label="Paid" value={formatINR(paid)} icon={CheckCircle2} accent="success" />
+            <StatCard label="Not paid yet" value={formatINR(unpaid)} icon={Wallet} accent="warning" />
           </>
         )}
       </div>
+
+      {reviewCount > 0 && !isLoading && (
+        <div className="flex gap-2 rounded-xl border border-amber-300 bg-amber-50 p-3 text-[13px] text-amber-900">
+          <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+          <p>
+            {reviewCount} salar{reviewCount === 1 ? "y needs" : "ies need"} checking: some attendance days could not be
+            worked out automatically. Correct them on the Attendance page, then press Recalculate.
+          </p>
+        </div>
+      )}
 
       {/* Filters Bar */}
       <div className="flex flex-col md:flex-row items-center justify-between gap-3 py-1">
         <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
           <ViewToggle view={view} onViewChange={updateDefaultLayout} />
 
-          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          <div className="grid grid-cols-2 md:flex md:flex-wrap items-center gap-2 w-full md:w-auto">
             <Select value={selectedMonth} onValueChange={setSelectedMonth}>
-              <SelectTrigger className="h-10 w-full md:w-[160px] border border-primary/20 bg-primary/5 text-primary hover:bg-primary/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
+              <SelectTrigger aria-label="Month" className="col-span-2 md:col-auto h-10 w-full md:w-[170px] border border-primary/20 bg-primary/5 text-primary hover:bg-primary/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
                 <CalendarDays className="h-3.5 w-3.5" />
                 <SelectValue placeholder="Month" />
               </SelectTrigger>
@@ -271,36 +376,38 @@ function SalaryPage() {
             </Select>
 
             <Select value={status} onValueChange={setStatus}>
-              <SelectTrigger className="h-10 w-full md:w-[140px] border border-success/20 bg-success/5 text-success hover:bg-success/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
+              <SelectTrigger aria-label="Status" className="h-10 w-full md:w-[150px] border border-success/20 bg-success/5 text-success hover:bg-success/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
                 <Filter className="h-3.5 w-3.5" />
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent className="rounded-xl border-border/60">
-                <SelectItem value="all">All Status</SelectItem>
+                <SelectItem value="all">All statuses</SelectItem>
                 <SelectItem value="paid">Paid</SelectItem>
+                <SelectItem value="final">Final</SelectItem>
                 <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="review">Needs review</SelectItem>
               </SelectContent>
             </Select>
 
             <Select value={deptFilter} onValueChange={setDeptFilter}>
-              <SelectTrigger className="h-10 w-full md:w-[150px] border-border bg-white rounded-xl text-[13px] font-medium gap-2 px-3 shadow-none">
+              <SelectTrigger aria-label="Department" className="h-10 w-full md:w-[160px] border-border bg-white rounded-xl text-[13px] font-medium gap-2 px-3 shadow-none">
                 <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
                 <SelectValue placeholder="Department" />
               </SelectTrigger>
               <SelectContent className="rounded-xl border-border/60">
-                <SelectItem value="all">All Departments</SelectItem>
-                {departments.map(d => <SelectItem key={d._id} value={d.name}>{d.name}</SelectItem>)}
+                <SelectItem value="all">All departments</SelectItem>
+                {(departments || []).map(d => <SelectItem key={d._id} value={d.name}>{d.name}</SelectItem>)}
               </SelectContent>
             </Select>
 
             <Select value={branchFilter} onValueChange={setBranchFilter}>
-              <SelectTrigger className="h-10 w-full md:w-[150px] border-border bg-white rounded-xl text-[13px] font-medium gap-2 px-3 shadow-none">
+              <SelectTrigger aria-label="Branch" className="col-span-2 md:col-auto h-10 w-full md:w-[160px] border-border bg-white rounded-xl text-[13px] font-medium gap-2 px-3 shadow-none">
                 <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
                 <SelectValue placeholder="Branch" />
               </SelectTrigger>
               <SelectContent className="rounded-xl border-border/60">
-                <SelectItem value="all">All Branches</SelectItem>
-                {branches.map(b => <SelectItem key={b._id} value={b.branchName}>{b.branchName}</SelectItem>)}
+                <SelectItem value="all">All branches</SelectItem>
+                {(branches || []).map(b => <SelectItem key={b._id} value={b.branchName}>{b.branchName}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -318,6 +425,11 @@ function SalaryPage() {
       <AnimatePresence mode="wait">
         {isLoading ? (
           <SkeletonLoader key="loading" type="table" count={10} />
+        ) : error ? (
+          <motion.div key="error" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="rounded-2xl border border-destructive/20 bg-destructive/5 p-6 text-center space-y-3">
+            <p className="text-[14px] font-semibold text-foreground">Could not load salaries for {selectedMonthLabel}.</p>
+            <Button variant="outline" className="h-10 rounded-xl" onClick={() => refetch()}>Try again</Button>
+          </motion.div>
         ) : view === "grid" ? (
           <motion.div
             key="grid"
@@ -326,83 +438,62 @@ function SalaryPage() {
             exit={{ opacity: 0 }}
             className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
           >
+            {filtered.length === 0 && (
+              <p className="col-span-full py-10 text-center text-[13px] text-muted-foreground">
+                No salaries for {selectedMonthLabel} yet.{canCreate ? " Press Generate Payroll to work them out." : ""}
+              </p>
+            )}
             {filtered.map((r, i) => (
               <GridCard
                 key={r._id}
                 title={r.employeeId?.name || "—"}
-                subtitle={MONTHS.find(m => m.m === r.month)?.label || r.month}
+                subtitle={monthLabel(r.month, r.year)}
                 icon={<Wallet className="h-5 w-5 text-primary" />}
                 delay={i * 0.04}
                 statusNode={
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "text-[9px] font-bold px-2 py-0.5",
-                      r.status === "paid" ? "border-success/40 text-success bg-success/8" : "border-warning/40 text-warning-foreground bg-warning/8"
-                    )}
-                  >{r.status.toUpperCase()}</Badge>
+                  <Badge variant="outline" className={cn("text-[11px] font-bold px-2 py-0.5", statusClass(r.status))}>
+                    {statusLabel(r.status)}
+                  </Badge>
                 }
               >
                 <div className="space-y-3 mt-1">
                   <div className="flex justify-between items-center gap-2 bg-muted/20 p-2 rounded-lg border border-border/40">
-                    <span className="text-[11px] text-muted-foreground font-medium shrink-0">Net Payable</span>
-                    <span className="text-[16px] font-black text-primary truncate min-w-0">{formatINRFull(r.totalSalary)}</span>
+                    <span className="text-[11px] text-muted-foreground font-medium shrink-0">Net pay</span>
+                    <span className="text-[16px] font-black text-primary truncate min-w-0">{money(r.totalSalary)}</span>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 mt-2">
                     <div className="p-2 rounded-lg bg-success/5 border border-success/10 min-w-0">
-                      <p className="text-[9px] text-success font-bold uppercase tracking-tighter">Earnings</p>
-                      <p className="text-[13px] font-bold truncate">{formatINRFull(r.baseSalary + (r.breakdown?.earnings || []).reduce((s: number, e: any) => s + (e.name !== "Basic Salary" ? e.amount : 0), 0))}</p>
+                      <p className="text-[11px] text-success font-bold uppercase tracking-tight">Earned</p>
+                      <p className="text-[13px] font-bold truncate">{money(earnedOf(r))}</p>
                     </div>
                     <div className="p-2 rounded-lg bg-destructive/5 border border-destructive/10 min-w-0">
-                      <p className="text-[9px] text-destructive font-bold uppercase tracking-tighter">Deductions</p>
-                      <p className="text-[13px] font-bold truncate">-{formatINRFull(r.deductions)}</p>
+                      <p className="text-[11px] text-destructive font-bold uppercase tracking-tight">Deductions</p>
+                      <p className="text-[13px] font-bold truncate">-{money(r.deductions)}</p>
                     </div>
                   </div>
+                  <p className="text-[11px] text-muted-foreground">
+                    Salary {salaryBasis(r)}{r.payableDays != null && r.employmentType !== "daily" && r.employmentType !== "hourly" ? ` · ${r.payableDays} of ${r.totalDaysInWindow ?? "—"} days paid` : ""}
+                  </p>
 
-                  <div className="pt-2 flex items-center justify-between gap-2">
+                  <div className="pt-2 flex flex-wrap items-center justify-between gap-2">
                     <ActionButton
                       variant="view"
                       showLabel
-                      label="SLIP"
+                      label="Slip"
                       onClick={() => setDetailsRecord(r)}
-                      className="flex-1 h-9"
+                      className="flex-1 h-10"
                     />
-                    {(r.status === "pending" || r.status === "review") && canEdit && (
-                      <ActionButton
-                        variant="comment"
-                        icon={HandCoins}
-                        tooltip="Apply Advance Deduction"
-                        onClick={() => openAdvanceModal(r)}
-                        className="h-9 w-9"
-                      />
-                    )}
-                    {(r.status === "pending" || r.status === "review") && canEdit && (
-                      <ActionButton
-                        variant="comment"
-                        icon={Receipt}
-                        tooltip="Apply Expense Reimbursement"
-                        onClick={() => openExpenseModal(r)}
-                        className="h-9 w-9"
-                      />
-                    )}
-                    {r.status === "pending" && canEdit && (
+                    {canPay(r) && canEdit && (
                       <ActionButton
                         variant="approve"
                         showLabel
-                        label="PAY"
-                        onClick={() => handlePay(r._id)}
-                        className="flex-1 h-9 bg-emerald-500 text-white"
+                        label="Pay"
+                        onClick={() => setPayRecord(r)}
+                        className="flex-1 h-10 bg-emerald-500 text-white"
                       />
                     )}
-                    {canDelete && (
-                      <ActionButton
-                        variant="delete"
-                        tooltip="Delete Salary Record"
-                        onClick={() => setDeleteId(r._id)}
-                        className="h-9 w-9"
-                      />
-                    )}
+                    <div className="flex gap-2">{rowActions(r, "h-10 w-10")}</div>
                   </div>
                 </div>
               </GridCard>
@@ -418,60 +509,40 @@ function SalaryPage() {
             <DataTable
               className="shadow-sm"
               headers={[
-                "Employee", "Month", "Days",
-                <div key="base" className="text-right w-full">CTC</div>,
-                <div key="bonus" className="text-right w-full">Allowance</div>,
+                "Employee", "Days paid",
+                <div key="base" className="text-right w-full">Salary</div>,
+                <div key="earned" className="text-right w-full">Earned</div>,
                 <div key="ded" className="text-right w-full">Deductions</div>,
-                <div key="net" className="text-right w-full">Net Pay</div>,
+                <div key="net" className="text-right w-full">Net pay</div>,
                 "Status",
                 <div key="action" className="text-right w-full">Actions</div>
               ]}
               isEmpty={filtered.length === 0}
-              emptyMessage="No payroll records found for this month."
+              emptyMessage={`No salaries for ${selectedMonthLabel} yet.${canCreate ? " Press Generate Payroll to work them out." : ""}`}
             >
               {filtered.map((r) => (
                 <DataTableRow key={r._id}>
                   <DataTableCell isFirst className="font-medium text-[13px]">{r.employeeId?.name || "—"}</DataTableCell>
-                  <DataTableCell className="text-[12px] text-muted-foreground">{MONTHS.find(m => m.m === r.month)?.label || r.month}</DataTableCell>
-                  <DataTableCell className="text-[12px] font-black">
-                    {r.payableDays != null
-                      ? `${r.payableDays}/${r.totalDaysInWindow ?? "—"}`
-                      : (r.workingDays ? `${r.workingDays}/26` : "—")}
-                    {r.needsReview && <span className="ml-1 text-amber-500 text-[10px]">⚠</span>}
+                  <DataTableCell className="text-[12px] font-black whitespace-nowrap">
+                    {daysCell(r)}
+                    {r.status === "review" && <AlertTriangle className="inline ml-1 h-3.5 w-3.5 text-amber-500" aria-label="Needs checking" />}
                   </DataTableCell>
-                  <DataTableCell className="text-[13px] text-right font-mono text-muted-foreground">{formatINRFull(r.baseSalary)}</DataTableCell>
-                  <DataTableCell className="text-[13px] text-right text-success font-medium">+{formatINRFull((r.breakdown?.earnings || []).reduce((s: number, e: any) => s + (e.name !== "Basic Salary" ? e.amount : 0), 0))}</DataTableCell>
-                  <DataTableCell className="text-[13px] text-right text-destructive font-medium">-{formatINRFull(r.deductions)}</DataTableCell>
-                  <DataTableCell className="text-[13px] text-right font-bold text-foreground">{formatINRFull(r.totalSalary)}</DataTableCell>
+                  <DataTableCell className="text-[13px] text-right font-mono text-muted-foreground whitespace-nowrap">{salaryBasis(r)}</DataTableCell>
+                  <DataTableCell className="text-[13px] text-right text-success font-medium whitespace-nowrap">{money(earnedOf(r))}</DataTableCell>
+                  <DataTableCell className="text-[13px] text-right text-destructive font-medium whitespace-nowrap">-{money(r.deductions)}</DataTableCell>
+                  <DataTableCell className="text-[13px] text-right font-bold text-foreground whitespace-nowrap">{money(r.totalSalary)}</DataTableCell>
                   <DataTableCell>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        "text-[10px] font-bold px-2 py-0.5",
-                        r.status === "paid" ? "border-success/40 text-success bg-success/8"
-                          : r.status === "review" ? "border-amber-400/60 text-amber-600 bg-amber-50"
-                          : "border-warning/40 text-warning-foreground bg-warning/8"
-                      )}
-                    >{r.status === "review" ? "REVIEW ⚠" : r.status.toUpperCase()}</Badge>
+                    <Badge variant="outline" className={cn("text-[11px] font-bold px-2 py-0.5 whitespace-nowrap", statusClass(r.status))}>
+                      {statusLabel(r.status)}
+                    </Badge>
                   </DataTableCell>
                   <DataTableCell isLast>
                     <div className="flex justify-end gap-1">
-                      <ActionButton variant="view" tooltip="View Details" onClick={() => setDetailsRecord(r)} />
-                      {(r.status === "pending" || r.status === "review") && canEdit && (
-                        <ActionButton variant="comment" icon={HandCoins} tooltip="Apply Advance Deduction" onClick={() => openAdvanceModal(r)} />
+                      <ActionButton variant="view" tooltip="View slip" aria-label="View slip" onClick={() => setDetailsRecord(r)} className="h-10 w-10" />
+                      {canPay(r) && canEdit && (
+                        <ActionButton variant="approve" tooltip="Mark as paid" aria-label="Mark as paid" onClick={() => setPayRecord(r)} className="h-10 w-10 bg-emerald-500 text-white" />
                       )}
-                      {(r.status === "pending" || r.status === "review") && canEdit && (
-                        <ActionButton variant="comment" icon={Receipt} tooltip="Apply Expense Reimbursement" onClick={() => openExpenseModal(r)} />
-                      )}
-                      {r.status === "pending" && canEdit && (
-                        <ActionButton variant="approve" tooltip="Pay Now" onClick={() => handlePay(r._id)} className="bg-emerald-500 text-white" />
-                      )}
-                      {r.status === "paid" && (
-                        <ActionButton variant="history" tooltip="View Slip" onClick={() => setDetailsRecord(r)} />
-                      )}
-                      {canDelete && (
-                        <ActionButton variant="delete" tooltip="Delete Record" onClick={() => setDeleteId(r._id)} />
-                      )}
+                      {rowActions(r, "h-10 w-10")}
                     </div>
                   </DataTableCell>
                 </DataTableRow>
@@ -481,81 +552,57 @@ function SalaryPage() {
         )}
       </AnimatePresence>
 
-      {/* Breakdown Dialog */}
-      <Dialog open={!!detailsRecord} onOpenChange={(o) => !o && setDetailsRecord(null)}>
-        <DialogContent className="max-w-md rounded-2xl overflow-hidden p-0 border-none shadow-2xl max-h-[90vh] flex flex-col">
-          <div className="bg-linear-to-br from-primary/10 via-primary/5 to-transparent p-6 pb-4 shrink-0">
-            <DialogHeader>
-              <div className="h-12 w-12 rounded-2xl bg-white shadow-sm border border-primary/10 grid place-items-center mb-3">
-                <Receipt className="h-6 w-6 text-primary" />
-              </div>
-              <DialogTitle className="text-[18px] font-bold">{detailsRecord?.employeeId?.name}</DialogTitle>
-              <DialogDescription className="text-[13px] font-medium text-muted-foreground">
-                Salary Slip — {MONTHS.find(m => m.m === detailsRecord?.month)?.label}
-              </DialogDescription>
-            </DialogHeader>
-          </div>
+      <SalarySlipDialog
+        record={detailsRecord}
+        onClose={() => setDetailsRecord(null)}
+        onUndoPayment={canEdit ? (r) => setUndoRecord(r) : undefined}
+      />
 
-          <div className="p-6 space-y-6 bg-white flex-1 overflow-y-auto min-h-0">
-            {/* Earnings */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 text-[11px] font-bold text-success uppercase tracking-widest">
-                <ArrowUpRight className="h-3.5 w-3.5" /> Earnings
-              </div>
-              <div className="space-y-2.5">
-                {(detailsRecord?.breakdown?.earnings || []).map((e: any, idx: number) => (
-                  <div key={idx} className="flex justify-between items-center text-[13px]">
-                    <span className="text-muted-foreground font-medium">{e.name}</span>
-                    <span className="font-bold text-foreground">{formatINRFull(e.amount)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
+      {/* Mark as paid confirmation */}
+      <AlertDialog open={!!payRecord} onOpenChange={(o) => !o && setPayRecord(null)}>
+        <AlertDialogContent className="rounded-2xl shadow-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-[18px] font-black tracking-tight">Mark this salary as paid?</AlertDialogTitle>
+            <AlertDialogDescription className="text-[14px] text-muted-foreground">
+              {payRecord?.employeeId?.name} — {monthLabel(payRecord?.month, payRecord?.year)}: <b className="text-foreground">{money(payRecord?.totalSalary)}</b>.
+              {payRecord?.status === "pending" && " This month is not over yet, so the amount may still change."}
+              {" "}A paid payslip can't be deleted unless you undo the payment first.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 mt-4">
+            <AlertDialogCancel className="rounded-xl h-10">Cancel</AlertDialogCancel>
+            <ActionButton variant="approve" showLabel label="Mark as paid" loading={isUpdating} disabled={isUpdating} onClick={confirmPay} className="bg-emerald-500 text-white" />
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-            <div className="h-px bg-border/40" />
-
-            {/* Deductions */}
-            <div className="space-y-3">
-              <div className="flex items-center gap-2 text-[11px] font-bold text-destructive uppercase tracking-widest">
-                <ArrowDownRight className="h-3.5 w-3.5" /> Deductions
-              </div>
-              <div className="space-y-2.5">
-                {(detailsRecord?.breakdown?.deductions || []).map((e: any, idx: number) => (
-                  <div key={idx} className="flex justify-between items-center text-[13px]">
-                    <span className="text-muted-foreground font-medium">{e.name}</span>
-                    <span className="font-bold text-destructive">-{formatINRFull(e.amount)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Total Footer */}
-            <div className="mt-8 p-4 rounded-2xl bg-muted/30 border border-border/40 flex justify-between items-center">
-              <div>
-                <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Net Payable</p>
-                <p className="text-[20px] font-black text-primary">{formatINRFull(detailsRecord?.totalSalary || 0)}</p>
-              </div>
-              <Badge variant="outline" className={cn(
-                "px-3 py-1 rounded-full text-[11px] font-bold",
-                detailsRecord?.status === "paid" ? "bg-success/10 text-success border-success/20" : "bg-warning/10 text-warning-foreground border-warning/20"
-              )}>
-                {detailsRecord?.status.toUpperCase()}
-              </Badge>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Undo payment confirmation */}
+      <AlertDialog open={!!undoRecord} onOpenChange={(o) => !o && setUndoRecord(null)}>
+        <AlertDialogContent className="rounded-2xl shadow-2xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-[18px] font-black tracking-tight">Undo this payment?</AlertDialogTitle>
+            <AlertDialogDescription className="text-[14px] text-muted-foreground">
+              Use this only if {undoRecord?.employeeId?.name}'s {monthLabel(undoRecord?.month, undoRecord?.year)} salary
+              was marked paid by mistake. The payment date will be removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 mt-4">
+            <AlertDialogCancel className="rounded-xl h-10">Keep as paid</AlertDialogCancel>
+            <ActionButton variant="revoke" showLabel label="Undo payment" loading={isUpdating} disabled={isUpdating} onClick={confirmUndo} />
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Advance Salary Deduction Dialog */}
       <Dialog open={!!advanceModalRecord} onOpenChange={(o) => !o && setAdvanceModalRecord(null)}>
         <DialogContent className="max-w-md rounded-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-[18px] font-black tracking-tight">
-              Apply Advance Deduction
+              Deduct an advance
             </DialogTitle>
             <DialogDescription className="text-[13px] text-muted-foreground">
-              {advanceModalRecord?.employeeId?.name} — {MONTHS.find(mo => mo.m === advanceModalRecord?.month)?.label}.
-              Select approved advance salary / loan requests to recover from this month's payroll.
+              {advanceModalRecord?.employeeId?.name} — {monthLabel(advanceModalRecord?.month, advanceModalRecord?.year)}.
+              Choose the approved advances or loans to take back from this month's salary.
             </DialogDescription>
           </DialogHeader>
 
@@ -565,14 +612,14 @@ function SalaryPage() {
             </div>
           ) : advanceOptions.length === 0 ? (
             <p className="py-6 text-center text-[13px] text-muted-foreground">
-              No approved advance/loan requests pending recovery for this employee.
+              This employee has no approved advances or loans waiting to be taken back.
             </p>
           ) : (
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {advanceOptions.map((req) => (
                 <label
                   key={req._id}
-                  className="flex items-center justify-between gap-3 p-3 rounded-xl border border-border/60 cursor-pointer hover:bg-muted/20"
+                  className="flex items-center justify-between gap-3 p-3 min-h-[48px] rounded-xl border border-border/60 cursor-pointer hover:bg-muted/20"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <Checkbox
@@ -581,13 +628,13 @@ function SalaryPage() {
                     />
                     <div className="min-w-0">
                       <p className="text-[13px] font-bold truncate">
-                        {req.type === "loan" ? "Loan" : "Advance Salary"}
+                        {req.type === "loan" ? "Loan" : "Advance salary"}
                       </p>
                       <p className="text-[11px] text-muted-foreground truncate">{req.reason}</p>
                     </div>
                   </div>
                   <span className="text-[13px] font-black text-foreground shrink-0">
-                    {formatINRFull(req.approvedAmount ?? req.amount)}
+                    {money(req.approvedAmount ?? req.amount)}
                   </span>
                 </label>
               ))}
@@ -597,7 +644,7 @@ function SalaryPage() {
           <div className="flex items-center justify-between px-1 pt-2 border-t border-border/40">
             <span className="text-[12px] font-bold text-muted-foreground">Total selected</span>
             <span className="text-[15px] font-black text-primary">
-              {formatINRFull(advanceOptions
+              {money(advanceOptions
                 .filter((req) => selectedAdvanceIds.has(req._id))
                 .reduce((s, req) => s + (req.approvedAmount ?? req.amount), 0))}
             </span>
@@ -606,19 +653,19 @@ function SalaryPage() {
           <DialogFooter className="gap-2 mt-2">
             <Button
               variant="outline"
-              className="rounded-xl"
+              className="rounded-xl h-10"
               onClick={() => setAdvanceModalRecord(null)}
               disabled={isGeneratingOne}
             >
               Cancel
             </Button>
             <Button
-              className="rounded-xl bg-gradient-primary text-primary-foreground"
+              className="rounded-xl h-10 bg-gradient-primary text-primary-foreground"
               onClick={confirmAdvanceDeduction}
               disabled={isGeneratingOne || selectedAdvanceIds.size === 0}
             >
               {isGeneratingOne ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
-              Apply & Recalculate
+              Deduct and recalculate
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -629,11 +676,11 @@ function SalaryPage() {
         <DialogContent className="max-w-md rounded-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-[18px] font-black tracking-tight">
-              Apply Expense Reimbursement
+              Add an expense claim
             </DialogTitle>
             <DialogDescription className="text-[13px] text-muted-foreground">
-              {expenseModalRecord?.employeeId?.name} — {MONTHS.find(mo => mo.m === expenseModalRecord?.month)?.label}.
-              Select approved expense claims to add to this month's payroll.
+              {expenseModalRecord?.employeeId?.name} — {monthLabel(expenseModalRecord?.month, expenseModalRecord?.year)}.
+              Choose the approved expense claims to pay with this month's salary.
             </DialogDescription>
           </DialogHeader>
 
@@ -643,14 +690,14 @@ function SalaryPage() {
             </div>
           ) : expenseOptions.length === 0 ? (
             <p className="py-6 text-center text-[13px] text-muted-foreground">
-              No approved expense claims pending reimbursement for this employee.
+              This employee has no approved expense claims waiting to be paid.
             </p>
           ) : (
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {expenseOptions.map((exp) => (
                 <label
                   key={exp._id}
-                  className="flex items-center justify-between gap-3 p-3 rounded-xl border border-border/60 cursor-pointer hover:bg-muted/20"
+                  className="flex items-center justify-between gap-3 p-3 min-h-[48px] rounded-xl border border-border/60 cursor-pointer hover:bg-muted/20"
                 >
                   <div className="flex items-center gap-3 min-w-0">
                     <Checkbox
@@ -663,7 +710,7 @@ function SalaryPage() {
                     </div>
                   </div>
                   <span className="text-[13px] font-black text-foreground shrink-0">
-                    {formatINRFull(exp.amount)}
+                    {money(exp.amount)}
                   </span>
                 </label>
               ))}
@@ -673,7 +720,7 @@ function SalaryPage() {
           <div className="flex items-center justify-between px-1 pt-2 border-t border-border/40">
             <span className="text-[12px] font-bold text-muted-foreground">Total selected</span>
             <span className="text-[15px] font-black text-primary">
-              {formatINRFull(expenseOptions
+              {money(expenseOptions
                 .filter((exp) => selectedExpenseIds.has(exp._id))
                 .reduce((s, exp) => s + exp.amount, 0))}
             </span>
@@ -682,19 +729,19 @@ function SalaryPage() {
           <DialogFooter className="gap-2 mt-2">
             <Button
               variant="outline"
-              className="rounded-xl"
+              className="rounded-xl h-10"
               onClick={() => setExpenseModalRecord(null)}
               disabled={isGeneratingOne}
             >
               Cancel
             </Button>
             <Button
-              className="rounded-xl bg-gradient-primary text-primary-foreground"
+              className="rounded-xl h-10 bg-gradient-primary text-primary-foreground"
               onClick={confirmExpenseReimbursement}
               disabled={isGeneratingOne || selectedExpenseIds.size === 0}
             >
               {isGeneratingOne ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
-              Apply & Recalculate
+              Add and recalculate
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -704,8 +751,9 @@ function SalaryPage() {
         open={!!deleteId}
         onOpenChange={(o) => !o && setDeleteId(null)}
         onConfirm={handleDelete}
-        title="Delete Salary Record?"
-        description="Are you sure you want to delete this salary record? This action cannot be undone."
+        title="Delete this salary record?"
+        description="The record is removed. Any advance or expense claim it included goes back to the waiting list, so a later payroll can pick it up."
+        confirmText="Delete"
         isLoading={isDeleting}
       />
 
@@ -724,8 +772,8 @@ function SalaryPage() {
               Generate payroll for {selectedMonthLabel}?
             </AlertDialogTitle>
             <AlertDialogDescription className="text-[14px] text-muted-foreground">
-              This recalculates {selectedMonthLabel} for every active employee and replaces the
-              existing figures for that month.
+              This works out {selectedMonthLabel} again for every active employee and replaces the
+              existing figures for that month, including any amount changed by hand.
               {paidCount > 0 && (
                 <span className="mt-2 block font-semibold text-foreground">
                   {paidCount} payslip{paidCount === 1 ? " is" : "s are"} already marked paid.
@@ -736,7 +784,7 @@ function SalaryPage() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="gap-2 mt-4">
-            <AlertDialogCancel className="rounded-xl border-border/60">Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="rounded-xl h-10 border-border/60">Cancel</AlertDialogCancel>
             <ActionButton
               variant="add"
               icon={Sparkles}

@@ -24,6 +24,12 @@ export interface MyDevice {
   recentUnresolved?: MyDeviceUnresolved[];
   notes?: string;
   createdAt?: string;
+  /** Smallest gap (minutes) between the machine's clock and ours over the last day. */
+  clockSkewMinutes?: number | null;
+  /** A correction support set by hand, in minutes. 0 = none. */
+  clockOffsetMinutes?: number;
+  /** When the tenant was last told this machine went quiet. */
+  offlineAlertedAt?: string | null;
 }
 
 export interface DevicePinEmployee {
@@ -74,8 +80,13 @@ export async function clearMyDeviceUnresolved(id: string) {
   return data as MyDevice;
 }
 
-/** Assign or clear an employee's on-device PIN. Rejects duplicates with a 409. */
+/**
+ * Assign or clear an employee's on-device PIN. Rejects duplicates with a 409.
+ *
+ * Its own endpoint under /devices (not the Employees edit), so it follows the
+ * Biometric Device permission this page is gated on.
+ */
 export async function setEmployeePin(employeeId: string, deviceUserId: string) {
-  const { data } = await apiClient.put(`/users/employees/${employeeId}`, { deviceUserId });
-  return data;
+  const { data } = await apiClient.put(`/devices/pins/${employeeId}`, { deviceUserId });
+  return data as { _id: string; name: string; deviceUserId: string | null };
 }

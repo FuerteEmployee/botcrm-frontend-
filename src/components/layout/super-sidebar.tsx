@@ -8,6 +8,7 @@ import {
   Fingerprint,
   Smartphone,
   LogOut,
+  Activity,
 } from "lucide-react";
 import { getSession } from "@/lib/auth";
 import { logoutAndClear } from "@/lib/logout";
@@ -19,6 +20,7 @@ const mainNav = [
   { to: "/super/overview", label: "Dashboard", icon: LayoutDashboard },
   { to: "/super/tenants", label: "Companies", icon: Building2 },
   { to: "/super/devices", label: "Machines", icon: Fingerprint },
+  { to: "/super/health", label: "Health", icon: Activity },
 ];
 
 const subsNav = [

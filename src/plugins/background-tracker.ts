@@ -32,6 +32,14 @@ export interface TrackerStatus {
   /** Epoch milliseconds, not an ISO string -- the native side sends a Long. */
   lastFixAt: number | null;
   permissionState: "granted" | "denied" | "partial" | "unknown";
+  /**
+   * True on an APK that honours the company's "track always" setting (APK 17+).
+   * Absent on older builds: those stop the service whenever no shift is open, so
+   * the web layer must not ask them to track off duty.
+   */
+  supportsAlwaysMode?: boolean;
+  /** The mode the native service last applied. */
+  trackAlways?: boolean;
 }
 
 /**
@@ -58,6 +66,8 @@ export interface TrackerReadiness {
    * and logging 11.
    */
   activityRecognition: boolean;
+  /** Android camera grant. Only APK 19 and later send it. */
+  camera?: boolean;
   locationState: "always" | "foreground" | "denied";
   manufacturer: string;
   /** Whether this OEM has an auto-start screen worth sending the user to. */
@@ -92,6 +102,11 @@ export interface StartOptions {
    * ignores it, and a missing one only costs the events their device grouping.
    */
   installId?: string;
+  /**
+   * Company setting "track always": keep recording with no open shift. An older
+   * native build ignores it and stops at punch-out, as before.
+   */
+  trackAlways?: boolean;
 }
 
 export interface NativeCrash {
@@ -155,7 +170,9 @@ export async function startBackgroundTracking(opts: StartOptions): Promise<boole
     // treat it as "not tracking" rather than as "use the web fallback and carry
     // on", because the web tracker stops the moment the WebView is suspended.
     const started = !!res?.started;
-    if (!started) {
+    // No location permission yet is the normal state before setup, not a failure:
+    // APK 17+ declines to start and says why, instead of starting and being refused.
+    if (!started && (res as { reason?: string } | undefined)?.reason !== "no_location_permission") {
       console.warn("[bg-tracker] native service did not come up");
       reportTrackerIssue("native background tracker did not start");
     }

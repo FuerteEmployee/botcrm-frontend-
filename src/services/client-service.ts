@@ -179,7 +179,9 @@ export function useLoginSessions(userId?: string, limit = 50) {
  */
 export function latestDeviceByEmployee(devices: ClientDevice[] | undefined) {
   const map = new Map<string, ClientDevice>();
-  for (const d of devices ?? []) {
+  // Array.isArray, not `?? []`: a reply that is not a list (a proxy error
+  // page, `{}`) threw here and took down the whole Employees page.
+  for (const d of Array.isArray(devices) ? devices : []) {
     const id = typeof d.employeeId === "string" ? d.employeeId : d.employeeId?._id;
     if (id && !map.has(id)) map.set(id, d);
   }

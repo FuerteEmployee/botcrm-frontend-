@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState, useRef, lazy, Suspense } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient, IMAGE_BASE_URL } from "@/lib/api-client";
+import { LoadError } from "@/components/user/load-error";
 import { useAuth } from "@/hooks/use-auth";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -20,6 +22,7 @@ import { startTracking, stopTracking } from "@/services/location-tracker";
 import { startBackgroundTracking, stopBackgroundTracking, getTrackerStatus, available as trackerAvailable } from "@/plugins/background-tracker";
 import { getSession } from "@/lib/auth";
 import { getInstallId } from "@/lib/client-telemetry";
+import { formatINRFull } from "@/lib/format";
 import {
   buildSessions,
   TodaySessions,
@@ -39,6 +42,7 @@ import {
   isNativeApp,
   type LocationFailureReason,
 } from "@/lib/geolocation";
+import { CorrectionLog, type PunchCorrectionEntry } from "@/components/tickets/correction-log";
 // Lazy: Leaflet is ~148 KB and is only needed once the location-consent modal
 // is actually opened. Importing it here statically made every employee pay for
 // it — download and parse — on every single app open.
@@ -56,7 +60,13 @@ interface AttendanceLog {
   lunchInTime?: string;
   lunchOutTime?: string;
   isWFH?: boolean;
-  status: "present" | "absent" | "half-day" | "late" | "weekly-off" | "festival";
+  status: "present" | "absent" | "half-day" | "late" | "wfh" | "needs_review" | "weekly-off" | "festival" | "leave";
+  /** Arrived late. Survives punch-out, which normalises `status: late` to present. */
+  wasLate?: boolean;
+  /** Net worked time the server graded and pays the day on. */
+  totalWorkMs?: number;
+  /** A day with no stored record, synthesised by /my-history (off day, holiday, absence). */
+  isPlaceholder?: boolean;
   source?: "app" | "lens" | "biometric";
   punchOutIsProvisional?: boolean;
   /**
@@ -91,13 +101,20 @@ interface UserProfile {
   employmentType?: string;
   profileImage?: string;
   departmentId?: { name: string };
-  branchId?: { name: string; latitude: number; longitude: number };
+  // Branch documents call their name `branchName`; `name` never existed, so
+  // Home's "12m from <branch>" always fell back to "from branch".
+  branchId?: { branchName?: string; name?: string; latitude: number; longitude: number };
   shiftId?: { name: string; startTime: string; endTime: string };
   /** Server-side cap on punch-in sessions per day. Server is the authority. */
   maxDailySessions?: number;
+  /**
+   * Whether punch-in closes at shift end, and how many minutes after it.
+   * Absent on an older backend, which is treated as the default: closed at end.
+   */
+  punchInAfterShiftEnd?: { blocked: boolean; graceMins: number };
   todayAttendance?: AttendanceLog | null;
   recentAttendance?: AttendanceLog[];
-  upcomingHolidays?: Array<{ _id: string; name: string; startDate: string }>;
+  upcomingHolidays?: Array<{ _id: string; name: string; startDate: string; endDate?: string; type?: "mandatory" | "optional" | "event" }>;
   allowMultiplePunches?: boolean;
   /**
    * May this employee mark a punch Work From Home?
@@ -108,57 +125,22 @@ interface UserProfile {
    */
   canWorkFromHome?: boolean;
   trackingEnabled?: boolean;
+  /** When tracking runs: punch-in to punch-out, or all the time (company setting). */
+  trackingMode?: "on_duty" | "always";
 }
 
-// Sleek Custom SVG Circular Progress Gauge (Lighter stroke, balanced typography)
-const CircularProgress = ({
-  value,
-  max,
-  color,
-  trackColor,
-  size = 56
-}: {
-  value: number;
-  max: number;
-  color: string;
-  trackColor: string;
-  size?: number;
-}) => {
-  const radius = size * 0.38;
-  const strokeWidth = size * 0.07;
-  const circumference = 2 * Math.PI * radius;
-  const safeVal = Math.min(value, max);
-  const strokeDashoffset = max > 0 ? circumference - (safeVal / max) * circumference : circumference;
-
-  return (
-    <div className="relative flex items-center justify-center shrink-0" style={{ width: size, height: size }}>
-      <svg className="w-full h-full -rotate-90">
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke={trackColor}
-          strokeWidth={strokeWidth}
-          fill="transparent"
-        />
-        <circle
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke={color}
-          strokeWidth={strokeWidth}
-          strokeDasharray={circumference}
-          strokeDashoffset={strokeDashoffset}
-          strokeLinecap="round"
-          fill="transparent"
-          className="transition-all duration-700 ease-out"
-        />
-      </svg>
-      <span className="absolute text-[11px] font-semibold text-slate-700 dark:text-slate-200">{value}</span>
-    </div>
-  );
-};
-
+/**
+ * Renders a full-screen popup at the end of <body>.
+ *
+ * Inside the page it sits in the content column's stacking context, which the
+ * shell's fixed bottom nav paints above whatever z-index the popup asks for:
+ * on a short phone the nav covered the popup's own buttons, and it stayed
+ * tappable, so someone could navigate away with the camera still running.
+ * CenterModal portals for the same reason.
+ */
+function BodyPortal({ children }: { children: React.ReactNode }) {
+  return typeof document === "undefined" ? null : createPortal(children, document.body);
+}
 
 // Device-appropriate instructions for enabling location, shown in the help dialog.
 function locationHelpSteps(
@@ -187,6 +169,136 @@ function locationHelpSteps(
   ];
 }
 
+/**
+ * Time worked today up to `nowMs`: every session, lunch removed.
+ *
+ * Measuring from the root punch-in to now (as this screen used to) counted the
+ * gap between sessions as work -- 09:30-12:00 plus 16:00-now read as a
+ * continuous day -- and counted lunch too.
+ */
+function workedTodayMs(
+  log: AttendanceLog | null | undefined,
+  lunchIn: string | undefined,
+  lunchOut: string | undefined,
+  nowMs: number,
+): number {
+  const lunchStart = lunchIn ? +new Date(lunchIn) : null;
+  const lunchEnd = lunchOut ? +new Date(lunchOut) : nowMs;
+  const lunchWithin = (from: number, to: number) =>
+    lunchStart === null ? 0 : Math.max(0, Math.min(to, lunchEnd) - Math.max(from, lunchStart));
+
+  return buildSessions(log).reduce((total, s) => {
+    const from = +new Date(s.punchIn!);
+    const to = s.punchOut ? +new Date(s.punchOut) : nowMs;
+    // Server per-session workMs is gross (lunch is a day-level deduction), so
+    // lunch comes off both it and the raw span alike.
+    const gross = s.punchOut && s.workMs != null ? s.workMs : to - from;
+    return total + Math.max(0, gross - lunchWithin(from, to));
+  }, 0);
+}
+
+/**
+ * What to tell the employee when their location cannot be read, in words
+ * that need no technical background. The raw messages ("Timed out while
+ * getting your location.", "Geolocation is not supported by this browser.")
+ * describe the failure to a developer, not what to do about it.
+ */
+function friendlyLocationError(reason: LocationFailureReason | null | undefined): string {
+  switch (reason) {
+    case "timeout": return "Could not find your location. Go near a window or outside, then try again.";
+    case "unavailable": return "Your phone's location (GPS) is off. Turn it on, then try again.";
+    case "unsupported": return "This phone cannot share its location. Ask your admin to add your attendance.";
+    default: return "Location is not allowed for this app. Allow it, then try again.";
+  }
+}
+
+/** Server hours "7.50" -> "7h 30m". A decimal hour reads as 7 hours 50 minutes. */
+function hoursLabel(workHours?: string | number | null): string | undefined {
+  const h = Number(workHours);
+  if (!Number.isFinite(h) || h <= 0) return undefined;
+  const mins = Math.round(h * 60);
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+
+/** The server refuses an office punch whose fix is worse than this (PUNCH_MAX_ACCURACY_M). */
+const WEAK_FIX_M = 150;
+
+/** 16200000 -> "04h 30m". */
+function formatMs(ms: number): string {
+  const mins = Math.max(0, Math.floor(ms / 60000));
+  return `${String(Math.floor(mins / 60)).padStart(2, "0")}h ${String(mins % 60).padStart(2, "0")}m`;
+}
+
+/** Today's synthesised "absent" row: nothing recorded yet, day still running. */
+function isOpenToday(record: AttendanceLog): boolean {
+  return !!record.isPlaceholder && record.status === "absent"
+    && new Date(record.date).toDateString() === new Date().toDateString();
+}
+
+/** A history day's grade as the employee should read it. */
+function dayLabel(record: AttendanceLog): { text: string; tone: "green" | "amber" | "blue" | "rose" | "indigo" | "slate" | "violet" | "orange" | "teal" } {
+  // The server fills a working day with no record as "absent", today
+  // included -- but today is not over, so nobody is absent from it yet.
+  if (isOpenToday(record)) return { text: "Not punched in yet", tone: "slate" };
+  if (record.isWFH || record.status === "wfh") return { text: "Work from home", tone: "indigo" };
+  switch (record.status) {
+    case "absent": return { text: "Absent", tone: "rose" };
+    case "half-day": return { text: "Half Day", tone: "blue" };
+    case "late": return { text: "Late", tone: "amber" };
+    case "needs_review": return { text: "Being checked", tone: "orange" };
+    case "weekly-off": return { text: "Weekly Off", tone: "slate" };
+    case "festival": return { text: record.remarks || "Holiday", tone: "violet" };
+    case "leave": return { text: "On leave", tone: "teal" };
+    default: return record.wasLate ? { text: "Late", tone: "amber" } : { text: "On time", tone: "green" };
+  }
+}
+
+type DayTone = ReturnType<typeof dayLabel>["tone"];
+
+const TONE_BADGE: Record<DayTone, string> = {
+  green: "bg-emerald-500/10 text-emerald-500",
+  amber: "bg-amber-500/10 text-amber-600 dark:text-amber-500",
+  blue: "bg-blue-500/10 text-blue-500",
+  rose: "bg-rose-500/10 text-rose-500",
+  indigo: "bg-indigo-500/10 text-indigo-500",
+  slate: "bg-slate-500/10 text-slate-500 dark:text-slate-400",
+  violet: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+  orange: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+  teal: "bg-teal-500/10 text-teal-600 dark:text-teal-400",
+};
+
+const TONE_CELL: Record<DayTone, string> = {
+  green: "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500/20",
+  amber: "bg-amber-500/10 text-amber-600 border-amber-500/30 hover:bg-amber-500/20 dark:text-amber-400 dark:border-amber-500/20",
+  blue: "bg-blue-500/10 text-blue-600 border-blue-500/30 hover:bg-blue-500/20 dark:text-blue-400 dark:border-blue-500/20",
+  rose: "bg-rose-500/10 text-rose-600 border-rose-500/30 hover:bg-rose-500/20 dark:text-rose-400 dark:border-rose-500/20",
+  indigo: "bg-indigo-500/10 text-indigo-600 border-indigo-500/30 hover:bg-indigo-500/20 dark:text-indigo-400 dark:border-indigo-500/20",
+  slate: "bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-200/70 dark:bg-slate-800/40 dark:text-slate-400 dark:border-slate-700/40",
+  violet: "bg-violet-500/10 text-violet-600 border-violet-500/30 hover:bg-violet-500/20 dark:text-violet-400 dark:border-violet-500/20",
+  orange: "bg-orange-500/10 text-orange-600 border-orange-500/30 hover:bg-orange-500/20 dark:text-orange-400 dark:border-orange-500/20",
+  teal: "bg-teal-500/10 text-teal-600 border-teal-500/30 hover:bg-teal-500/20 dark:text-teal-400 dark:border-teal-500/20",
+};
+
+/**
+ * "Wed, 4 Nov" or "Sat, 31 Oct – Mon, 2 Nov" for a holiday.
+ *
+ * Festival dates are plain YYYY-MM-DD calendar strings, not instants, so they
+ * are built from their parts rather than parsed (a bare date string parses as
+ * UTC midnight). The card used en-US ("Sat, Sep 26") and showed only the first
+ * day of a multi-day holiday.
+ */
+function holidayRange(start?: string, end?: string): string {
+  const day = (key?: string) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(key ?? "");
+    return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12) : null;
+  };
+  const fmt = (d: Date) => d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
+  const s = day(start);
+  if (!s) return start ?? "";
+  const e = day(end);
+  return e && e.getTime() !== s.getTime() ? `${fmt(s)} – ${fmt(e)}` : fmt(s);
+}
+
 /** "18:30" -> "06:30 PM". Returns the raw value if it is not an HH:mm string. */
 function formatShiftTime(hhmm?: string | null): string {
   if (!hhmm) return "shift end";
@@ -199,41 +311,44 @@ function formatShiftTime(hhmm?: string | null): string {
 }
 
 /**
- * When today's occurrence of `shift` ends, as a real instant, or null when the
- * shift has no usable times.
+ * When punch-in closes for the shift occurrence `now` falls in, or null when it
+ * never does: no usable shift times, or the company lets people punch in after
+ * shift end (`blocked: false`). `graceMins` is the company's late window.
  *
- * An overnight shift (22:00-06:00) ends TOMORROW, so the end is pushed a day
- * forward whenever it would otherwise land at or before the start. Without
- * that, a night worker's punch-in control would disappear the moment they
- * arrived.
+ * Mirrors the server's isAfterShiftEnd. An overnight shift (22:00-06:00) ends
+ * the next morning, and at 02:00 the occurrence is LAST night's, not tonight's.
+ *
+ * Worked out from `now` on every tick, not once when the screen opens: an app
+ * left open overnight kept yesterday's end time and showed "Your shift ended"
+ * all the next morning, hiding Punch In until it was restarted.
  *
  * Resolved against the handset's own clock, which is the same clock the
  * employee is reading. The server re-checks in IST and is the authority on
  * whether a punch is accepted.
  */
-function useShiftEndToday(shift?: { startTime?: string; endTime?: string } | null) {
-  const [end, setEnd] = useState<Date | null>(null);
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-  const start = shift?.startTime;
-  const finish = shift?.endTime;
-
-  useEffect(() => {
-    if (!start || !finish) { setEnd(null); return; }
-    const parse = (hhmm: string) => {
-      const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm);
-      if (!m) return null;
-      const d = new Date();
-      d.setHours(Number(m[1]), Number(m[2]), 0, 0);
-      return d;
-    };
-    const s = parse(start);
-    const e = parse(finish);
-    if (!s || !e) { setEnd(null); return; }
-    if (e.getTime() <= s.getTime()) e.setDate(e.getDate() + 1); // overnight
-    setEnd(e);
-  }, [start, finish]);
-
-  return end;
+function punchInClosesAt(
+  shift: { startTime?: string; endTime?: string } | null | undefined,
+  rule: { blocked?: boolean; graceMins?: number } | undefined,
+  now: number,
+): Date | null {
+  if (rule?.blocked === false) return null;
+  const at = (hhmm?: string) => {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm ?? "");
+    if (!m) return null;
+    const d = new Date(now);
+    d.setHours(Number(m[1]), Number(m[2]), 0, 0);
+    return d.getTime();
+  };
+  const start = at(shift?.startTime);
+  let end = at(shift?.endTime);
+  if (start === null || end === null) return null;
+  if (end <= start) {
+    end += DAY_MS; // overnight: tonight's shift ends tomorrow morning
+    if (now < end - DAY_MS) end -= DAY_MS; // still inside last night's shift
+  }
+  return new Date(end + Math.max(0, rule?.graceMins ?? 0) * 60_000);
 }
 
 function UserDashboard() {
@@ -245,8 +360,15 @@ function UserDashboard() {
   // it would cost battery on a phone that is already running a GPS service.
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
-    const id = setInterval(() => setNowTick(Date.now()), 30_000);
-    return () => clearInterval(id);
+    const tick = () => setNowTick(Date.now());
+    const id = setInterval(tick, 30_000);
+    // Timers are paused while the app is in the background, so catch up the
+    // moment it comes back rather than up to 30s later.
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, []);
   const queryClient = useQueryClient();
   const [time, setTime] = useState(new Date());
@@ -281,6 +403,12 @@ function UserDashboard() {
    * corrected by an admin.
    */
   const [confirmNewSession, setConfirmNewSession] = useState(false);
+  /**
+   * Guard on Start Lunch. It sits right beside Punch Out, records the moment
+   * it is tapped, and cannot be taken back: a stray tap starts a real break
+   * that the minimum-break rule then will not let them end for a minute.
+   */
+  const [confirmLunch, setConfirmLunch] = useState(false);
   const [locationFailReason, setLocationFailReason] = useState<LocationFailureReason | null>(null);
   /**
    * Has the first location attempt finished?
@@ -305,11 +433,11 @@ function UserDashboard() {
   const [scanResult, setScanResult] = useState<{ type: "punch-in" | "punch-out"; workHoursLabel?: string; timeLabel?: string } | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // Selected Month/Year for statistics navigation (Synchronized via localStorage)
-  const [selectedDate, setSelectedDate] = useState(() => {
-    const saved = localStorage.getItem("employee-portal-selected-date");
-    return saved ? new Date(saved) : new Date();
-  });
+  // Selected Month/Year for statistics navigation. Always opens on the current
+  // month: it used to be restored from localStorage, so someone who had looked
+  // at August reopened the app in October to August's salary and stats beside
+  // today's punch card, with nothing saying they were not current.
+  const [selectedDate, setSelectedDate] = useState(() => new Date());
 
   // Calendar / Chronological list view state (merged in from the old History page)
   const [activeTab, setActiveTab] = useState<"calendar" | "list">("calendar");
@@ -317,14 +445,22 @@ function UserDashboard() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [showSessionDetails, setShowSessionDetails] = useState(false);
 
+  // Bring a tapped day's breakdown into view on a phone, where it sits below
+  // the calendar grid rather than beside it.
+  const dayDetailRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    localStorage.setItem("employee-portal-selected-date", selectedDate.toISOString());
+    if (!selectedDayLog || window.innerWidth >= 1024) return;
+    const id = window.setTimeout(() => dayDetailRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);
+    return () => window.clearTimeout(id);
+  }, [selectedDayLog]);
+
+  useEffect(() => {
     setSelectedDayLog(null);
     setShowSessionDetails(false);
   }, [selectedDate]);
 
   // 1. Fetch User Profile
-  const { data: profile, isLoading: isProfileLoading, refetch: refetchProfile } = useQuery<UserProfile>({
+  const { data: profile, isLoading: isProfileLoading, isError: isProfileError, error: profileError, refetch: refetchProfile } = useQuery<UserProfile>({
     queryKey: ["user-profile"],
     queryFn: async () => {
       const { data } = await apiClient.get("/users/profile");
@@ -336,6 +472,11 @@ function UserDashboard() {
     // cache, so this one has to re-check often enough that the screen cannot
     // disagree with the machine the employee just used.
     staleTime: 10 * 1000,
+    // staleTime alone never triggers a fetch -- it only matters on mount, and
+    // window-focus refetching is off app-wide -- so a biometric punch stayed
+    // invisible until the app was restarted. Poll while the screen is visible
+    // (React Query pauses this in the background).
+    refetchInterval: 60 * 1000,
   });
 
   // 1.5 Fetch Unified Employee Dashboard Summary (Backend Stats)
@@ -353,7 +494,9 @@ function UserDashboard() {
   });
 
   // 1.6 Fetch full day-by-day attendance history for the calendar grid + chronological list
-  const { data: historyData, isLoading: isHistoryLoading, isRefetching: isHistoryRefetching } = useQuery<{ history: AttendanceLog[] }>({
+  // Skeleton only on a first load (e.g. a month not seen yet). It used to show
+  // on every background refetch too, so each refresh blanked the calendar.
+  const { data: historyData, isLoading: isHistoryLoading } = useQuery<{ history: AttendanceLog[] }>({
     queryKey: ["user-history", selectedDate.getMonth() + 1, selectedDate.getFullYear()],
     queryFn: async () => {
       const { data } = await apiClient.get("/attendance/my-history", {
@@ -374,11 +517,63 @@ function UserDashboard() {
     enabled: !!profile?._id,
   });
 
-  const currentMonthSalary = salaryData?.find(
+  // Every list read from the API is checked with Array.isArray: a 200 that is
+  // not a list (a captive-portal page on public wifi, a proxy error body)
+  // threw on .find / .filter and blanked the whole Home screen.
+  const currentMonthSalary = (Array.isArray(salaryData) ? salaryData : []).find(
     (s: any) => s.month === (selectedDate.getMonth() + 1) && s.year === selectedDate.getFullYear()
   );
 
   const todayLog = profile?.todayAttendance;
+
+  // Keep the calendar and month stats in step with today's record.
+  //
+  // They are separate queries from the profile, and nothing refreshed them
+  // when the day changed: after punching in, the calendar went on showing
+  // today as the "absent" placeholder it had fetched beforehand until the app
+  // was restarted. Keyed on what the day actually contains, so it fires for a
+  // punch from any channel -- app, biometric terminal, admin correction --
+  // but not on a poll that returns the same thing.
+  const todaySignature = todayLog
+    ? [todayLog.punchIn, todayLog.punchOut, todayLog.lunchInTime, todayLog.lunchOutTime, todayLog.status, todayLog.shifts?.length].join("|")
+    : "none";
+  const lastTodaySignature = useRef<string | null>(null);
+  useEffect(() => {
+    if (!profile) return;
+    if (lastTodaySignature.current !== null && lastTodaySignature.current !== todaySignature) {
+      queryClient.invalidateQueries({ queryKey: ["user-history"] });
+      queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
+    }
+    lastTodaySignature.current = todaySignature;
+  }, [profile, todaySignature, queryClient]);
+
+  // Coming back to the app refreshes everything on this screen. A WebView gets
+  // no window-focus event on resume (and focus refetching is off anyway), so
+  // an app left open since yesterday kept yesterday's calendar, and punches
+  // made elsewhere in the meantime never appeared.
+  useEffect(() => {
+    const refreshAll = () => {
+      queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+      queryClient.invalidateQueries({ queryKey: ["user-history"] });
+      queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
+    };
+    const onVisible = () => { if (document.visibilityState === "visible") refreshAll(); };
+    document.addEventListener("visibilitychange", onVisible);
+
+    let removeAppListener: (() => void) | undefined;
+    let disposed = false;
+    if (isNativeApp()) {
+      import("@capacitor/app")
+        .then(({ App }) => App.addListener("appStateChange", ({ isActive }) => { if (isActive) refreshAll(); }))
+        .then((h) => { if (disposed) void h.remove(); else removeAppListener = () => void h.remove(); })
+        .catch(() => {});
+    }
+    return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", onVisible);
+      removeAppListener?.();
+    };
+  }, [queryClient]);
 
   // Time-ordered and numbered. Kept next to todayLog rather than computed at
   // each render site so the strip and the activity list can never disagree
@@ -426,8 +621,8 @@ function UserDashboard() {
   //
   // The server enforces the same rule (attendance_controller.punchIn) and is
   // the authority; this only stops the employee walking into a refusal.
-  const shiftEnd = useShiftEndToday(profile?.shiftId);
-  const shiftIsOver = !!shiftEnd && nowTick >= shiftEnd.getTime();
+  const punchInCloses = punchInClosesAt(profile?.shiftId, profile?.punchInAfterShiftEnd, nowTick);
+  const shiftIsOver = !!punchInCloses && nowTick > punchInCloses.getTime();
   // Unconditional on any capable device -- every employee goes through the
   // same one-time permission setup, matching the reference app, whether or
   // not an admin has separately turned on this specific person's tracking
@@ -445,7 +640,11 @@ function UserDashboard() {
    * as they do now. Inventing a second rule here is how the client would start
    * refusing punches the server would have accepted.
    */
-  const locationRequired = !!profile?.branchId;
+  // An OPEN Work From Home day is the exception: nothing about ending it is
+  // measured against the branch (the server skips the fence and the accuracy
+  // gate for it), so demanding GPS here stranded a remote worker indoors
+  // unable to take lunch or punch out of a day they were allowed to start.
+  const locationRequired = !!profile?.branchId && !(todayLog?.isWFH && !displayPunchOut);
 
   /**
    * Location is BLOCKED — as opposed to merely not known yet.
@@ -478,6 +677,18 @@ function UserDashboard() {
   }, []);
   const isPunchedOut = !!displayPunchOut;
 
+  // Does this phone's APK honour "track always"? Asked once. An older APK does not
+  // say yes, and then tracking stays punch-in to punch-out on that phone.
+  const [alwaysSupported, setAlwaysSupported] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    if (!trackerAvailable()) return;
+    void getTrackerStatus()
+      .then((s) => { if (alive) setAlwaysSupported(s?.supportsAlwaysMode === true); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
   // Real-time location tracking lifecycle. Tracking is enabled per-employee by
   // the admin (profile.trackingEnabled) — employees no longer choose. It runs
   // only while the employee is punched in.
@@ -502,7 +713,12 @@ function UserDashboard() {
     // service exactly as it is.
     if (!profile?._id) return;
 
-    const shouldTrack = isPunchedIn && !isPunchedOut && !!profile.trackingEnabled;
+    // "Always" is only honoured on an APK that says it supports it. An older APK
+    // stops its own service whenever no shift is open, so asking it to track off
+    // duty would only make it start and stop every minute; there it stays on duty.
+    const onDuty = isPunchedIn && !isPunchedOut;
+    const wantsAlways = profile.trackingMode === "always" && alwaysSupported;
+    const shouldTrack = !!profile.trackingEnabled && (onDuty || wantsAlways);
 
     if (!shouldTrack) {
       stopTracking();
@@ -542,6 +758,7 @@ function UserDashboard() {
             token: session.token,
             apiBase: nativeApiBase,
             employeeId: profile._id,
+            trackAlways: wantsAlways,
           })
         : false;
 
@@ -565,7 +782,9 @@ function UserDashboard() {
       // native side now enqueues an expedited watchdog run the moment a start
       // fails (which survives this WebView going away), and the JS watchdog
       // below re-attempts every 60 s for as long as the app is open.
-      if (!started) startTracking(profile._id);
+      // The in-app fallback runs only while the app is open, so it cannot provide
+      // "always" and must never track off duty: working hours only.
+      if (!started && onDuty) startTracking(profile._id);
     })();
 
     // ── Watchdog ─────────────────────────────────────────────────────────────
@@ -601,6 +820,7 @@ function UserDashboard() {
           token: session.token,
           apiBase: rawBase.replace(/\/api\/?$/, ""),
           employeeId: profile._id,
+          trackAlways: wantsAlways,
         });
       } catch {
         // A failed health check must never surface to the employee, and must
@@ -621,7 +841,7 @@ function UserDashboard() {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onResume);
     };
-  }, [profile?._id, isPunchedIn, isPunchedOut, profile?.trackingEnabled]);
+  }, [profile?._id, isPunchedIn, isPunchedOut, profile?.trackingEnabled, profile?.trackingMode, alwaysSupported]);
 
   // Real-time Shift Progress
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -629,8 +849,8 @@ function UserDashboard() {
   useEffect(() => {
     if (todayLog?.punchIn && !displayPunchOut) {
       const calculateDiff = () => {
-        const diffMs = new Date().getTime() - new Date(todayLog.punchIn!).getTime();
-        setElapsedSeconds(Math.floor(diffMs / 1000));
+        const ms = workedTodayMs(todayLog, displayLunchInTime, displayLunchOutTime, Date.now());
+        setElapsedSeconds(Math.floor(ms / 1000));
       };
       calculateDiff();
       const interval = setInterval(calculateDiff, 1000);
@@ -638,6 +858,7 @@ function UserDashboard() {
     } else {
       setElapsedSeconds(0);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [todayLog]);
 
   // Ticking clock
@@ -749,7 +970,7 @@ function UserDashboard() {
       setLocationProbed(true);
       setAddress("GPS permissions needed");
       if (result.reason === "timeout") {
-        toast.error(`${result.message} Please try again.`);
+        toast.error(friendlyLocationError("timeout"));
       } else {
         // Permission denied / GPS off / unsupported — offer the guided fix.
         setShowLocationHelp(true);
@@ -773,7 +994,7 @@ function UserDashboard() {
       }, 50);
 
     } catch {
-      toast.error("Unable to access front camera");
+      toast.error("Camera is blocked. Allow the camera for this app in your phone Settings, then try again.");
       setScanType(null);
       setIsScanning(false);
     }
@@ -804,6 +1025,34 @@ function UserDashboard() {
     setPendingPunch(null);
     toast.error(message);
   };
+
+  // Android Back closes the punch popup on top rather than leaving the page
+  // (see the "bot-back" handler in routes/user.tsx). These popups are plain
+  // overlays, not role="dialog", so the shell's Escape fallback misses them.
+  const closeTopPopup = useRef<() => boolean>(() => false);
+  useEffect(() => {
+    closeTopPopup.current = () => {
+      if (showLocationHelp) { setShowLocationHelp(false); setPendingPunch(null); return true; }
+      if (confirmLunch) { setConfirmLunch(false); return true; }
+      if (confirmNewSession) { setConfirmNewSession(false); return true; }
+      if (scanType) {
+        // Not while the selfie is being sent or the result is showing: the
+        // punch may already be recorded, and closing would hide the outcome.
+        if (scanLoading || scanResult) return true;
+        stopScannerCamera();
+        setScanType(null);
+        setCapturedSelfie(null);
+        return true;
+      }
+      if (showLocationVerification) { setShowLocationVerification(false); return true; }
+      return false;
+    };
+  });
+  useEffect(() => {
+    const onBack = (e: Event) => { if (closeTopPopup.current()) e.preventDefault(); };
+    window.addEventListener("bot-back", onBack);
+    return () => window.removeEventListener("bot-back", onBack);
+  }, []);
 
   /**
    * Leave the punch flow if the conditions that let it open stop being true.
@@ -861,7 +1110,7 @@ function UserDashboard() {
         abortPunchFlow(
           result.reason === "unavailable"
             ? "GPS was turned off, so the punch was cancelled. Turn location on and try again."
-            : "Location access was withdrawn, so the punch was cancelled.",
+            : "Location was turned off, so the punch was cancelled. Turn it on and try again.",
         );
       } finally {
         inFlight = false;
@@ -893,7 +1142,15 @@ function UserDashboard() {
     setScanLoading(false);
     const fresh = await refetchProfile();
     const freshLog = fresh.data?.todayAttendance;
-    const alreadyDone = type === "punch-in" ? !!freshLog?.punchIn : !!freshLog?.punchOut;
+    // "Did it land?" has to be judged on an OPEN session, not on a punch-in
+    // existing at all. On a second session the root punchIn is still this
+    // morning's, so a refused re-punch (e.g. outside the fence) read as done:
+    // the app showed "Punched In Successfully!" and swallowed the error while
+    // the employee stayed punched out. Likewise a provisional device
+    // punch-out is not the app punch-out succeeding.
+    const alreadyDone = type === "punch-in"
+      ? !!freshLog?.punchIn && !freshLog?.punchOut
+      : !!freshLog?.punchOut && !freshLog?.punchOutIsProvisional;
     if (alreadyDone) {
       // The backend recorded the punch even though the request errored — show
       // the same success confirmation the happy path would, no error toast.
@@ -908,8 +1165,8 @@ function UserDashboard() {
       setScanResult({
         type,
         timeLabel: nowLabel(),
-        workHoursLabel: type === "punch-out" && freshLog?.punchIn && freshLog?.punchOut
-          ? formatWorkedDuration(freshLog.punchIn, freshLog.punchOut)
+        workHoursLabel: type === "punch-out" && freshLog?.totalWorkMs
+          ? formatMs(freshLog.totalWorkMs)
           : undefined,
       });
       setTimeout(() => {
@@ -918,7 +1175,13 @@ function UserDashboard() {
         setScanResult(null);
       }, 1800);
     } else {
-      const rawMsg = err?.response?.data?.message as string | undefined;
+      let rawMsg = err?.response?.data?.message as string | undefined;
+      // A branch-less employee's punch is sent as remote (see punchIsWFH), so a
+      // company with remote punch off answered "Remote punch (Work From Home)
+      // is disabled" -- true, but it hides the real problem and its fix.
+      if (!profile?.branchId && rawMsg && /remote punch/i.test(rawMsg)) {
+        rawMsg = "You are not added to a branch yet, so you cannot punch in. Ask your admin to add you to your branch.";
+      }
       const fallback = `${type === "punch-in" ? "Punch In" : "Punch Out"} failed. Please try again.`;
       // Explicit, generous duration -- this is the one message that actually
       // explains why nothing happened (wrong location, poor accuracy, already
@@ -998,7 +1261,7 @@ function UserDashboard() {
           punchOutMutation.mutate(dataUrl, {
             onSuccess: (data) => {
               setScanLoading(false);
-              setScanResult({ type: "punch-out", timeLabel: nowLabel(), workHoursLabel: data?.workHours ? `${data.workHours} hrs` : undefined });
+              setScanResult({ type: "punch-out", timeLabel: nowLabel(), workHoursLabel: hoursLabel(data?.workHours) });
               setTimeout(() => {
                 setScanType(null);
                 setCapturedSelfie(null);
@@ -1038,7 +1301,7 @@ function UserDashboard() {
     // commitment, unlike navigation.
     void haptic("impactMedium");
 
-    if (!profile?.branchId || location) {
+    if (!locationRequired || location) {
       openScanner(type);
       return;
     }
@@ -1056,7 +1319,7 @@ function UserDashboard() {
     } else {
       setLocationFailReason(result.reason);
       if (result.reason === "timeout") {
-        toast.error(`${result.message} Please try again.`);
+        toast.error(friendlyLocationError("timeout"));
       } else {
         setShowLocationHelp(true);
       }
@@ -1105,7 +1368,7 @@ function UserDashboard() {
         throw {
           response: {
             data: {
-              message: "GPS location is required to punch in at your office branch. Please enable location in browser Site Settings and refresh.",
+              message: "Turn on location (GPS) on your phone, then try again.",
             },
           },
         };
@@ -1123,9 +1386,11 @@ function UserDashboard() {
       return data;
     },
     onSuccess: (data) => {
-      toast.success(data.message || "Punched In Successfully!");
+      // Our own words, not the server's ("Punch-in Successful. Status: late").
+      toast.success(`Punched in at ${nowLabel()}`);
       queryClient.invalidateQueries({ queryKey: ["user-profile"] });
       queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["user-history"] });
     },
     // No toast here — handlePunchError (called from the scanner) decides what to
     // show, since a request can error while the punch still went through on the
@@ -1136,11 +1401,11 @@ function UserDashboard() {
     mutationFn: async (photoArg: string) => {
       const { currentLocation, currentAddress, currentAccuracy } = await getFreshLocation();
 
-      if (!currentLocation && profile?.branchId) {
+      if (!currentLocation && profile?.branchId && !todayLog?.isWFH) {
         throw {
           response: {
             data: {
-              message: "GPS location is required to punch out. Please enable location in browser Site Settings and refresh.",
+              message: "Turn on location (GPS) on your phone, then try again.",
             },
           },
         };
@@ -1157,9 +1422,10 @@ function UserDashboard() {
       return data;
     },
     onSuccess: (data) => {
-      toast.success(`Punched Out! Worked: ${data.workHours} hrs`);
+      toast.success(hoursLabel(data?.workHours) ? `Punched out. You worked ${hoursLabel(data?.workHours)} today.` : "Punched out.");
       queryClient.invalidateQueries({ queryKey: ["user-profile"] });
       queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["user-history"] });
     },
     // No toast here — see punchInMutation above for why.
   });
@@ -1182,12 +1448,13 @@ function UserDashboard() {
       return data;
     },
     onSuccess: () => {
-      toast.success("Lunch Break Started!");
+      toast.success(`Lunch break started at ${nowLabel()}`);
       queryClient.invalidateQueries({ queryKey: ["user-profile"] });
       queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["user-history"] });
     },
     onError: (err: any) => {
-      toast.error(err.response?.data?.message || "Lunch In Failed");
+      toast.error(err.response?.data?.message || "Could not start lunch. Please try again.");
     }
   });
 
@@ -1221,14 +1488,29 @@ function UserDashboard() {
   const lunchOutMutation = useMutation({
     mutationFn: postLunchOut,
     onSuccess: () => {
-      toast.success("Lunch Break Completed!");
+      toast.success(`Lunch break ended at ${nowLabel()}`);
       queryClient.invalidateQueries({ queryKey: ["user-profile"] });
       queryClient.invalidateQueries({ queryKey: ["employee-dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["user-history"] });
     },
     onError: (err: any) => {
-      toast.error(err.response?.data?.message || "Lunch Out Failed");
+      toast.error(err.response?.data?.message || "Could not end lunch. Please try again.");
     }
   });
+
+  // The profile could not be loaded and there is nothing cached to show.
+  // Without this branch Home drew its normal Punch In card from an empty
+  // profile, so an employee of a paused or switched-off company saw a button
+  // that could not work and no reason why. LoadError says the server's own
+  // plain sentence for a company block ("...tell your admin"), and "Try
+  // again" for everything else.
+  if (!profile && isProfileError) {
+    return (
+      <div className="w-full">
+        <LoadError what="your home screen" error={profileError} onRetry={() => void refetchProfile()} />
+      </div>
+    );
+  }
 
   if (isProfileLoading || isDashboardLoading) {
     return (
@@ -1306,25 +1588,19 @@ function UserDashboard() {
     return `${h.toString().padStart(2, '0')}h ${m.toString().padStart(2, '0')}m ${s.toString().padStart(2, '0')}s`;
   };
 
-  // Final worked duration for a completed shift (punch-in to punch-out), stable across refresh.
-  const formatWorkedDuration = (punchIn?: string, punchOut?: string) => {
-    if (!punchIn || !punchOut) return "00h 00m";
-    const diffSecs = Math.max(0, Math.floor((new Date(punchOut).getTime() - new Date(punchIn).getTime()) / 1000));
-    const h = Math.floor(diffSecs / 3600);
-    const m = Math.floor((diffSecs % 3600) / 60);
-    return `${h.toString().padStart(2, '0')}h ${m.toString().padStart(2, '0')}m`;
-  };
-
-  // Duration for a calendar/list day record — ticks live off `time` for an
-  // in-progress shift, otherwise uses the stored punch-out timestamp.
+  // Duration for a calendar/list day record.
+  //
+  // The server's graded total first: it is what the day is paid on, with lunch
+  // and between-session gaps already out. Raw punch-in to punch-out counted
+  // lunch as work (9h07m shown for an 8h day). Only TODAY's open record ticks
+  // live -- a past day left open used to keep counting from its punch-in, and
+  // showed several hundred hours.
   const formatDuration = (record: AttendanceLog) => {
+    if (record.totalWorkMs) return formatMs(record.totalWorkMs);
     if (!record.punchIn) return "00h 00m";
-    const endTime = record.punchOut ? new Date(record.punchOut) : time;
-    const diff = endTime.getTime() - new Date(record.punchIn).getTime();
-    if (diff <= 0) return "00h 00m";
-    const hrs = Math.floor(diff / (1000 * 60 * 60));
-    const mins = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-    return `${hrs.toString().padStart(2, '0')}h ${mins.toString().padStart(2, '0')}m`;
+    if (record.punchOut) return formatMs(+new Date(record.punchOut) - +new Date(record.punchIn));
+    if (new Date(record.date).toDateString() !== time.toDateString()) return "--";
+    return formatMs(workedTodayMs(record, record.lunchInTime, record.lunchOutTime, time.getTime()));
   };
 
   // Days-of-month grid helper for the Interactive Calendar Map
@@ -1345,7 +1621,7 @@ function UserDashboard() {
   };
 
   const getDayRecord = (day: Date | null) => {
-    if (!day || !historyData?.history) return null;
+    if (!day || !Array.isArray(historyData?.history)) return null;
     const dateString = day.toDateString();
     return historyData.history.find(log => new Date(log.date).toDateString() === dateString);
   };
@@ -1408,12 +1684,17 @@ function UserDashboard() {
   const calendarDays = getDaysInMonth(selectedDate);
   const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-  const filteredLogs = historyData?.history?.filter(log => {
+  // Filtered on the same label the row shows, so "On-Time" cannot list a day
+  // badged Late, and "All" hides nothing. Late is read from wasLate too:
+  // punch-out normalises `status: late` to present, so filtering on status
+  // alone lost every late day that had been closed.
+  const filteredLogs = (Array.isArray(historyData?.history) ? historyData.history : []).filter(log => {
+    const tone = dayLabel(log).tone;
     if (statusFilter === "all") return true;
-    if (statusFilter === "present") return log.status === "present";
-    if (statusFilter === "late") return log.status === "late";
-    if (statusFilter === "absent") return log.status === "absent";
-    if (statusFilter === "wfh") return log.isWFH === true;
+    if (statusFilter === "present") return tone === "green";
+    if (statusFilter === "late") return tone === "amber";
+    if (statusFilter === "absent") return tone === "rose";
+    if (statusFilter === "wfh") return tone === "indigo";
     return true;
   }) || [];
 
@@ -1432,8 +1713,8 @@ function UserDashboard() {
 
       {/* Mobile Title */}
       <div className="md:hidden block text-left">
-        <h2 className="text-[17px] font-semibold text-slate-800 dark:text-slate-100">Attendance Portal</h2>
-        <p className="text-[11px] text-slate-500">Track and manage your workspace hours.</p>
+        <h2 className="text-[19px] font-bold text-slate-800 dark:text-slate-100">Attendance</h2>
+        <p className="text-[13px] text-slate-500">Punch in when you start work. Punch out when you leave.</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -1453,11 +1734,11 @@ function UserDashboard() {
                     {time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}
                   </h3>
                   <div className="flex items-center gap-2 mt-1.5">
-                    <Badge className={`border-none px-2.5 py-0.5 text-[8px] font-bold uppercase tracking-wider rounded-full shadow-xs ${isPunchedIn && !isPunchedOut
+                    <Badge className={`border-none px-3 py-1 text-[11px] font-bold uppercase tracking-wide rounded-full shadow-xs ${isPunchedIn && !isPunchedOut
                       ? "bg-emerald-500 text-white animate-pulse"
                       : "bg-white/15 text-white/90"
                       }`}>
-                      {isPunchedIn && !isPunchedOut ? "PUNCHED IN" : "NOT PUNCHED IN"}
+                      {isPunchedIn && !isPunchedOut ? "PUNCHED IN" : isPunchedOut ? "PUNCHED OUT" : "NOT PUNCHED IN"}
                     </Badge>
                   </div>
                 </div>
@@ -1465,14 +1746,15 @@ function UserDashboard() {
                 {/* Date on the right */}
                 <div className="flex items-center gap-2">
                   <div className="text-right">
-                    <span className="text-[11px] font-bold text-white/90 tracking-wide uppercase block">TODAY</span>
-                    <span className="text-[9.5px] text-white/60 font-semibold block mt-0.5">
+                    <span className="text-[13px] font-bold text-white/90 tracking-wide uppercase block">TODAY</span>
+                    <span className="text-[12px] text-white/70 font-semibold block mt-0.5">
                       {time.toLocaleDateString("en-US", { day: "numeric", month: "short", weekday: "short" })}
                     </span>
                   </div>
-                  <button className="h-7 w-7 rounded-full border border-white/15 bg-white/10 flex items-center justify-center hover:bg-white/20 transition-all text-white/80 shrink-0">
+                  {/* Decorative. It was a <button> with no action, so a tap did nothing. */}
+                  <div aria-hidden className="h-7 w-7 rounded-full border border-white/15 bg-white/10 flex items-center justify-center text-white/80 shrink-0">
                     <Clock className="h-3.5 w-3.5" />
-                  </button>
+                  </div>
                 </div>
               </div>
 
@@ -1496,26 +1778,26 @@ function UserDashboard() {
                 {/* 2x2 grid with exact light weight / size requirements */}
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2.5 flex-1 text-left">
                   <div>
-                    <span className="text-[8px] font-semibold text-white/40 uppercase tracking-wider block">PUNCH-IN</span>
-                    <span className="text-[13.5px] font-medium text-white block mt-0.5">
+                    <span className="text-[11px] font-semibold text-white/60 block">Punch in</span>
+                    <span className="text-[16px] font-semibold text-white block mt-0.5">
                       {formatTimeStr(todayLog?.punchIn)}
                     </span>
                   </div>
                   <div>
-                    <span className="text-[8px] font-semibold text-white/40 uppercase tracking-wider block">PUNCH-OUT</span>
-                    <span className="text-[13.5px] font-medium text-white block mt-0.5">
+                    <span className="text-[11px] font-semibold text-white/60 block">Punch out</span>
+                    <span className="text-[16px] font-semibold text-white block mt-0.5">
                       {formatTimeStr(displayPunchOut)}
                     </span>
                   </div>
                   <div>
-                    <span className="text-[7.5px] font-semibold text-white/30 uppercase tracking-wider block">LUNCH-IN</span>
-                    <span className="text-[11.5px] font-normal text-white/80 block mt-0.5">
+                    <span className="text-[11px] font-semibold text-white/60 block">Lunch start</span>
+                    <span className="text-[14px] font-medium text-white/90 block mt-0.5">
                       {formatTimeStr(displayLunchInTime)}
                     </span>
                   </div>
                   <div>
-                    <span className="text-[7.5px] font-semibold text-white/30 uppercase tracking-wider block">LUNCH-OUT</span>
-                    <span className="text-[11.5px] font-normal text-white/80 block mt-0.5">
+                    <span className="text-[11px] font-semibold text-white/60 block">Lunch end</span>
+                    <span className="text-[14px] font-medium text-white/90 block mt-0.5">
                       {formatTimeStr(displayLunchOutTime)}
                     </span>
                   </div>
@@ -1531,8 +1813,8 @@ function UserDashboard() {
                 <div className="flex items-center justify-start gap-3 p-2 bg-white/5 rounded-xl border border-white/5">
                   {todayLog.punchInPhoto && (
                     <div className="flex items-center gap-1.5">
-                      <span className="text-[7.5px] font-semibold text-white/40 uppercase tracking-wider">In:</span>
-                      <div className="h-5 w-8 rounded overflow-hidden border border-white/10 relative shadow-xs">
+                      <span className="text-[11px] font-semibold text-white/60">In</span>
+                      <div className="h-10 w-10 rounded-lg overflow-hidden border border-white/10 relative shadow-xs">
                         <img
                           src={todayLog.punchInPhoto.startsWith('http') ? todayLog.punchInPhoto : `${IMAGE_BASE_URL}${todayLog.punchInPhoto}`}
                           alt="Punch In selfie"
@@ -1543,8 +1825,8 @@ function UserDashboard() {
                   )}
                   {todayLog.punchOutPhoto && (
                     <div className="flex items-center gap-1.5 border-l border-white/10 pl-2">
-                      <span className="text-[7.5px] font-semibold text-white/40 uppercase tracking-wider">Out:</span>
-                      <div className="h-5 w-8 rounded overflow-hidden border border-white/10 relative shadow-xs">
+                      <span className="text-[11px] font-semibold text-white/60">Out</span>
+                      <div className="h-10 w-10 rounded-lg overflow-hidden border border-white/10 relative shadow-xs">
                         <img
                           src={todayLog.punchOutPhoto.startsWith('http') ? todayLog.punchOutPhoto : `${IMAGE_BASE_URL}${todayLog.punchOutPhoto}`}
                           alt="Punch Out selfie"
@@ -1561,29 +1843,29 @@ function UserDashboard() {
                   locationProbed. And a timeout is not a block: telling someone
                   to go and enable a permission they already granted sends them
                   into Settings to change nothing. */}
-              <div className="flex items-center justify-center gap-1.5 text-[9px] pt-0.5">
+              <div className="flex items-center justify-center gap-1.5 text-[12px] pt-0.5">
                 {!location && (!locationProbed || locationLoading) ? (
                   <>
-                    <Loader2 className="h-3 w-3 shrink-0 animate-spin text-white/70" />
+                    <Loader2 className="h-4 w-4 shrink-0 animate-spin text-white/70" />
                     <span className="font-medium truncate text-white/70">Checking your location…</span>
                   </>
                 ) : !location ? (
                   <>
-                    <MapPin className="h-3 w-3 shrink-0 text-red-400" />
+                    <MapPin className="h-4 w-4 shrink-0 text-red-300" />
                     <button
                       onClick={() => (locationFailReason === "timeout" ? void refreshLocation() : setShowLocationHelp(true))}
-                      className="font-semibold text-red-400 underline underline-offset-2 truncate"
+                      className="font-semibold text-red-300 underline underline-offset-2 truncate py-1"
                     >
                       {locationFailReason === "timeout"
-                        ? "Couldn't get a fix — tap to retry"
+                        ? "Location not found — tap to try again"
                         : locationFailReason === "unavailable"
                           ? "GPS is off — tap to turn it on"
-                          : "Location blocked — tap to enable GPS"}
+                          : "Location not allowed — tap to fix"}
                     </button>
                   </>
                 ) : (
                   <>
-                    <MapPin className="h-3 w-3 shrink-0 text-white/80" />
+                    <MapPin className="h-4 w-4 shrink-0 text-white/80" />
                     <span className="font-medium truncate text-white/60">{address}</span>
                   </>
                 )}
@@ -1620,24 +1902,23 @@ function UserDashboard() {
               <div className="w-full rounded-[16px] border border-destructive/20 bg-destructive/5 px-4 py-3.5 text-center">
                 <div className="mb-1 flex items-center justify-center gap-2">
                   <ShieldAlert className="h-4 w-4 text-destructive" />
-                  <span className="text-[12px] font-bold text-destructive">App update required</span>
+                  <span className="text-[14px] font-bold text-destructive">Please update the app</span>
                 </div>
-                <p className="text-[11px] leading-relaxed text-destructive/80">
-                  Punching is turned off until you install the latest app version. Open the update
-                  prompt to download it.
+                <p className="text-[13px] leading-relaxed text-destructive/80">
+                  You cannot punch in or out on this old version. Install the new version from the
+                  update message.
                 </p>
               </div>
             ) : !isOnline ? (
               <div className="w-full rounded-[16px] border border-amber-200 bg-amber-50/80 px-4 py-3.5 text-center dark:border-amber-500/20 dark:bg-amber-500/10">
                 <div className="mb-1 flex items-center justify-center gap-2">
                   <CloudOff className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                  <span className="text-[12px] font-bold text-amber-900 dark:text-amber-200">
-                    Connect to the internet
+                  <span className="text-[14px] font-bold text-amber-900 dark:text-amber-200">
+                    No internet
                   </span>
                 </div>
-                <p className="text-[11px] leading-relaxed text-amber-800/80 dark:text-amber-200/70">
-                  You need a connection to punch in or out. Your location is still being
-                  recorded and will upload by itself.
+                <p className="text-[13px] leading-relaxed text-amber-800/80 dark:text-amber-200/70">
+                  Turn on mobile data or Wi-Fi to punch in or out.
                 </p>
               </div>
             ) : locationBlocked ? (
@@ -1653,27 +1934,27 @@ function UserDashboard() {
               <div className="p-4 rounded-[18px] bg-red-500/10 border border-red-500/20 text-center space-y-2.5">
                 <div className="flex items-center justify-center gap-2">
                   <MapPin className="h-4 w-4 text-red-600 dark:text-red-400" />
-                  <span className="text-[12px] font-bold text-red-900 dark:text-red-200">
+                  <span className="text-[14px] font-bold text-red-900 dark:text-red-200">
                     {locationFailReason === "unavailable"
-                      ? "Turn on GPS to punch"
+                      ? "Turn on location to punch"
                       : locationFailReason === "unsupported"
                         ? "This device cannot share location"
                         : "Allow location to punch"}
                   </span>
                 </div>
-                <p className="text-[11px] leading-relaxed text-red-800/80 dark:text-red-200/70">
+                <p className="text-[13px] leading-relaxed text-red-800/80 dark:text-red-200/70">
                   {locationFailReason === "unavailable"
-                    ? "Your attendance is recorded against your branch, so location has to be on before you can punch in or out."
+                    ? "Your phone's location (GPS) is off. Turn it on to punch in or out."
                     : locationFailReason === "unsupported"
                       ? "Ask your admin to record today through Attendance Regularization — your work still counts."
-                      : "Location permission is off for this app, so punches cannot be verified against your branch."}
+                      : "This app is not allowed to see your location. Allow it to punch in or out."}
                 </p>
                 {locationFailReason !== "unsupported" && (
                   <Button
                     onClick={() => setShowLocationHelp(true)}
-                    className="w-full h-10 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-[14px] border-none text-xs tracking-wider"
+                    className="w-full h-12 bg-red-600 hover:bg-red-700 text-white font-bold rounded-[14px] border-none text-[15px]"
                   >
-                    {locationFailReason === "unavailable" ? "Turn on location" : "Enable location"}
+                    {locationFailReason === "unavailable" ? "Turn on location" : "Allow location"}
                   </Button>
                 )}
               </div>
@@ -1683,17 +1964,16 @@ function UserDashboard() {
               // is "why can I not punch in", and the answer names the time and
               // the way to fix it.
               <div className="p-4 rounded-[18px] bg-slate-500/10 border border-slate-500/20 text-center space-y-1">
-                <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                <p className="text-[14px] font-bold text-slate-700 dark:text-slate-300">
                   {profile?.shiftId?.name ? `${profile.shiftId.name} shift` : "Your shift"} ended at{" "}
                   {formatShiftTime(profile?.shiftId?.endTime)}
                 </p>
-                <p className="text-[10px] leading-relaxed text-slate-600/80 dark:text-slate-400/80">
-                  Punch-in is closed for today. If you worked, ask your admin to add it
-                  through Attendance Regularization &mdash; your work still counts.
+                <p className="text-[13px] leading-relaxed text-slate-600/80 dark:text-slate-400/80">
+                  You cannot punch in now. If you worked today, ask your admin to add it.
                 </p>
               </div>
             ) : !isPunchedIn && trackingSetup.applicable && !trackingSetup.ready ? (
-              <TrackingSetupGate setup={trackingSetup} />
+              <TrackingSetupGate setup={trackingSetup} alwaysOn={profile?.trackingMode === "always" && alwaysSupported} />
             ) : !isPunchedIn ? (
               // Not punched in: Primary "Punch In" button (opens location consent and map verification popup first)
               <Button
@@ -1703,14 +1983,14 @@ function UserDashboard() {
                   }
                   setShowLocationVerification(true);
                 }}
-                className="w-full h-11 bg-gradient-to-r from-[#501537] to-[#7B2453] hover:from-[#6B1C4B] hover:to-[#912D64] text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-xs tracking-wider relative overflow-hidden group"
+                className="w-full h-14 bg-gradient-to-r from-[#501537] to-[#7B2453] hover:from-[#6B1C4B] hover:to-[#912D64] text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-[15px] tracking-wide relative overflow-hidden group"
               >
                 <div className="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
                 {/* iOS only, and only because a real finger must touch the
                     control -- see components/shared/haptic-overlay.tsx. The tap
                     bubbles on to this button's own onClick unchanged. */}
                 <HapticOverlay radius="16px" />
-                <Fingerprint className="h-4.5 w-4.5 text-white group-hover:scale-110 transition-transform duration-300" />
+                <Fingerprint className="h-5 w-5 text-white group-hover:scale-110 transition-transform duration-300" />
                 <span>Punch In</span>
               </Button>
             ) : !isPunchedOut ? (
@@ -1722,23 +2002,23 @@ function UserDashboard() {
                   <div className="grid grid-cols-2 gap-3">
                     <Button
                       onClick={() => beginPunch("punch-out")}
-                      className="relative h-11 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-700 hover:to-red-600 text-white font-semibold rounded-[16px] shadow-xs border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all text-xs tracking-wider"
+                      className="relative h-14 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-700 hover:to-red-600 text-white font-semibold rounded-[16px] shadow-xs border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all text-[15px] tracking-wide"
                     >
                       <HapticOverlay radius="16px" />
-                      <Fingerprint className="h-4 w-4 text-white" />
+                      <Fingerprint className="h-5 w-5 text-white" />
                       <span>Punch Out</span>
                     </Button>
                     <Button
-                      onClick={() => lunchInMutation.mutate()}
+                      onClick={() => setConfirmLunch(true)}
                       disabled={lunchInMutation.isPending}
-                      className="relative h-11 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-semibold rounded-[16px] shadow-xs border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all text-xs tracking-wider"
+                      className="relative h-14 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-semibold rounded-[16px] shadow-xs border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all text-[15px] tracking-wide"
                     >
                       <HapticOverlay radius="16px" />
                       {lunchInMutation.isPending ? (
-                        <RefreshCw className="h-4 w-4 animate-spin" />
+                        <RefreshCw className="h-5 w-5 animate-spin" />
                       ) : (
                         <>
-                          <Coffee className="h-4 w-4 text-white" />
+                          <Coffee className="h-5 w-5 text-white" />
                           <span>Start Lunch</span>
                         </>
                       )}
@@ -1749,15 +2029,15 @@ function UserDashboard() {
                   <Button
                     onClick={() => lunchOutMutation.mutate()}
                     disabled={lunchOutMutation.isPending}
-                    className="relative w-full h-11 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-xs tracking-wider"
+                    className="relative w-full h-14 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-[15px] tracking-wide"
                   >
                     <HapticOverlay radius="16px" />
                     {lunchOutMutation.isPending ? (
-                      <RefreshCw className="h-4.5 w-4.5 animate-spin" />
+                      <RefreshCw className="h-5 w-5 animate-spin" />
                     ) : (
                       <>
-                        <Coffee className="h-4.5 w-4.5 text-white" />
-                        <span>End Lunch Break</span>
+                        <Coffee className="h-5 w-5 text-white" />
+                        <span>End Lunch</span>
                       </>
                     )}
                   </Button>
@@ -1765,10 +2045,10 @@ function UserDashboard() {
                   // Lunch completed: Only Punch Out button is available
                   <Button
                     onClick={() => beginPunch("punch-out")}
-                    className="relative w-full h-11 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-700 hover:to-red-600 text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-xs tracking-wider group"
+                    className="relative w-full h-14 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-700 hover:to-red-600 text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-[15px] tracking-wide group"
                   >
                     <HapticOverlay radius="16px" />
-                    <Fingerprint className="h-4.5 w-4.5 text-white group-hover:scale-110 transition-transform duration-300" />
+                    <Fingerprint className="h-5 w-5 text-white group-hover:scale-110 transition-transform duration-300" />
                     <span>Punch Out</span>
                   </Button>
                 )}
@@ -1782,9 +2062,9 @@ function UserDashboard() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5">
                       <Clock className="h-3.5 w-3.5 text-emerald-500" />
-                      <span className="text-[9.5px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Shift Progress</span>
+                      <span className="text-[12px] font-semibold text-slate-500 dark:text-slate-400">Shift progress</span>
                     </div>
-                    <Badge variant="outline" className="text-[8.5px] font-bold tracking-widest bg-emerald-500/10 text-emerald-500 border-none px-2 py-0.5 rounded-full">
+                    <Badge variant="outline" className="text-[12px] font-bold bg-emerald-500/10 text-emerald-500 border-none px-2 py-0.5 rounded-full">
                       {Math.round(getShiftPercent())}%
                     </Badge>
                   </div>
@@ -1797,8 +2077,8 @@ function UserDashboard() {
                     />
                   </div>
 
-                  <div className="flex items-center justify-between text-[9.5px] font-medium">
-                    <span className="text-slate-500 dark:text-slate-400">Total Worked:</span>
+                  <div className="flex items-center justify-between text-[13px] font-medium">
+                    <span className="text-slate-500 dark:text-slate-400">Worked today</span>
                     <span className="text-slate-700 dark:text-slate-200 font-mono font-semibold">{formatElapsed(elapsedSeconds)}</span>
                   </div>
                 </motion.div>
@@ -1806,19 +2086,19 @@ function UserDashboard() {
             ) : (
               // Punched out today
               <div className="flex flex-col gap-3">
-                <div className="p-4 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-[18px] border border-emerald-500/20 text-center font-semibold text-xs flex items-center justify-center gap-2 shadow-xs">
-                  <CheckCircle className="h-4.5 w-4.5 text-emerald-500" />
-                  <span>Today's Shift Successfully Completed!</span>
+                <div className="p-4 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-[18px] border border-emerald-500/20 text-center font-semibold text-[14px] flex items-center justify-center gap-2 shadow-xs">
+                  <CheckCircle className="h-5 w-5 text-emerald-500" />
+                  <span>Day finished. You have punched out.</span>
                 </div>
 
                 {/* Final worked hours — computed from stored punch times, so it stays correct on refresh */}
                 <div className="p-4 bg-white dark:bg-slate-900/50 backdrop-blur-md rounded-[18px] border border-slate-100 dark:border-white/5 shadow-xs flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <Clock className="h-3.5 w-3.5 text-emerald-500" />
-                    <span className="text-[9.5px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Total Worked Today</span>
+                    <span className="text-[12px] font-semibold text-slate-500 dark:text-slate-400">Worked today</span>
                   </div>
-                  <span className="text-[13px] font-mono font-bold text-slate-700 dark:text-slate-200">
-                    {formatWorkedDuration(todayLog?.punchIn, displayPunchOut)}
+                  <span className="text-[16px] font-mono font-bold text-slate-700 dark:text-slate-200">
+                    {formatMs(todayLog?.totalWorkMs || workedTodayMs(todayLog, displayLunchInTime, displayLunchOutTime, Date.now()))}
                   </span>
                 </div>
 
@@ -1828,11 +2108,11 @@ function UserDashboard() {
                   // admin can resolve it, so say that instead of leaving a dead
                   // control on screen.
                   <div className="p-4 rounded-[18px] bg-amber-500/10 border border-amber-500/20 text-center space-y-1">
-                    <p className="text-[11px] font-bold text-amber-700 dark:text-amber-400">
-                      Daily limit of {maxSessions} sessions reached
+                    <p className="text-[14px] font-bold text-amber-700 dark:text-amber-400">
+                      You cannot punch in again today
                     </p>
-                    <p className="text-[10px] leading-relaxed text-amber-700/80 dark:text-amber-400/80">
-                      Today's hours are still recorded in full. Ask your admin if you need another session.
+                    <p className="text-[13px] leading-relaxed text-amber-700/80 dark:text-amber-400/80">
+                      You have used all {maxSessions} punch-ins for today. Your hours are saved. Ask your admin if you need more.
                     </p>
                   </div>
                 ) : profile?.allowMultiplePunches && shiftIsOver ? (
@@ -1840,20 +2120,20 @@ function UserDashboard() {
                   // session can be opened, so say so rather than offering a
                   // button the server will refuse.
                   <div className="p-4 rounded-[18px] bg-slate-500/10 border border-slate-500/20 text-center space-y-1">
-                    <p className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                    <p className="text-[14px] font-bold text-slate-700 dark:text-slate-300">
                       Shift ended at {formatShiftTime(profile?.shiftId?.endTime)}
                     </p>
-                    <p className="text-[10px] leading-relaxed text-slate-600/80 dark:text-slate-400/80">
-                      Today's hours are recorded in full. Ask your admin if you need another session.
+                    <p className="text-[13px] leading-relaxed text-slate-600/80 dark:text-slate-400/80">
+                      Your hours for today are saved. Ask your admin if you need to punch in again.
                     </p>
                   </div>
                 ) : profile?.allowMultiplePunches ? (
                   <Button
                     onClick={() => setConfirmNewSession(true)}
-                    className="w-full h-11 bg-gradient-to-r from-[#501537] to-[#7B2453] hover:from-[#6B1C4B] hover:to-[#912D64] text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-xs tracking-wider relative overflow-hidden group"
+                    className="w-full h-14 bg-gradient-to-r from-[#501537] to-[#7B2453] hover:from-[#6B1C4B] hover:to-[#912D64] text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-[15px] tracking-wide relative overflow-hidden group"
                   >
-                    <Fingerprint className="h-4.5 w-4.5 text-white group-hover:scale-110 transition-transform duration-300" />
-                    <span>Punch In For Next Shift</span>
+                    <Fingerprint className="h-5 w-5 text-white group-hover:scale-110 transition-transform duration-300" />
+                    <span>Punch In Again</span>
                   </Button>
                 ) : null}
               </div>
@@ -1863,7 +2143,11 @@ function UserDashboard() {
           {/* Every punch today, in order, with how far from the branch each one
               was taken. The distance is what makes a disputed punch checkable
               instead of a matter of recollection. */}
-          <TodayActivity sessions={todaySessions} branchName={profile?.branchId?.name} />
+          <TodayActivity sessions={todaySessions} branchName={profile?.branchId?.branchName ?? profile?.branchId?.name} />
+
+          {/* No standing "records your location all the time" notice here (owner,
+              2026-10-01): the setup screen says it once, and the phone's own
+              tracking notification ("Location sharing is on") says it all the time. */}
 
         </div>
 
@@ -1874,19 +2158,21 @@ function UserDashboard() {
           <div className="flex items-center justify-between bg-white dark:bg-slate-900 px-6 py-4.5 rounded-2xl shadow-xs border border-slate-100/50 dark:border-slate-800/20">
             <button
               onClick={() => changeMonth(-1)}
-              className="text-[#501537] dark:text-[#7B2453] hover:bg-[#501537]/5 dark:hover:bg-[#7B2453]/10 p-2 rounded-xl transition-all cursor-pointer"
+              aria-label="Previous month"
+              className="text-[#501537] dark:text-[#C0467F] hover:bg-[#501537]/5 dark:hover:bg-[#7B2453]/10 p-2.5 rounded-xl transition-all cursor-pointer"
             >
               <ChevronLeft className="h-5 w-5 stroke-[3px]" />
             </button>
 
-            <h4 className="font-black text-sm text-slate-750 dark:text-white uppercase tracking-wider">
-              {selectedDate.toLocaleDateString("en-US", { month: "long", year: "numeric" })} Summary
+            <h4 className="font-bold text-[16px] text-slate-800 dark:text-white">
+              {selectedDate.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
             </h4>
 
             <button
               onClick={() => changeMonth(1)}
+              aria-label="Next month"
               disabled={isCurrentMonth}
-              className={`text-[#501537] dark:text-[#7B2453] p-2 rounded-xl transition-all ${isCurrentMonth
+              className={`text-[#501537] dark:text-[#C0467F] p-2.5 rounded-xl transition-all ${isCurrentMonth
                 ? "opacity-30 cursor-not-allowed"
                 : "hover:bg-[#501537]/5 dark:hover:bg-[#7B2453]/10 cursor-pointer"
                 }`}
@@ -1903,7 +2189,7 @@ function UserDashboard() {
               <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 to-transparent pointer-events-none" />
               <div className="flex items-start justify-between relative z-10">
                 <div>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-[#501537] dark:text-[#8C2059]">Present</span>
+                  <span className="text-[13px] font-bold text-[#501537] dark:text-[#C0467F]">Present</span>
                 </div>
                 {/* Purple calendar icon */}
                 <div className="h-7 w-7 rounded-xl bg-purple-50 dark:bg-purple-950/20 text-[#501537] dark:text-[#8C2059] flex items-center justify-center shrink-0">
@@ -1913,7 +2199,7 @@ function UserDashboard() {
 
               <div className="mt-1 relative z-10">
                 <span className="text-3xl font-black text-slate-800 dark:text-white leading-none font-sans tracking-tight">{stats.present}</span>
-                <span className="text-[9px] text-slate-400 dark:text-slate-500 block font-medium mt-1">Days Logged</span>
+                <span className="text-[12px] text-slate-500 dark:text-slate-400 block font-medium mt-1">days</span>
               </div>
 
               {/* Thick bottom progress bar */}
@@ -1932,7 +2218,7 @@ function UserDashboard() {
               <div className="absolute inset-0 bg-gradient-to-tr from-rose-500/5 to-transparent pointer-events-none" />
               <div className="flex items-start justify-between relative z-10">
                 <div>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-rose-500">Absent</span>
+                  <span className="text-[13px] font-bold text-rose-500">Absent</span>
                 </div>
                 {/* Rose icon badge */}
                 <div className="h-7 w-7 rounded-xl bg-rose-50 dark:bg-rose-950/20 text-rose-500 flex items-center justify-center shrink-0">
@@ -1943,15 +2229,8 @@ function UserDashboard() {
               <div className="mt-1 flex items-end justify-between relative z-10">
                 <div>
                   <span className="text-3xl font-black text-slate-800 dark:text-white leading-none font-sans tracking-tight">{stats.absent}</span>
-                  <span className="text-[9px] text-slate-400 dark:text-slate-500 block font-medium mt-1">Unexcused</span>
+                  <span className="text-[12px] text-slate-500 dark:text-slate-400 block font-medium mt-1">days</span>
                 </div>
-                <CircularProgress
-                  value={stats.absent}
-                  max={6}
-                  color="#EF4444"
-                  trackColor="rgba(239, 68, 68, 0.1)"
-                  size={44}
-                />
               </div>
 
               <div className="w-full mt-2 relative z-10">
@@ -1969,7 +2248,7 @@ function UserDashboard() {
               <div className="absolute inset-0 bg-gradient-to-tr from-emerald-500/5 to-transparent pointer-events-none" />
               <div className="flex items-start justify-between relative z-10">
                 <div>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">WFH</span>
+                  <span className="text-[13px] font-bold text-emerald-600">From home</span>
                 </div>
                 {/* Green Home Icon Badge */}
                 <div className="h-7 w-7 rounded-xl bg-emerald-50 dark:bg-emerald-950/20 text-emerald-500 flex items-center justify-center shrink-0">
@@ -1980,15 +2259,8 @@ function UserDashboard() {
               <div className="mt-1 flex items-end justify-between relative z-10">
                 <div>
                   <span className="text-3xl font-black text-slate-800 dark:text-white leading-none font-sans tracking-tight">{stats.wfh}</span>
-                  <span className="text-[9px] text-slate-400 dark:text-slate-500 block font-medium mt-1">Remote</span>
+                  <span className="text-[12px] text-slate-500 dark:text-slate-400 block font-medium mt-1">days</span>
                 </div>
-                <CircularProgress
-                  value={stats.wfh}
-                  max={10}
-                  color="#10B981"
-                  trackColor="rgba(16, 185, 129, 0.1)"
-                  size={44}
-                />
               </div>
 
               <div className="w-full mt-2 relative z-10">
@@ -2006,7 +2278,7 @@ function UserDashboard() {
               <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/5 to-transparent pointer-events-none" />
               <div className="flex items-start justify-between relative z-10">
                 <div>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600">Half Day</span>
+                  <span className="text-[13px] font-bold text-blue-600">Half day</span>
                 </div>
                 {/* Blue Clock Icon Badge */}
                 <div className="h-7 w-7 rounded-xl bg-blue-50 dark:bg-blue-950/20 text-blue-500 flex items-center justify-center shrink-0">
@@ -2017,15 +2289,8 @@ function UserDashboard() {
               <div className="mt-1 flex items-end justify-between relative z-10">
                 <div>
                   <span className="text-3xl font-black text-slate-800 dark:text-white leading-none font-sans tracking-tight">{stats.halfDay}</span>
-                  <span className="text-[9px] text-slate-400 dark:text-slate-500 block font-medium mt-1">Short Shift</span>
+                  <span className="text-[12px] text-slate-500 dark:text-slate-400 block font-medium mt-1">days</span>
                 </div>
-                <CircularProgress
-                  value={stats.halfDay}
-                  max={6}
-                  color="#3B82F6"
-                  trackColor="rgba(59, 130, 246, 0.1)"
-                  size={44}
-                />
               </div>
 
               <div className="w-full mt-2 relative z-10">
@@ -2046,11 +2311,11 @@ function UserDashboard() {
             <CardContent className="p-4 flex items-center justify-between gap-4">
               <div className="space-y-1 flex-1 min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <Badge className="bg-amber-100 dark:bg-amber-950/25 text-amber-600 dark:text-amber-550 font-bold text-[8px] uppercase tracking-wider border-none">
+                  <Badge className="bg-amber-100 dark:bg-amber-950/25 text-amber-700 dark:text-amber-400 font-bold text-[11px] uppercase tracking-wide border-none">
                     SALARY
                   </Badge>
                   {currentMonthSalary && (
-                    <Badge className={`border-none font-semibold text-[8px] px-1.5 py-0.5 uppercase tracking-wider rounded-md ${currentMonthSalary.status === "paid"
+                    <Badge className={`border-none font-semibold text-[11px] px-2 py-0.5 uppercase tracking-wide rounded-md ${currentMonthSalary.status === "paid"
                       ? "bg-emerald-500/10 text-emerald-500"
                       : "bg-amber-500/10 text-amber-555"
                       }`}>
@@ -2059,48 +2324,51 @@ function UserDashboard() {
                   )}
                 </div>
 
-                <h4 className="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider mt-1">
-                  {selectedDate.toLocaleDateString("en-US", { month: "long" })} Earnings
+                <h4 className="text-[13px] font-semibold text-slate-500 dark:text-slate-400 mt-1">
+                  {selectedDate.toLocaleDateString("en-US", { month: "long" })} salary
                   {dashboardData?.salary?.isMTD === true && (
-                    <span className="ml-1.5 text-[8px] bg-blue-100 text-blue-600 rounded px-1 py-0.5 font-bold normal-case">MTD</span>
+                    <span className="ml-1.5 text-[11px] bg-blue-100 text-blue-700 rounded px-1.5 py-0.5 font-bold">so far</span>
                   )}
                   {dashboardData?.salary?.isMTD === false && (
-                    <span className="ml-1.5 text-[8px] bg-emerald-100 text-emerald-600 rounded px-1 py-0.5 font-bold normal-case">Final</span>
+                    <span className="ml-1.5 text-[11px] bg-emerald-100 text-emerald-700 rounded px-1.5 py-0.5 font-bold">final</span>
                   )}
                 </h4>
 
                 <div className="flex items-baseline gap-1.5 mt-0.5">
                   <span className="text-2xl font-semibold text-slate-800 dark:text-white leading-none font-sans">
-                    ₹{(currentMonthSalary
+                    {/* Whole rupees in Indian grouping (₹1,25,000). Bare
+                        toLocaleString() printed the engine's raw float --
+                        "₹98,765.4" -- in the handset's locale grouping. */}
+                    {formatINRFull(Math.round(currentMonthSalary
                       ? currentMonthSalary.totalSalary
-                      : (dashboardData?.salary?.estimatedEarnings ?? profile?.salary ?? 0)
-                    ).toLocaleString()}
+                      : (dashboardData?.salary?.estimatedEarnings ?? profile?.salary ?? 0)))}
                   </span>
-                  <span className="text-[9.5px] text-slate-400 font-medium uppercase tracking-wider">
+                  <span className="text-[11px] text-slate-500 font-medium uppercase tracking-wide">
                     {currentMonthSalary?.employmentType || profile?.employmentType || "monthly"}
                   </span>
                 </div>
 
                 {/* Projected full-month salary when engine is active and in MTD mode */}
                 {!currentMonthSalary && dashboardData?.salary?.projectedFull != null && dashboardData?.salary?.isMTD && (
-                  <p className="text-[8.5px] text-slate-400 font-medium mt-0.5">
-                    Projected full month: ₹{dashboardData.salary.projectedFull.toLocaleString()}
+                  <p className="text-[12px] text-slate-500 font-medium mt-0.5">
+                    Expected for full month: {formatINRFull(Math.round(dashboardData.salary.projectedFull))}
                   </p>
                 )}
 
                 {dashboardData?.salary?.needsReview && (
-                  <p className="text-[8.5px] text-amber-500 font-semibold mt-0.5">
-                    ⚠ Payroll flagged for review
+                  <p className="text-[12px] text-amber-600 font-semibold mt-0.5">
+                    ⚠ Your admin is checking this month's salary
                   </p>
                 )}
 
                 {currentMonthSalary?.remarks ? (
-                  <p className="text-[8.5px] text-slate-400 font-medium truncate mt-1">
+                  <p className="text-[12px] text-slate-500 font-medium truncate mt-1">
                     {currentMonthSalary.remarks}
                   </p>
                 ) : (
-                  <p className="text-[8.5px] text-slate-400 font-medium truncate mt-1">
-                    Estimated · {dashboardData?.salary?.remarks || "prorated by attendance"}
+                  <p className="text-[12px] text-slate-500 font-medium mt-1">
+                    {/* Not the engine's remarks string -- that is written for admins. */}
+                    Estimate, based on your attendance so far
                   </p>
                 )}
               </div>
@@ -2119,18 +2387,17 @@ function UserDashboard() {
               <div className="space-y-1 flex-1 text-left">
                 <div className="flex items-center gap-1.5">
                   <Sparkles className="h-3.5 w-3.5 text-amber-400 animate-pulse" />
-                  <span className="text-[8.5px] font-bold uppercase tracking-widest text-slate-350">Punctuality Score</span>
+                  <span className="text-[12px] font-bold text-slate-200">On-time score</span>
                 </div>
-                <h4 className="text-xs font-semibold tracking-tight text-white leading-none">Monthly Compliance Rating</h4>
-                <p className="text-[9.5px] text-slate-350 leading-normal mt-1">
-                  Ratio of On-Time arrivals. Late arrivals affect your overall score.
+                <h4 className="text-[15px] font-semibold tracking-tight text-white leading-snug">How often you came on time</h4>
+                <p className="text-[12px] text-slate-300 leading-normal mt-1">
+                  Coming late lowers this score.
                 </p>
               </div>
 
               <div className="relative h-14 w-14 flex items-center justify-center shrink-0 bg-white/10 rounded-xl border border-white/10 backdrop-blur-md shadow-inner">
                 <div className="text-center">
-                  <span className="text-base font-semibold block tracking-tight text-amber-300 leading-none">{complianceScore}%</span>
-                  <span className="text-[7px] font-bold uppercase tracking-wider text-slate-400 mt-0.5 block">Rating</span>
+                  <span className="text-[18px] font-bold block tracking-tight text-amber-300 leading-none">{complianceScore}%</span>
                 </div>
               </div>
             </CardContent>
@@ -2139,26 +2406,28 @@ function UserDashboard() {
           {/* Corporate Holidays list */}
           <Card className="border border-slate-100 dark:border-white/5 shadow-xs bg-white dark:bg-slate-900 rounded-[20px] overflow-hidden">
             <CardContent className="p-4">
-              <h4 className="text-[9px] font-semibold uppercase tracking-wider text-slate-500 flex items-center gap-2 mb-3 text-left">
-                <Award className="h-3.5 w-3.5 text-[#501537] dark:text-[#8C2059]" /> Corporate Holidays & Events
+              <h4 className="text-[13px] font-bold text-slate-600 dark:text-slate-300 flex items-center gap-2 mb-3 text-left">
+                <Award className="h-4 w-4 text-[#501537] dark:text-[#C0467F]" /> Upcoming holidays
               </h4>
               <div className="space-y-2.5">
-                {profile?.upcomingHolidays && profile.upcomingHolidays.length > 0 ? (
+                {Array.isArray(profile?.upcomingHolidays) && profile.upcomingHolidays.length > 0 ? (
                   profile.upcomingHolidays.map((holiday) => (
                     <div key={holiday._id} className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800/40 pb-2 last:border-b-0 last:pb-0">
                       <div className="text-left">
-                        <p className="text-[11.5px] font-semibold text-slate-700 dark:text-slate-200 leading-none">{holiday.name}</p>
-                        <span className="text-[9px] text-slate-400 font-medium block mt-0.5">
-                          {new Date(holiday.startDate).toLocaleDateString("en-US", { month: "short", day: "numeric", weekday: "short" })}
+                        <p className="text-[14px] font-semibold text-slate-700 dark:text-slate-200 leading-snug">{holiday.name}</p>
+                        <span className="text-[12px] text-slate-500 font-medium block mt-0.5">
+                          {holidayRange(holiday.startDate, holiday.endDate)}
                         </span>
                       </div>
-                      <Badge variant="outline" className="text-[7.5px] font-semibold uppercase tracking-wider bg-[#501537]/5 text-[#501537] dark:bg-[#8C2059]/10 dark:text-[#8C2059] border-none px-2 py-0.5 rounded-full">
-                        Paid Holiday
+                      {/* By the festival's own type -- optional holidays and
+                          events were all labelled "Paid Holiday". */}
+                      <Badge variant="outline" className="text-[11px] font-semibold bg-[#501537]/5 text-[#501537] dark:bg-[#8C2059]/10 dark:text-[#8C2059] border-none px-2 py-0.5 rounded-full">
+                        {holiday.type === "optional" ? "Optional Holiday" : holiday.type === "event" ? "Event" : "Paid Holiday"}
                       </Badge>
                     </div>
                   ))
                 ) : (
-                  <p className="text-[9.5px] text-slate-400 text-center py-1.5">No upcoming festivals this month</p>
+                  <p className="text-[13px] text-slate-500 text-center py-1.5">No upcoming holidays</p>
                 )}
               </div>
             </CardContent>
@@ -2172,9 +2441,9 @@ function UserDashboard() {
       <div className="space-y-5">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="text-left">
-            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">Attendance Calendar & History</h3>
-            <p className="text-slate-500 text-xs mt-1">
-              Review detailed timeline summaries, compliance metrics, and interactive maps for {selectedDate.toLocaleDateString("en-US", { month: "long", year: "numeric" })}.
+            <h3 className="text-lg font-bold text-slate-800 dark:text-slate-100">My attendance</h3>
+            <p className="text-slate-500 text-[13px] mt-1">
+              Tap a day to see your punch times for {selectedDate.toLocaleDateString("en-US", { month: "long", year: "numeric" })}.
             </p>
           </div>
 
@@ -2182,23 +2451,26 @@ function UserDashboard() {
           <div className="p-1 rounded-xl bg-slate-100/80 dark:bg-slate-900/60 border border-slate-200/50 dark:border-white/5 backdrop-blur-md flex items-center self-start shrink-0">
             <button
               onClick={() => setActiveTab("calendar")}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === "calendar"
+              className={`px-4 py-3 rounded-lg text-[13px] font-bold transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === "calendar"
                   ? "bg-white dark:bg-slate-800 text-primary shadow-sm"
                   : "text-slate-505 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
                 }`}
             >
               <Calendar className="h-3.5 w-3.5 text-primary/80" />
-              <span>Interactive Calendar Map</span>
+              {/* Short on a phone: the long labels wrapped to two lines each. */}
+              <span className="sm:hidden">Calendar</span>
+              <span className="hidden sm:inline">Interactive Calendar Map</span>
             </button>
             <button
               onClick={() => setActiveTab("list")}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === "list"
+              className={`px-4 py-3 rounded-lg text-[13px] font-bold transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === "list"
                   ? "bg-white dark:bg-slate-800 text-primary shadow-sm"
                   : "text-slate-505 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
                 }`}
             >
               <Clock className="h-3.5 w-3.5 text-primary/80" />
-              <span>Chronological List</span>
+              <span className="sm:hidden">List</span>
+              <span className="hidden sm:inline">Chronological List</span>
             </button>
           </div>
         </div>
@@ -2207,35 +2479,43 @@ function UserDashboard() {
 
           {/* LEFT: Legend (calendar tab only) */}
           {activeTab === "calendar" && (
-            <div className="col-span-1 lg:col-span-4 space-y-6 order-2 lg:order-1">
+            <div className="col-span-1 lg:col-span-4 flex flex-col gap-6 order-2 lg:order-1">
               <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-2xl p-5">
-                <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-3.5">
-                  Calendar Status Legend
+                <h4 className="text-[13px] font-bold text-slate-500 dark:text-slate-400 mb-3.5">
+                  What the colours mean
                 </h4>
                 <div className="grid grid-cols-2 gap-x-2 gap-y-3">
                   <div className="flex items-center gap-2">
                     <span className="h-3 w-3 rounded-full bg-emerald-500/10 border border-emerald-500 shrink-0" />
-                    <span className="text-[10px] text-slate-600 dark:text-slate-300 font-bold">On-Time Present</span>
+                    <span className="text-[13px] text-slate-600 dark:text-slate-300 font-semibold">On time</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="h-3 w-3 rounded-full bg-amber-500/10 border border-amber-500 shrink-0" />
-                    <span className="text-[10px] text-slate-600 dark:text-slate-300 font-bold">Late Arrival</span>
+                    <span className="text-[13px] text-slate-600 dark:text-slate-300 font-semibold">Late</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="h-3 w-3 rounded-full bg-blue-500/10 border border-blue-500 shrink-0" />
-                    <span className="text-[10px] text-slate-600 dark:text-slate-300 font-bold">Half-Day Log</span>
+                    <span className="text-[13px] text-slate-600 dark:text-slate-300 font-semibold">Half day</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="h-3 w-3 rounded-full bg-rose-500/10 border border-rose-500 shrink-0" />
-                    <span className="text-[10px] text-slate-600 dark:text-slate-300 font-bold">Absent / LOP</span>
+                    <span className="text-[13px] text-slate-600 dark:text-slate-300 font-semibold">Absent</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="h-3 w-3 rounded-full bg-indigo-500/10 border border-indigo-500 shrink-0" />
-                    <span className="text-[10px] text-slate-600 dark:text-slate-300 font-bold">Work From Home</span>
+                    <span className="text-[13px] text-slate-600 dark:text-slate-300 font-semibold">Work from home</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="h-3 w-3 rounded-full bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shrink-0" />
-                    <span className="text-[10px] text-slate-600 dark:text-slate-300 font-bold">Off Day / Future</span>
+                    <span className="text-[13px] text-slate-600 dark:text-slate-300 font-semibold">Day off</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full bg-violet-500/10 border border-violet-500 shrink-0" />
+                    <span className="text-[13px] text-slate-600 dark:text-slate-300 font-semibold">Holiday</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-full bg-orange-500/10 border border-orange-500 shrink-0" />
+                    <span className="text-[13px] text-slate-600 dark:text-slate-300 font-semibold">Being checked</span>
                   </div>
                 </div>
               </Card>
@@ -2243,7 +2523,12 @@ function UserDashboard() {
               {/* CALENDAR CLICK DETAIL PANEL */}
               <AnimatePresence mode="wait">
                 {selectedDayLog && (
+                  // order-first: straight under the calendar on a phone. It
+                  // rendered below the legend, off-screen, so tapping a day
+                  // appeared to do nothing.
                   <motion.div
+                    ref={dayDetailRef}
+                    className="order-first scroll-mt-20"
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 15 }}
@@ -2254,7 +2539,7 @@ function UserDashboard() {
                       <CardContent className="p-6 space-y-4 relative z-10">
                         <div className="flex items-center justify-between border-b border-white/10 pb-3">
                           <div className="space-y-0.5">
-                            <span className="text-[9px] font-black text-white/50 uppercase tracking-widest leading-none">Session Breakdown</span>
+                            <span className="text-[12px] font-bold text-white/60 leading-none">Day details</span>
                             <h4 className="text-[14px] font-black text-white">
                               {new Date(selectedDayLog.date).toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
                             </h4>
@@ -2264,46 +2549,80 @@ function UserDashboard() {
                               <button
                                 type="button"
                                 onClick={() => setShowSessionDetails((v) => !v)}
-                                className="flex items-center gap-1 text-[9px] font-black uppercase tracking-widest text-white/70 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-full px-2.5 py-1 transition-colors"
+                                className="flex items-center gap-1 text-[12px] font-bold text-white/80 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-full px-3 py-1.5 transition-colors"
                               >
-                                <ListChecks className="h-3 w-3" />
-                                Session details
+                                <ListChecks className="h-3.5 w-3.5" />
+                                All punches
                                 <ChevronDown className={`h-3 w-3 transition-transform ${showSessionDetails ? "rotate-180" : ""}`} />
                               </button>
                             )}
-                            <Badge className={`border-none text-[8.5px] font-black uppercase tracking-widest px-2.5 py-0.5 rounded-full shadow-xs ${selectedDayLog.status === "present"
-                                ? "bg-emerald-500 text-white"
-                                : selectedDayLog.status === "late"
-                                  ? "bg-amber-500 text-slate-900"
-                                  : selectedDayLog.status === "absent"
-                                    ? "bg-rose-500 text-white"
-                                    : "bg-white/10 text-white/70"
-                              }`}>
-                              {selectedDayLog.isWFH ? "WFH SESSION" : selectedDayLog.status}
-                            </Badge>
+                            {(() => {
+                              const label = dayLabel(selectedDayLog);
+                              const solid = label.tone === "green" ? "bg-emerald-500 text-white"
+                                : label.tone === "amber" ? "bg-amber-500 text-slate-900"
+                                : label.tone === "rose" ? "bg-rose-500 text-white"
+                                : label.tone === "orange" ? "bg-orange-500 text-white"
+                                : label.tone === "indigo" ? "bg-indigo-500 text-white"
+                                : "bg-white/15 text-white/80";
+                              return (
+                                <Badge className={`border-none text-[11px] font-bold px-2.5 py-0.5 rounded-full shadow-xs max-w-[150px] truncate ${solid}`}>
+                                  {label.text}
+                                </Badge>
+                              );
+                            })()}
                           </div>
                         </div>
 
+                        {selectedDayLog.isPlaceholder || !selectedDayLog.punchIn ? (
+                          // Nothing was recorded, so a grid of "--" and 00h 00m
+                          // says less than one plain sentence.
+                          <p className="text-[12px] font-semibold text-white/75 pt-1">
+                            {isOpenToday(selectedDayLog)
+                              ? "You have not punched in yet today."
+                              : selectedDayLog.status === "weekly-off"
+                              ? "Weekly off — no attendance needed."
+                              : selectedDayLog.status === "festival"
+                                ? `Holiday: ${selectedDayLog.remarks || "company holiday"}.`
+                                : selectedDayLog.status === "leave"
+                                ? `On approved leave: ${selectedDayLog.remarks || "leave"}.`
+                                : selectedDayLog.status === "absent"
+                                  ? "No attendance was recorded for this day. If you worked, ask your admin to add it."
+                                  : selectedDayLog.remarks || "No attendance recorded."}
+                          </p>
+                        ) : (
                         <div className="grid grid-cols-2 gap-4 pt-2">
                           <div className="p-3 bg-white/5 rounded-xl border border-white/10">
-                            <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-1">PUNCH IN</span>
-                            <span className="text-[13px] font-black text-white">{formatTimeStr(selectedDayLog.punchIn)}</span>
+                            <span className="text-[12px] font-semibold text-white/60 block mb-1">Punch in</span>
+                            <span className="text-[16px] font-black text-white">{formatTimeStr(selectedDayLog.punchIn)}</span>
                           </div>
                           <div className="p-3 bg-white/5 rounded-xl border border-white/10">
-                            <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-1">PUNCH OUT</span>
-                            <span className="text-[13px] font-black text-white">{formatTimeStr(selectedDayLog.punchOut)}</span>
+                            <span className="text-[12px] font-semibold text-white/60 block mb-1">Punch out</span>
+                            <span className="text-[16px] font-black text-white">{formatTimeStr(selectedDayLog.punchOut)}</span>
                           </div>
                           <div className="p-3 bg-white/5 rounded-xl border border-white/10">
-                            <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-1">TOTAL WORKED</span>
-                            <span className="text-[13px] font-black text-amber-300 font-mono">{formatDuration(selectedDayLog)}</span>
+                            <span className="text-[12px] font-semibold text-white/60 block mb-1">Worked</span>
+                            <span className="text-[16px] font-black text-amber-300 font-mono">{formatDuration(selectedDayLog)}</span>
                           </div>
                           <div className="p-3 bg-white/5 rounded-xl border border-white/10">
-                            <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-1">LUNCH BREAK</span>
-                            <span className="text-[13px] font-black text-white font-mono">
-                              {selectedDayLog.lunchInTime ? "Break Taken" : "No Break Log"}
+                            <span className="text-[12px] font-semibold text-white/60 block mb-1">Lunch</span>
+                            <span className="text-[16px] font-black text-white">
+                              {selectedDayLog.lunchInTime ? "Taken" : "None"}
                             </span>
                           </div>
                         </div>
+                        )}
+                        {/* Approved punch corrections: what was punched, and what
+                            it was corrected to. The times above are the corrected
+                            ones; hours and pay use those. */}
+                        <CorrectionLog
+                          tone="dark"
+                          corrections={(selectedDayLog as { corrections?: PunchCorrectionEntry[] }).corrections}
+                        />
+                        {selectedDayLog.status === "needs_review" && (
+                          <p className="text-[10.5px] leading-relaxed text-orange-200">
+                            This day could not be graded automatically and is waiting for your admin to review it.
+                          </p>
+                        )}
 
                         <AnimatePresence>
                           {showSessionDetails && (
@@ -2315,8 +2634,8 @@ function UserDashboard() {
                               className="overflow-hidden"
                             >
                               <div className="pt-1 pb-1">
-                                <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-2">
-                                  All Sessions Today ({selectedDayLog.shifts?.length ?? 0})
+                                <span className="text-[12px] font-semibold text-white/60 block mb-2">
+                                  All punches ({selectedDayLog.shifts?.length ?? 0})
                                 </span>
                                 <div className="max-h-48 overflow-y-auto pr-1 space-y-2 rounded-xl">
                                   {(selectedDayLog.shifts ?? []).map((shift, i) => (
@@ -2343,7 +2662,7 @@ function UserDashboard() {
                             <div className="flex items-start gap-2.5">
                               <MapPin className="h-4 w-4 text-emerald-400 shrink-0 mt-0.5" />
                               <div className="leading-tight text-left">
-                                <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-0.5">Punch-In Location</span>
+                                <span className="text-[12px] font-semibold text-white/60 block mb-0.5">Punch-in place</span>
                                 <span className="text-white/80 font-bold">{selectedDayLog.punchInLocation}</span>
                               </div>
                             </div>
@@ -2352,7 +2671,7 @@ function UserDashboard() {
                             <div className="flex items-start gap-2.5">
                               <MapPin className="h-4 w-4 text-rose-400 shrink-0 mt-0.5" />
                               <div className="leading-tight text-left">
-                                <span className="text-[8px] font-bold text-white/40 block uppercase tracking-widest mb-0.5">Punch-Out Location</span>
+                                <span className="text-[12px] font-semibold text-white/60 block mb-0.5">Punch-out place</span>
                                 <span className="text-white/80 font-bold">{selectedDayLog.punchOutLocation}</span>
                               </div>
                             </div>
@@ -2370,23 +2689,23 @@ function UserDashboard() {
           <div className={`col-span-1 ${activeTab === "calendar" ? "lg:col-span-8 order-1 lg:order-2" : "lg:col-span-12"} space-y-6`}>
 
             {activeTab === "calendar" ? (
-              <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-[28px] overflow-hidden p-6">
-                <div className="grid grid-cols-7 gap-2.5 text-center mb-3">
+              <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-[28px] overflow-hidden p-3 sm:p-6">
+                <div className="grid grid-cols-7 gap-1.5 sm:gap-2.5 text-center mb-3">
                   {weekdays.map(d => (
-                    <span key={d} className="text-[10px] font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest block py-1">
+                    <span key={d} className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase block py-1">
                       {d}
                     </span>
                   ))}
                 </div>
 
-                {isHistoryLoading || isHistoryRefetching ? (
-                  <div className="grid grid-cols-7 gap-2.5 animate-pulse">
+                {isHistoryLoading ? (
+                  <div className="grid grid-cols-7 gap-1.5 sm:gap-2.5 animate-pulse">
                     {Array.from({ length: 31 }).map((_, idx) => (
                       <div key={idx} className="aspect-square bg-slate-200 dark:bg-slate-800/80 rounded-xl sm:rounded-2xl" />
                     ))}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-7 gap-2.5">
+                  <div className="grid grid-cols-7 gap-1.5 sm:gap-2.5">
                     {calendarDays.map((day, idx) => {
                       if (!day) {
                         return <div key={`empty-${idx}`} className="aspect-square bg-slate-50/20 dark:bg-slate-950/5 rounded-xl border border-slate-100/10" />;
@@ -2405,17 +2724,7 @@ function UserDashboard() {
                       if (isFuture) {
                         circleClass = "bg-slate-100/30 text-slate-400/40 border-slate-200/10 dark:bg-slate-950/10 dark:text-slate-650 dark:border-slate-900/15 cursor-not-allowed opacity-50";
                       } else if (record) {
-                        if (record.isWFH) {
-                          circleClass = "bg-indigo-500/10 text-indigo-600 border-indigo-500/30 hover:bg-indigo-500/20 dark:text-indigo-400 dark:border-indigo-500/20";
-                        } else if (record.status === "present") {
-                          circleClass = "bg-emerald-500/10 text-emerald-600 border-emerald-500/30 hover:bg-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500/20";
-                        } else if (record.status === "late") {
-                          circleClass = "bg-amber-500/10 text-amber-600 border-amber-500/30 hover:bg-amber-500/20 dark:text-amber-400 dark:border-amber-500/20";
-                        } else if (record.status === "half-day") {
-                          circleClass = "bg-blue-500/10 text-blue-600 border-blue-500/30 hover:bg-blue-500/20 dark:text-blue-400 dark:border-blue-500/20";
-                        } else if (record.status === "absent") {
-                          circleClass = "bg-rose-500/10 text-rose-600 border-rose-500/30 hover:bg-rose-500/20 dark:text-rose-400 dark:border-rose-500/20";
-                        }
+                        circleClass = TONE_CELL[dayLabel(record).tone];
                       }
 
                       const isSelected = selectedDayLog && new Date(selectedDayLog.date).toDateString() === day.toDateString();
@@ -2425,13 +2734,11 @@ function UserDashboard() {
                           key={day.toISOString()}
                           onClick={() => {
                             if (isFuture) return;
+                            // The server sends a row (real or placeholder) for
+                            // every past day, so a missing one means the data is
+                            // absent -- not an off day, which is what the
+                            // invented fallback here used to claim.
                             if (record) setSelectedDayLog(record);
-                            else setSelectedDayLog({
-                              _id: `mock-${day.toISOString()}`,
-                              date: day.toISOString(),
-                              status: "weekly-off",
-                              remarks: "No duty session logged / Off Day"
-                            });
                           }}
                           disabled={isFuture}
                           className={`aspect-square rounded-xl sm:rounded-2xl border flex flex-col items-center justify-between p-1.5 sm:p-2.5 transition-all duration-300 relative group ${isFuture ? "cursor-not-allowed" : "cursor-pointer hover:scale-[1.03]"} ${circleClass} ${isSelected
@@ -2440,15 +2747,17 @@ function UserDashboard() {
                             }`}
                         >
                           <div className="flex items-center justify-between w-full">
-                            <span className={`text-[10px] sm:text-xs font-black ${isToday ? "h-4.5 w-4.5 sm:h-5 sm:w-5 bg-[#501537] text-white flex items-center justify-center rounded-full text-[9px] sm:text-[10px]" : ""}`}>
+                            <span className={`text-[13px] font-black ${isToday ? "h-6 w-6 bg-[#501537] text-white flex items-center justify-center rounded-full text-[12px]" : ""}`}>
                               {dayNum}
                             </span>
-                            {record && (
+                            {/* Dot = something was actually recorded that day,
+                                not a synthesised off day / holiday / absence. */}
+                            {record && !record.isPlaceholder && (
                               <span className="h-1 w-1 sm:h-1.5 sm:w-1.5 rounded-full bg-current shrink-0" />
                             )}
                           </div>
                           <span className="text-[7.5px] font-black uppercase tracking-widest opacity-60 leading-none truncate w-full text-center hidden sm:block">
-                            {isFuture ? "Upcoming" : record ? (record.isWFH ? "WFH" : record.status) : ""}
+                            {isFuture ? "Upcoming" : record ? dayLabel(record).text : ""}
                           </span>
                         </button>
                       );
@@ -2460,20 +2769,20 @@ function UserDashboard() {
               <div className="space-y-4">
                 {/* Quick Filter Badges */}
                 <div className="flex flex-wrap items-center gap-2 bg-white dark:bg-slate-900 px-5 py-3 rounded-2xl shadow-xs border border-slate-100/50 dark:border-slate-800/20">
-                  <span className="text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 mr-2 flex items-center gap-1.5">
-                    <Filter className="h-3.5 w-3.5" /> Filter Status:
+                  <span className="text-[13px] font-bold text-slate-500 dark:text-slate-400 mr-1 flex items-center gap-1.5">
+                    <Filter className="h-4 w-4" /> Show:
                   </span>
                   {[
-                    { value: "all", label: "All Logs" },
-                    { value: "present", label: "On-Time" },
-                    { value: "late", label: "Late Marks" },
-                    { value: "wfh", label: "WFH Logs" },
-                    { value: "absent", label: "Absents" },
+                    { value: "all", label: "All" },
+                    { value: "present", label: "On time" },
+                    { value: "late", label: "Late" },
+                    { value: "wfh", label: "From home" },
+                    { value: "absent", label: "Absent" },
                   ].map(f => (
                     <button
                       key={f.value}
                       onClick={() => setStatusFilter(f.value)}
-                      className={`px-3 py-1 rounded-xl text-[10px] font-black uppercase tracking-wider transition-all cursor-pointer ${statusFilter === f.value
+                      className={`px-3.5 py-2 rounded-xl text-[13px] font-bold transition-all cursor-pointer ${statusFilter === f.value
                           ? "bg-[#501537] text-white"
                           : "bg-slate-100 hover:bg-slate-200 text-slate-600 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-400"
                         }`}
@@ -2483,7 +2792,7 @@ function UserDashboard() {
                   ))}
                 </div>
 
-                {isHistoryLoading || isHistoryRefetching ? (
+                {isHistoryLoading ? (
                   <div className="space-y-3.5 animate-pulse">
                     {Array.from({ length: 3 }).map((_, idx) => (
                       <div key={idx} className="p-5 bg-slate-200 dark:bg-slate-800/40 rounded-[24px] h-[130px]" />
@@ -2496,10 +2805,7 @@ function UserDashboard() {
                       const dayStr = dateObj.toLocaleDateString("en-US", { day: "numeric", month: "short" });
                       const weekdayStr = dateObj.toLocaleDateString("en-US", { weekday: "short" });
 
-                      const isLate = record.status === "late";
-                      const isHalfDay = record.status === "half-day";
-                      const isAbsent = record.status === "absent";
-                      const isWFHRecord = record.isWFH;
+                      const label = dayLabel(record);
 
                       return (
                         <motion.div
@@ -2513,17 +2819,10 @@ function UserDashboard() {
                               <span className="text-sm font-black text-slate-850 dark:text-slate-100">
                                 {dayStr}, {weekdayStr}
                               </span>
-                              {isWFHRecord ? (
-                                <Badge className="border-none bg-indigo-500/10 text-indigo-500 text-[8.5px] font-black uppercase tracking-wider px-2 py-0">Remote WFH</Badge>
-                              ) : isAbsent ? (
-                                <Badge className="border-none bg-rose-500/10 text-rose-500 text-[8.5px] font-black uppercase tracking-wider px-2 py-0">LOP Absent</Badge>
-                              ) : isLate ? (
-                                <Badge className="border-none bg-amber-500/10 text-amber-600 dark:text-amber-500 text-[8.5px] font-black uppercase tracking-wider px-2 py-0">Late Arrival</Badge>
-                              ) : isHalfDay ? (
-                                <Badge className="border-none bg-blue-500/10 text-blue-500 text-[8.5px] font-black uppercase tracking-wider px-2 py-0">Half Day</Badge>
-                              ) : (
-                                <Badge className="border-none bg-emerald-500/10 text-emerald-500 text-[8.5px] font-black uppercase tracking-wider px-2 py-0">Present On-Time</Badge>
-                              )}
+                              {/* Every status gets its own label. The old chain
+                                  fell through to "Present On-Time" for weekly
+                                  offs, holidays and days under review. */}
+                              <Badge className={`border-none ${TONE_BADGE[label.tone]} text-[11px] font-bold px-2 py-0.5 max-w-[150px] truncate`}>{label.text}</Badge>
                             </div>
                             <div className="flex items-center gap-1.5 text-slate-400 dark:text-slate-500 shrink-0">
                               <Clock className="h-3.5 w-3.5 text-slate-400" />
@@ -2541,18 +2840,18 @@ function UserDashboard() {
                               Punch-Out: <span className="text-slate-800 dark:text-slate-200 font-black">{formatTimeStr(record.punchOut)}</span>
                             </div>
                             {record.remarks && (
-                              <div className="col-span-2 text-[10px] text-slate-400 dark:text-slate-500 italic mt-1 leading-relaxed">
-                                Remarks: "{record.remarks}"
+                              <div className="col-span-2 text-[12px] text-slate-500 dark:text-slate-400 italic mt-1 leading-relaxed">
+                                Note: "{record.remarks}"
                               </div>
                             )}
                             {record.punchInLocation && (
-                              <div className="col-span-2 text-[9.5px] text-slate-400/85 font-medium flex items-center gap-1.5 truncate mt-0.5">
+                              <div className="col-span-2 text-[12px] text-slate-500 font-medium flex items-center gap-1.5 truncate mt-0.5">
                                 <MapPin className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
                                 <span className="truncate">In: {record.punchInLocation}</span>
                               </div>
                             )}
                             {record.punchOutLocation && (
-                              <div className="col-span-2 text-[9.5px] text-slate-400/85 font-medium flex items-center gap-1.5 truncate">
+                              <div className="col-span-2 text-[12px] text-slate-500 font-medium flex items-center gap-1.5 truncate">
                                 <MapPin className="h-3.5 w-3.5 text-rose-500 shrink-0" />
                                 <span className="truncate">Out: {record.punchOutLocation}</span>
                               </div>
@@ -2561,7 +2860,7 @@ function UserDashboard() {
                               <div className="col-span-2 flex items-center gap-3 mt-2 pt-2.5 border-t border-slate-50 dark:border-slate-800/20">
                                 {record.punchInPhoto && (
                                   <div className="flex flex-col gap-1">
-                                    <span className="text-[7.5px] font-bold text-slate-400 uppercase tracking-widest">In Selfie</span>
+                                    <span className="text-[11px] font-semibold text-slate-500">In photo</span>
                                     <div className="h-10 w-16 rounded-lg overflow-hidden border border-slate-100 dark:border-slate-800 relative group/listphoto cursor-zoom-in">
                                       <img
                                         src={record.punchInPhoto.startsWith('http') ? record.punchInPhoto : `${IMAGE_BASE_URL}${record.punchInPhoto}`}
@@ -2573,7 +2872,7 @@ function UserDashboard() {
                                 )}
                                 {record.punchOutPhoto && (
                                   <div className="flex flex-col gap-1">
-                                    <span className="text-[7.5px] font-bold text-slate-400 uppercase tracking-widest">Out Selfie</span>
+                                    <span className="text-[11px] font-semibold text-slate-500">Out photo</span>
                                     <div className="h-10 w-16 rounded-lg overflow-hidden border border-slate-100 dark:border-slate-800 relative group/listphoto cursor-zoom-in">
                                       <img
                                         src={record.punchOutPhoto.startsWith('http') ? record.punchOutPhoto : `${IMAGE_BASE_URL}${record.punchOutPhoto}`}
@@ -2592,7 +2891,7 @@ function UserDashboard() {
                   </div>
                 ) : (
                   <p className="text-xs text-slate-400 text-center py-12 bg-white dark:bg-slate-900 rounded-2xl shadow-xs border border-slate-100/50 dark:border-slate-800/20">
-                    No chronological logs matched the filter.
+                    No days to show.
                   </p>
                 )}
               </div>
@@ -2605,29 +2904,30 @@ function UserDashboard() {
       {/* Location Verification Modal */}
       <AnimatePresence>
         {showLocationVerification && (
+          <BodyPortal key="showLocationVerification">
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.93, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.93, y: 15 }}
-              className="bg-white dark:bg-slate-900 rounded-[28px] overflow-hidden max-w-md w-full shadow-2xl border border-slate-100 dark:border-white/5 relative p-5 flex flex-col gap-4"
+              className="bg-white dark:bg-slate-900 rounded-[28px] overflow-y-auto max-h-[calc(100dvh-2rem)] max-w-md w-full shadow-2xl border border-slate-100 dark:border-white/5 relative p-5 flex flex-col gap-4"
             >
               {/* Header */}
               <div className="w-full text-center">
-                <h4 className="text-sm font-semibold text-slate-800 dark:text-white uppercase tracking-wider">
-                  Location Verification
+                <h4 className="text-base font-bold text-slate-800 dark:text-white">
+                  Check your location
                 </h4>
-                <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
-                  Confirm your current coordinates before you punch in.
+                <p className="text-[13px] text-slate-500 mt-1 leading-relaxed">
+                  The pin should be where you are now.
                 </p>
               </div>
 
               {/* Leaflet Map Box */}
-              <div className="relative w-full h-52 rounded-2xl overflow-hidden border border-slate-100 dark:border-white/5 flex items-center justify-center bg-slate-950 shadow-inner">
+              <div className="relative w-full h-44 rounded-2xl overflow-hidden border border-slate-100 dark:border-white/5 flex items-center justify-center bg-slate-950 shadow-inner">
                 {locationLoading ? (
                   <div className="absolute inset-0 bg-black/50 backdrop-blur-xs flex flex-col items-center justify-center gap-2 z-10">
                     <RefreshCw className="h-6 w-6 animate-spin text-[#8C2059]" />
-                    <span className="text-[9.5px] font-semibold text-white tracking-widest uppercase">Fetching Location...</span>
+                    <span className="text-[13px] font-semibold text-white">Finding your location…</span>
                   </div>
                 ) : null}
 
@@ -2650,14 +2950,14 @@ function UserDashboard() {
                 ) : (
                   <div className="flex flex-col items-center justify-center text-center p-4 text-slate-400 gap-2">
                     <MapPin className="h-8 w-8 text-rose-500 animate-bounce" />
-                    <p className="text-xs font-semibold text-rose-500">GPS Permission or Coordinates Required</p>
-                    <p className="text-[10px] text-slate-500">Enable location access to continue</p>
+                    <p className="text-[14px] font-semibold text-rose-500">Location is off</p>
+                    <p className="text-[12px] text-slate-400">Turn it on to punch in</p>
                     <Button
                       size="sm"
                       onClick={() => setShowLocationHelp(true)}
-                      className="mt-1 h-7 px-3 text-[10px] font-bold bg-rose-500 hover:bg-rose-600 text-white rounded-lg flex items-center gap-1"
+                      className="mt-1 h-10 px-4 text-[13px] font-bold bg-rose-500 hover:bg-rose-600 text-white rounded-xl flex items-center gap-1.5"
                     >
-                      <Settings className="h-3 w-3" /> Enable Location
+                      <Settings className="h-4 w-4" /> Turn on location
                     </Button>
                   </div>
                 )}
@@ -2666,31 +2966,30 @@ function UserDashboard() {
               {/* Location address and coordinates metadata */}
               <div className="bg-slate-50 dark:bg-slate-950/40 border border-slate-100 dark:border-white/5 p-3 rounded-xl space-y-1.5 text-left">
                 <div className="flex items-center justify-between">
-                  <span className="text-[8px] font-bold text-slate-400 uppercase tracking-wider">CURRENT POSITION</span>
+                  <span className="text-[12px] font-semibold text-slate-500">You are here</span>
                   <Button
                     size="sm"
                     variant="ghost"
                     onClick={refreshLocation}
                     disabled={locationLoading}
-                    className="h-6 px-2 text-[9px] font-bold text-primary cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/40"
+                    className="h-9 px-3 text-[13px] font-bold text-primary cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800/40"
                   >
-                    <RefreshCw className={`h-2.5 w-2.5 mr-1 ${locationLoading ? "animate-spin" : ""}`} />
-                    REFRESH GPS
+                    <RefreshCw className={`h-4 w-4 mr-1.5 ${locationLoading ? "animate-spin" : ""}`} />
+                    Find me again
                   </Button>
                 </div>
-                <p className="text-xs font-medium text-slate-700 dark:text-slate-200 line-clamp-2 leading-relaxed">
+                <p className="text-[13px] font-medium text-slate-700 dark:text-slate-200 line-clamp-2 leading-relaxed">
                   {address}
                 </p>
-                {location && (
-                  <p className="text-[9.5px] font-mono text-slate-400 dark:text-slate-500">
-                    LAT: {location.lat.toFixed(6)} · LNG: {location.lng.toFixed(6)}
-                  </p>
-                )}
+                {/* In words, not "LAT/LNG" and "±20m". The warning line is
+                    the server's own cut-off (PUNCH_MAX_ACCURACY_M, 150m): it
+                    used to be 500m here, so a 200m fix showed a green tick and
+                    was then refused on the server. */}
                 {locationAccuracy !== null && (
-                  <p className={`text-[9px] font-semibold mt-0.5 ${locationAccuracy > 500 ? "text-amber-500" : "text-emerald-500"}`}>
-                    {locationAccuracy > 500
-                      ? `⚠ Low accuracy (±${Math.round(locationAccuracy)}m) — browser using WiFi/IP. Enable device GPS for exact location.`
-                      : `✓ Accuracy: ±${Math.round(locationAccuracy)}m`}
+                  <p className={`text-[12px] font-semibold mt-0.5 ${locationAccuracy > WEAK_FIX_M ? "text-amber-600" : "text-emerald-600"}`}>
+                    {locationAccuracy > WEAK_FIX_M
+                      ? "⚠ Weak location signal. Go near a window or outside, then tap Find me again."
+                      : "✓ Location found"}
                   </p>
                 )}
               </div>
@@ -2711,8 +3010,8 @@ function UserDashboard() {
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2">
-                      <Home className={`h-3.5 w-3.5 ${wfhForThisPunch ? "text-indigo-500" : "text-slate-400"}`} />
-                      <span className="text-[11px] font-bold text-slate-700 dark:text-slate-200">
+                      <Home className={`h-4 w-4 ${wfhForThisPunch ? "text-indigo-500" : "text-slate-400"}`} />
+                      <span className="text-[14px] font-bold text-slate-700 dark:text-slate-200">
                         Working from home today
                       </span>
                     </div>
@@ -2722,10 +3021,10 @@ function UserDashboard() {
                       aria-label="Mark this punch as Work From Home"
                     />
                   </div>
-                  <p className="mt-1.5 text-[9.5px] leading-relaxed text-slate-500 dark:text-slate-400">
+                  <p className="mt-1.5 text-[12px] leading-relaxed text-slate-500 dark:text-slate-400">
                     {wfhForThisPunch
-                      ? "Office distance is not checked and you will not be punched out automatically for leaving the area. Your location is still recorded on the punch."
-                      : "Turn on if you are not coming to the office. Skips the branch distance check and auto punch-out for today."}
+                      ? "Your office location will not be checked today."
+                      : "Turn this on only if you are working from home today."}
                   </p>
                 </div>
               )}
@@ -2736,7 +3035,7 @@ function UserDashboard() {
                   onClick={() => {
                     setShowLocationVerification(false);
                   }}
-                  className="flex-1 py-2 text-center text-xs font-semibold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 transition-all border border-slate-200 dark:border-slate-800 rounded-xl cursor-pointer"
+                  className="flex-1 h-12 text-center text-[15px] font-semibold text-slate-600 hover:text-slate-800 dark:text-slate-300 dark:hover:text-slate-100 transition-all border border-slate-200 dark:border-slate-700 rounded-xl cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -2752,13 +3051,64 @@ function UserDashboard() {
                     setShowLocationVerification(false);
                     openScanner("punch-in");
                   }}
-                  className="flex-1 h-9 bg-gradient-to-r from-[#501537] to-[#7B2453] hover:from-[#6B1C4B] hover:to-[#912D64] text-white font-semibold rounded-xl shadow-xs border-none flex items-center justify-center cursor-pointer transition-all text-xs"
+                  // Held while the fix is still coming in: a tap then saw
+                  // "no location" and threw up the enable-location help over a
+                  // phone whose GPS was working fine.
+                  disabled={locationLoading}
+                  className="flex-[1.4] h-12 bg-gradient-to-r from-[#501537] to-[#7B2453] hover:from-[#6B1C4B] hover:to-[#912D64] text-white font-bold rounded-xl shadow-xs border-none flex items-center justify-center gap-2 cursor-pointer transition-all text-[15px]"
                 >
-                  Confirm & Proceed
+                  {locationLoading ? "Finding you…" : (<><Camera className="h-5 w-5" />Next: Selfie</>)}
                 </Button>
               </div>
             </motion.div>
           </div>
+          </BodyPortal>
+        )}
+      </AnimatePresence>
+
+      {/* Start Lunch confirmation (see confirmLunch). Two big buttons, the
+          safe answer last so a hurried second tap lands on "No". */}
+      <AnimatePresence>
+        {confirmLunch && (
+          <BodyPortal key="confirmLunch">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.93, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.93, y: 15 }}
+              className="bg-white dark:bg-slate-900 rounded-[28px] overflow-hidden max-w-sm w-full shadow-2xl border border-slate-100 dark:border-white/5 p-5 flex flex-col gap-4"
+            >
+              <div className="w-full text-center">
+                <div className="mx-auto mb-2 h-14 w-14 rounded-2xl bg-amber-500/10 flex items-center justify-center">
+                  <Coffee className="h-7 w-7 text-amber-500" />
+                </div>
+                <h4 className="text-base font-bold text-slate-800 dark:text-white">Start lunch break now?</h4>
+                <p className="text-[13px] text-slate-500 mt-1.5 leading-relaxed">
+                  When you come back, tap <span className="font-semibold text-slate-700 dark:text-slate-200">End Lunch</span>.
+                </p>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Button
+                  onClick={() => {
+                    setConfirmLunch(false);
+                    lunchInMutation.mutate();
+                  }}
+                  className="w-full h-12 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-bold rounded-[16px] border-none text-[15px] flex items-center justify-center gap-2"
+                >
+                  <Coffee className="h-5 w-5" />
+                  Yes, start lunch
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => setConfirmLunch(false)}
+                  className="w-full h-12 rounded-[16px] text-[15px] font-semibold text-slate-600 border border-slate-200 dark:border-white/10"
+                >
+                  No
+                </Button>
+              </div>
+            </motion.div>
+          </div>
+          </BodyPortal>
         )}
       </AnimatePresence>
 
@@ -2767,6 +3117,7 @@ function UserDashboard() {
           they just closed, and that they should be at work before they tap. */}
       <AnimatePresence>
         {confirmNewSession && (
+          <BodyPortal key="confirmNewSession">
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.93, y: 15 }}
@@ -2778,12 +3129,12 @@ function UserDashboard() {
                 <div className="mx-auto mb-2 h-12 w-12 rounded-2xl bg-[#501537]/10 flex items-center justify-center">
                   <Fingerprint className="h-6 w-6 text-[#8C2059]" />
                 </div>
-                <h4 className="text-sm font-semibold text-slate-800 dark:text-white">
-                  Start session {todaySessions.length + 1} of {maxSessions}?
+                <h4 className="text-base font-bold text-slate-800 dark:text-white">
+                  Punch in again?
                 </h4>
-                <p className="text-[10.5px] text-slate-500 mt-1.5 leading-relaxed">
-                  This opens a new punch-in for today; it does not change the
-                  {" "}{todaySessions.length === 1 ? "one" : todaySessions.length} you have already recorded.
+                <p className="text-[13px] text-slate-500 mt-1.5 leading-relaxed">
+                  Only if you came back to work after punching out. Your earlier
+                  hours today stay saved.
                   <span className="block mt-1 font-semibold text-slate-600 dark:text-slate-300">
                     Make sure you are at your workplace.
                   </span>
@@ -2812,12 +3163,14 @@ function UserDashboard() {
               </div>
             </motion.div>
           </div>
+          </BodyPortal>
         )}
       </AnimatePresence>
 
       {/* Location Access Help Dialog — device-aware steps + deep link to OS settings + retry */}
       <AnimatePresence>
         {showLocationHelp && (
+          <BodyPortal key="showLocationHelp">
           <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.93, y: 15 }}
@@ -2830,13 +3183,13 @@ function UserDashboard() {
                 <div className="mx-auto mb-2 h-12 w-12 rounded-2xl bg-rose-500/10 flex items-center justify-center">
                   <MapPin className="h-6 w-6 text-rose-500" />
                 </div>
-                <h4 className="text-sm font-semibold text-slate-800 dark:text-white uppercase tracking-wider">
-                  {locationFailReason === "unavailable" ? "Turn On Location" : "Location Access Needed"}
+                <h4 className="text-base font-bold text-slate-800 dark:text-white">
+                  {locationFailReason === "unavailable" ? "Turn on location" : "Allow location"}
                 </h4>
-                <p className="text-[10px] text-slate-500 mt-1 leading-relaxed">
+                <p className="text-[13px] text-slate-500 mt-1 leading-relaxed">
                   {locationFailReason === "unavailable"
-                    ? "Your device location (GPS) is switched off. Turn it on so we can verify you're at your branch."
-                    : "We couldn't access your location. Please allow location access to punch in and out."}
+                    ? "Your phone's location (GPS) is off. It must be on to punch in and out."
+                    : "This app needs your location to punch in and out."}
                 </p>
               </div>
 
@@ -2845,10 +3198,10 @@ function UserDashboard() {
                 <ol className="space-y-2.5">
                   {locationHelpSteps(getPlatform(), locationFailReason).map((step, i) => (
                     <li key={i} className="flex gap-2.5 items-start">
-                      <span className="shrink-0 h-4 w-4 rounded-full bg-[#501537] dark:bg-[#8C2059] text-white text-[8px] font-bold flex items-center justify-center mt-0.5">
+                      <span className="shrink-0 h-6 w-6 rounded-full bg-[#501537] dark:bg-[#8C2059] text-white text-[12px] font-bold flex items-center justify-center">
                         {i + 1}
                       </span>
-                      <span className="text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">{step}</span>
+                      <span className="text-[14px] text-slate-600 dark:text-slate-300 leading-relaxed">{step}</span>
                     </li>
                   ))}
                 </ol>
@@ -2861,13 +3214,13 @@ function UserDashboard() {
                     onClick={async () => {
                       const opened = await openLocationSettings(locationFailReason ?? undefined);
                       if (!opened) {
-                        toast.error("Couldn't open settings automatically. Please open your device Settings manually.");
+                        toast.error("Could not open Settings. Please open your phone's Settings app yourself.");
                       }
                     }}
-                    className="w-full h-10 bg-gradient-to-r from-[#501537] to-[#7B2453] hover:from-[#6B1C4B] hover:to-[#912D64] text-white font-semibold rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer"
+                    className="w-full h-12 bg-gradient-to-r from-[#501537] to-[#7B2453] hover:from-[#6B1C4B] hover:to-[#912D64] text-white font-bold rounded-xl text-[15px] flex items-center justify-center gap-2 cursor-pointer"
                   >
                     <Settings className="h-4 w-4" />
-                    {locationFailReason === "unavailable" ? "Open Location Settings" : "Open App Settings"}
+                    {locationFailReason === "unavailable" ? "Open location settings" : "Open app settings"}
                   </Button>
                 )}
                 <Button
@@ -2886,34 +3239,36 @@ function UserDashboard() {
                       if (resume) openScanner(resume);
                     } else {
                       setLocationFailReason(result.reason);
-                      toast.error(result.message);
+                      toast.error(friendlyLocationError(result.reason));
                     }
                   }}
                   disabled={locationLoading}
                   variant="outline"
-                  className="w-full h-10 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 cursor-pointer"
+                  className="w-full h-12 rounded-xl text-[15px] font-semibold flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <RefreshCw className={`h-4 w-4 ${locationLoading ? "animate-spin" : ""}`} />
-                  {locationLoading ? "Checking..." : "I've Enabled It — Retry"}
+                  {locationLoading ? "Checking…" : "I turned it on — try again"}
                 </Button>
                 <button
                   onClick={() => {
                     setShowLocationHelp(false);
                     setPendingPunch(null);
                   }}
-                  className="w-full py-1.5 text-center text-[11px] font-semibold text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                  className="w-full h-11 text-center text-[14px] font-semibold text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 cursor-pointer"
                 >
                   Cancel
                 </button>
               </div>
             </motion.div>
           </div>
+          </BodyPortal>
         )}
       </AnimatePresence>
 
       {/* Selfie Verification Scanner Modal (Framer Motion AnimatePresence overlay) */}
       <AnimatePresence>
         {scanType && (
+          <BodyPortal key="scanType">
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.93, y: 15 }}
@@ -2923,11 +3278,11 @@ function UserDashboard() {
             >
               {/* Header */}
               <div className="w-full text-center">
-                <h4 className="text-sm font-semibold text-slate-800 dark:text-white uppercase tracking-wider">
-                  {scanType === "punch-in" ? "Punch In Scanner" : "Punch Out Scanner"}
+                <h4 className="text-base font-bold text-slate-800 dark:text-white">
+                  {scanType === "punch-in" ? "Selfie for Punch In" : "Selfie for Punch Out"}
                 </h4>
-                <p className="text-[9.5px] text-slate-500 mt-1 leading-relaxed">
-                  Verify your identity by capturing a selfie photo.
+                <p className="text-[13px] text-slate-500 mt-1 leading-relaxed">
+                  Look at the camera. Keep your face inside the circle.
                 </p>
               </div>
 
@@ -2964,7 +3319,7 @@ function UserDashboard() {
                 {scanLoading && (
                   <div className="absolute inset-0 bg-black/75 backdrop-blur-xs flex flex-col items-center justify-center gap-2">
                     <RefreshCw className="h-7 w-7 animate-spin text-[#8C2059]" />
-                    <span className="text-[9.5px] font-semibold text-white tracking-widest uppercase animate-pulse">Uploading Selfie...</span>
+                    <span className="text-[14px] font-semibold text-white animate-pulse">Sending…</span>
                   </div>
                 )}
 
@@ -2972,16 +3327,16 @@ function UserDashboard() {
                 {scanResult && (
                   <div className="absolute inset-0 bg-black/80 backdrop-blur-xs flex flex-col items-center justify-center gap-2 text-center px-4">
                     <CheckCircle className="h-9 w-9 text-emerald-400" />
-                    <span className="text-[12px] font-bold text-white tracking-wide">
-                      {scanResult.type === "punch-in" ? "Punched In Successfully!" : "Punched Out Successfully!"}
+                    <span className="text-[16px] font-bold text-white tracking-wide">
+                      {scanResult.type === "punch-in" ? "Punched In!" : "Punched Out!"}
                     </span>
                     {scanResult.timeLabel && (
-                      <span className="text-[10px] text-white/70 font-mono">
-                        {scanResult.type === "punch-in" ? "Punch In" : "Punch Out"}: {scanResult.timeLabel}
+                      <span className="text-[14px] text-white/80 font-mono">
+                        {scanResult.timeLabel}
                       </span>
                     )}
                     {scanResult.type === "punch-out" && scanResult.workHoursLabel && (
-                      <span className="text-[10px] text-emerald-300 font-mono">Worked: {scanResult.workHoursLabel}</span>
+                      <span className="text-[13px] text-emerald-300 font-mono">Worked {scanResult.workHoursLabel}</span>
                     )}
                   </div>
                 )}
@@ -2993,20 +3348,22 @@ function UserDashboard() {
                   <Button
                     onClick={captureScannerPhoto}
                     disabled={!isScanning}
-                    className="w-full h-10 bg-gradient-to-r from-[#501537] to-[#7B2453] hover:from-[#6B1C4B] hover:to-[#912D64] text-white font-semibold rounded-xl shadow-xs border-none flex items-center justify-center gap-2 cursor-pointer transition-all text-xs"
+                    className="w-full h-14 bg-gradient-to-r from-[#501537] to-[#7B2453] hover:from-[#6B1C4B] hover:to-[#912D64] text-white font-bold rounded-xl shadow-xs border-none flex items-center justify-center gap-2 cursor-pointer transition-all text-[16px]"
                   >
-                    <Camera className="h-4 w-4" />
-                    <span>Capture Selfie & Done</span>
+                    <Camera className="h-5 w-5" />
+                    {/* Disabled until the camera is live, so say why rather
+                        than showing a dead button. */}
+                    <span>{isScanning ? "Take Photo" : "Starting camera…"}</span>
                   </Button>
                 ) : scanResult ? (
-                  <div className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest flex items-center justify-center gap-1 py-1.5">
-                    <CheckCircle className="h-4 w-4 text-emerald-500" />
+                  <div className="text-[14px] font-bold text-emerald-600 flex items-center justify-center gap-1.5 py-2">
+                    <CheckCircle className="h-5 w-5 text-emerald-500" />
                     <span>Done</span>
                   </div>
                 ) : (
-                  <div className="text-[9px] font-bold text-emerald-500 uppercase tracking-widest flex items-center justify-center gap-1 py-1.5 animate-pulse">
-                    <CheckCircle className="h-4 w-4 text-emerald-500" />
-                    <span>Processing Session...</span>
+                  <div className="text-[14px] font-bold text-slate-600 dark:text-slate-300 flex items-center justify-center gap-1.5 py-2 animate-pulse">
+                    <RefreshCw className="h-5 w-5 animate-spin" />
+                    <span>Please wait…</span>
                   </div>
                 )}
 
@@ -3018,14 +3375,15 @@ function UserDashboard() {
                       setCapturedSelfie(null);
                     }}
                     disabled={scanLoading}
-                    className="w-full py-2 text-center text-xs font-semibold text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 transition-all border border-slate-200 dark:border-slate-850 rounded-xl cursor-pointer"
+                    className="w-full h-12 text-center text-[15px] font-semibold text-slate-600 hover:text-slate-800 dark:text-slate-300 dark:hover:text-slate-100 transition-all border border-slate-200 dark:border-slate-700 rounded-xl cursor-pointer disabled:opacity-50"
                   >
-                    Cancel Scanner
+                    Cancel
                   </button>
                 )}
               </div>
             </motion.div>
           </div>
+          </BodyPortal>
         )}
       </AnimatePresence>
 

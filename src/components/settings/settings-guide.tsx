@@ -72,6 +72,8 @@ export interface GuideContext {
   notifPush: boolean;
   notifWeekly: boolean;
   companyName?: string | null;
+  /** Settings.employeeSelfService.allowSensitiveEdits */
+  allowSensitiveEdits?: boolean;
 }
 
 const RATE_BASIS_LABEL: Record<string, string> = {
@@ -206,6 +208,12 @@ export function settingsGuideLines(tab: string, c: GuideContext): GuideLine[] {
     case "security":
       return [
         { tone: "info", text: "Change your password and review where your account has been signed in." },
+        {
+          tone: c.allowSensitiveEdits ? "warn" : "on",
+          text: c.allowSensitiveEdits
+            ? "Employees can change their own name, bank account, PAN and Aadhaar in the app. Salary is paid to the bank account on file, so check changes before a pay run."
+            : "Only HR can change an employee's name, bank account, PAN or Aadhaar. Employees see these as read-only in the app, and the server refuses a change from the app. Address, email and emergency contact stay editable.",
+        },
         { tone: "info", text: "Sign-in history is recorded by the server, including the deliberate sign-outs made from this panel, so a closed tab is distinguishable from a real logout." },
         { tone: "warn", text: "Signing in on a second device does not end the first session — multiple devices can be signed in at once, by design." },
         { tone: "warn", text: "The login code is shown on screen rather than sent by SMS, because no SMS gateway is connected. Treat it as a convenience, not a second factor." },
@@ -221,7 +229,7 @@ export function settingsGuideLines(tab: string, c: GuideContext): GuideLine[] {
             : "No shifts yet. Until one exists and is assigned, days cannot be graded on hours worked.",
         },
         { tone: "info", text: "Working days resolve in three layers: the employee's own Weekly Holidays win, then the shift's working days, then the company-wide Active Work Days in Settings." },
-        { tone: "info", text: "Each shift defines its own lunch deduction mode (Fixed window, Fixed length, Calculate from punches, or No lunch deduction)." },
+        { tone: "info", text: "Each shift defines its own lunch deduction mode (Fixed window, Fixed length, Calculate from punches, or No lunch deduction). Shifts saved before this change may still show “Company default (legacy)”, which deducts the company default lunch from Settings › Attendance › Company Fallbacks until you pick one of the other modes." },
         { tone: "info", text: "Half Day Rules are off by default (0 minutes = no rule); with both blank, a day is graded purely on hours worked against the shift span minus lunch." },
         { tone: "info", text: "Editing a shift changes how FUTURE days are graded. It does not recompute attendance already recorded." },
       ];

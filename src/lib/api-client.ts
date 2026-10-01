@@ -79,18 +79,22 @@ apiClient.interceptors.response.use(
 
         const code = error.response?.data?.code;
         const message: string = error.response?.data?.message || "";
-        let toastMessage = "You were signed out.";
+        let toastMessage = "You were signed out. Please sign in again.";
         let reason: "another_device" | "inactive" | null = null;
 
         if (code === "another_device") {
           reason = "another_device";
-          toastMessage = "You were signed out because your account was logged in on another device.";
-        } else if (code === "inactive" || code === "employee_inactive" || code === "account_inactive" || /inactive|deactivat/i.test(message)) {
-          // Deactivated mid-session (e.g. admin flips the employee's status
-          // while they hold a valid token) — the message may be a custom
-          // per-employee reason the admin set.
+          toastMessage = "You were signed out because your account was signed in on another phone.";
+        } else if (
+          code === "inactive" || code === "employee_inactive" || code === "account_inactive" ||
+          code === "company_inactive" || /inactive|deactivat|switched off/i.test(message)
+        ) {
+          // Deactivated mid-session (the admin switched the employee off, or
+          // the company itself was switched off) while a valid token was held.
+          // The message is written for people -- possibly a custom reason the
+          // admin set -- so it is shown as-is, here and on the login screen.
           reason = "inactive";
-          toastMessage = message || "Your account has been deactivated. Please contact your administrator.";
+          toastMessage = message || "Your account has been switched off. Please contact your admin.";
         }
 
         // No forced navigation/reload here — just clear the session and show
@@ -101,7 +105,8 @@ apiClient.interceptors.response.use(
           window.localStorage.setItem("bot_logout_reason", reason);
           if (message) window.localStorage.setItem("bot_logout_message", message);
         }
-        toast.error(toastMessage, { duration: LOGOUT_TOAST_DURATION_MS });
+        // A fixed id: however many requests fail at once, one toast.
+        toast.error(toastMessage, { id: "forced-logout", duration: LOGOUT_TOAST_DURATION_MS });
       }
     }
 

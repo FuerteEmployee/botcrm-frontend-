@@ -45,10 +45,14 @@ export function QuickAddBranchDialog({ open, onOpenChange, onCreated }: QuickAdd
     if (res.ok) {
       setForm((prev) => ({
         ...prev,
-        latitude: parseFloat(res.coords.lat.toFixed(2)),
-        longitude: parseFloat(res.coords.lng.toFixed(2)),
+        // 6 decimals (~0.1 m), not 2: two decimals is ~1.1 km of error,
+        // enough to put a 100 m fence entirely off the premises the moment
+        // someone picks a radius on the Branches page. 27 of 39 stored
+        // branches carry exactly two decimals.
+        latitude: parseFloat(res.coords.lat.toFixed(6)),
+        longitude: parseFloat(res.coords.lng.toFixed(6)),
       }));
-      toast.success("Location fetched and simplified");
+      toast.success("Location fetched");
     } else {
       if (res.reason === "denied") {
         toast.error("Location Permission Denied", {
@@ -70,6 +74,14 @@ export function QuickAddBranchDialog({ open, onOpenChange, onCreated }: QuickAdd
     e.preventDefault();
     if (!form.branchName.trim() || !form.branchLocation.trim() || !form.city.trim()) {
       toast.error("Please fill all required fields");
+      return;
+    }
+    // An untouched form sends 0,0 -- a point in the Atlantic. Saved, it
+    // refuses every punch at this branch as thousands of km away.
+    if (form.latitude === 0 && form.longitude === 0) {
+      toast.error(
+        "Set the branch location: tap Auto-detect at the branch, or enter its latitude and longitude.",
+      );
       return;
     }
     setSubmitting(true);
@@ -312,6 +324,28 @@ function to24h(hour: string, minute: string, period: string) {
   return `${String(h).padStart(2, "0")}:${minute}`;
 }
 
+/**
+ * The lunch policy a quick-added shift gets.
+ *
+ * It used to send none, so the shift took the schema default `inherit`, the
+ * retired tenant-wide rule the Shifts page no longer offers. Now: the Shifts
+ * page's own default, an unpaid 1:00-2:00 PM window, when the shift covers
+ * that hour; otherwise no deduction, because the server refuses a lunch window
+ * outside the shift (a night shift, say). Checked the same way the server
+ * does, measured from the shift start so it works across midnight.
+ */
+function quickAddLunch(startTime: string, endTime: string) {
+  const mins = (hhmm: string) => {
+    const [h, m] = hhmm.split(":").map(Number);
+    return h * 60 + m;
+  };
+  const span = (mins(endTime) - mins(startTime) + 1440) % 1440;
+  const from = (mins("13:00") - mins(startTime) + 1440) % 1440;
+  return span > 60 && from + 60 <= span
+    ? { mode: "fixed_window" as const, startTime: "13:00", endTime: "14:00" }
+    : { mode: "none" as const };
+}
+
 export function QuickAddShiftDialog({ open, onOpenChange, onCreated }: QuickAddDialogProps) {
   const { createShift } = useShiftService();
   const [globalWorkDays, setGlobalWorkDays] = useState<string[]>(["M", "T", "W", "Th", "F", "Sa"]);
@@ -344,7 +378,7 @@ export function QuickAddShiftDialog({ open, onOpenChange, onCreated }: QuickAddD
     setSubmitting(true);
     try {
       const { is24Hours, ...payload } = form;
-      const created = await createShift(payload);
+      const created = await createShift({ ...payload, lunch: quickAddLunch(form.startTime, form.endTime) });
       onCreated(created._id);
       onOpenChange(false);
     } catch {
@@ -476,6 +510,13 @@ export function QuickAddShiftDialog({ open, onOpenChange, onCreated }: QuickAddD
               Highlighted = work day. Non-highlighted = holiday. Pre-filled from global settings.
             </p>
           </div>
+
+          <p className="text-[12px] text-muted-foreground rounded-lg bg-muted/30 px-3 py-2">
+            {quickAddLunch(form.startTime, form.endTime).mode === "fixed_window"
+              ? "Lunch: 1:00 PM to 2:00 PM, unpaid."
+              : "Lunch: no time taken off for lunch."}{" "}
+            You can change this later on the Shifts page.
+          </p>
 
           <DialogFooter className="gap-2 pt-2 border-t border-border/40 mt-2">
             <Button type="button" size="sm" variant="outline" onClick={() => onOpenChange(false)} className="rounded-lg" disabled={submitting}>Cancel</Button>

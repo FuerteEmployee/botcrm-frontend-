@@ -93,7 +93,23 @@ class BackgroundTrackerPlugin : Plugin() {
             return
         }
 
+        // No location permission: do not start the service at all. Starting it only
+        // for it to be refused by Android (it must go foreground before it can check)
+        // logged a false "fg_denied" failure on every app open after login, before
+        // the employee had even reached the permission screen. Nothing is marked
+        // active, so the watchdog and boot receiver do not try either.
+        val hasLocation =
+            androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!hasLocation) {
+            call.resolve(JSObject().put("started", false).put("reason", "no_location_permission"))
+            return
+        }
+
         Prefs.save(context, token, apiBase, sessionId, employeeId, installId)
+        // "Track always" (company setting). The server repeats it on every
+        // /attendance/today poll, so this start value only covers the first poll.
+        Prefs.setTrackAlways(context, call.getBoolean("trackAlways", false) ?: false)
 
         val intent = Intent(context, LocationTrackingService::class.java)
             .apply { action = LocationTrackingService.ACTION_START }
@@ -204,6 +220,11 @@ class BackgroundTrackerPlugin : Plugin() {
             .put("queued",         -1)
             .put("lastFixAt",       lastFixAt)
             .put("permissionState", permState)
+            // Lets the web layer know this build honours "track always". An older
+            // APK does not send it, so the web layer keeps it on-duty only there
+            // instead of restarting a service that stops itself every 30 s.
+            .put("supportsAlwaysMode", true)
+            .put("trackAlways",     Prefs.trackAlways(context))
         call.resolve(snapshot)
 
         // Async: fetch real queued count and emit as event.
@@ -383,6 +404,11 @@ class BackgroundTrackerPlugin : Plugin() {
                     .put("notifications",       notifications)
                     .put("batteryUnrestricted", batteryUnrestricted)
                     .put("activityRecognition", ActivityRecognitionTracker.hasPermission(context))
+                    // The Android camera grant. The web layer could only ask the WebView,
+                    // which has its own separate grant and answered "prompt" on phones
+                    // where the camera was plainly allowed and in use for selfie punches.
+                    .put("camera",              context.checkSelfPermission(Manifest.permission.CAMERA) ==
+                                                    PackageManager.PERMISSION_GRANTED)
                     .put("locationState",       buildPermissionState())
                     .put("manufacturer",        Build.MANUFACTURER ?: "")
                     // Whether an OEM autostart screen exists to send the user to.
@@ -433,13 +459,28 @@ class BackgroundTrackerPlugin : Plugin() {
             "com.huawei.systemmanager" to "com.huawei.systemmanager.optimize.process.ProtectActivity",
         )
         for ((pkg, cls) in candidates) {
-            val intent = Intent().apply {
+            // `intent.resolveActivity` answers yes for ANY explicit component without
+            // checking the app is installed, so the first entry (Xiaomi's) "matched" on
+            // every phone: a Pixel or Vivo showed an auto-start step that could only
+            // open Xiaomi's screen, fail, and land on the Settings home page. Ask the
+            // package manager whether this exact screen exists. The packages are listed
+            // under <queries> in the manifest, which Android 11+ needs to see them.
+            if (!activityExists(pkg, cls)) continue
+            return Intent().apply {
                 component = android.content.ComponentName(pkg, cls)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            if (intent.resolveActivity(context.packageManager) != null) return intent
         }
         return null
+    }
+
+    private fun activityExists(pkg: String, cls: String): Boolean = try {
+        context.packageManager.getActivityInfo(android.content.ComponentName(pkg, cls), 0)
+        true
+    } catch (_: PackageManager.NameNotFoundException) {
+        false
+    } catch (_: Exception) {
+        false
     }
 
     // ── Developer Options Check ──────────────────────────────────────────────

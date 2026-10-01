@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Outlet, useNavigate, Link, useLocation, createFileRoute, redirect } from "@tanstack/react-router";
 import { UpdatePrompt } from "@/components/shared/app-update";
+import { CenterModal } from "@/components/shared/center-modal";
 import { MissedPunchOutPrompt } from "@/components/user/missed-punch-out-prompt";
 import { OfflineBanner } from "@/components/user/offline-banner";
 import { ApkUpdatePrompt } from "@/components/shared/apk-update-prompt";
@@ -9,6 +10,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useDeveloperOptionsGate } from "@/hooks/use-developer-options-gate";
 import { DeveloperOptionsBlock } from "@/components/attendance/developer-options-block";
 import { getSession } from "@/lib/auth";
+import { isNativeApp } from "@/lib/geolocation";
 import { logoutAndClear } from "@/lib/logout";
 import {
   Home, CalendarDays, Ticket, LogOut, Sparkles, Coins, Gift, Zap,
@@ -54,6 +56,52 @@ function UserLayout() {
     return () => clearInterval(timer);
   }, []);
 
+  // Android's Back button.
+  //
+  // With no handler, Capacitor's default goes back in history or closes the
+  // app -- so pressing Back with a popup open (the selfie camera, the location
+  // check, a confirmation) threw away the half-finished action instead of
+  // closing the popup, which is what everybody expects Back to do. Order:
+  //  1. a page popup that handles Back itself (Home's punch flow listens for
+  //     "bot-back" and cancels the event when it closed something);
+  //  2. any other open dialog is sent Escape, which CenterModal and the Radix
+  //     dialogs both close on (a deliberately undismissable one ignores it,
+  //     so Back is swallowed rather than navigating out from under it);
+  //  3. nothing open: Home is the root, so the app goes to the background --
+  //     going "back" from it would land on /login, which bounces straight
+  //     back here, and Back could then never leave the app. Elsewhere, history.
+  useEffect(() => {
+    if (!isNativeApp()) return;
+    let remove: (() => void) | undefined;
+    let disposed = false;
+    import("@capacitor/app")
+      .then(({ App }) =>
+        App.addListener("backButton", ({ canGoBack }) => {
+          const back = new Event("bot-back", { cancelable: true });
+          window.dispatchEvent(back);
+          if (back.defaultPrevented) return;
+
+          if (document.querySelector('[role="dialog"], [role="alertdialog"]')) {
+            document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+            return;
+          }
+
+          const atRoot = window.location.pathname.replace(/\/$/, "") === "/user";
+          if (canGoBack && !atRoot) window.history.back();
+          else void App.minimizeApp();
+        }),
+      )
+      .then((h) => {
+        if (disposed) void h.remove();
+        else remove = () => void h.remove();
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      remove?.();
+    };
+  }, []);
+
   useEffect(() => {
     if (isMounted && !isAuthenticated) {
       navigate({ to: "/login" });
@@ -67,9 +115,15 @@ function UserLayout() {
     window.localStorage.setItem("bot_theme", next ? "dark" : "light");
   };
 
-  const handleLogout = async () => {
+  // Asked first. The icon sits beside the profile picture, one stray tap
+  // logged people out, and getting back in needs a phone number and an OTP --
+  // a real barrier for someone who does not read English comfortably.
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const handleLogout = () => setConfirmLogout(true);
+  const doLogout = async () => {
+    setConfirmLogout(false);
     await logoutAndClear();
-    toast.success("Successfully logged out");
+    toast.success("You have logged out");
     navigate({ to: "/login" });
   };
 
@@ -109,7 +163,7 @@ function UserLayout() {
     { to: "/user/holidays", label: "Holidays", icon: Gift },
     { to: "/user/advance-salary", label: "My Requests", icon: Coins },
     { to: "/user/tickets", label: "Tickets", icon: Ticket },
-    { to: "/user/profile", label: "Quick Action", icon: Zap, hash: "quick-actions" },
+    { to: "/user/profile", label: "More", icon: Zap, hash: "quick-actions" },
   ];
 
   /**
@@ -249,22 +303,22 @@ function UserLayout() {
             <Link
               to="/user/account"
               aria-label="Profile"
-              className={`rounded-full transition-all active:scale-95 ${
+              className={`rounded-full p-0.5 transition-all active:scale-95 ${
                 isProfileActive ? "ring-2 ring-[#501537] dark:ring-white" : "ring-2 ring-[#501537]/10 dark:ring-white/10"
               }`}
             >
-              <Avatar className="h-8 w-8">
-                <AvatarFallback className="bg-gradient-to-br from-[#4A0E2E] to-[#7B2453] text-white text-[11px] font-bold uppercase">
+              <Avatar className="h-9 w-9">
+                <AvatarFallback className="bg-gradient-to-br from-[#4A0E2E] to-[#7B2453] text-white text-[12px] font-bold uppercase">
                   {initials}
                 </AvatarFallback>
               </Avatar>
             </Link>
             <button
               onClick={handleLogout}
-              className="p-1.5 rounded-lg text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all cursor-pointer"
+              className="h-10 w-10 flex items-center justify-center rounded-lg text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all cursor-pointer"
               aria-label="Logout"
             >
-              <LogOut className="h-4.5 w-4.5" />
+              <LogOut className="h-5 w-5" />
             </button>
           </div>
         </header>
@@ -349,13 +403,51 @@ function UserLayout() {
                   transition={{ type: "spring", stiffness: 380, damping: 30 }}
                 />
               )}
-              <IconComponent className={`h-[18px] w-[18px] shrink-0 relative z-10 ${isActive ? "stroke-[2.5px] text-[#501537] dark:text-white" : "stroke-[2px]"}`} />
-              <span className="w-full text-center text-[8px] tracking-tight font-semibold uppercase leading-none mt-0.5 relative z-10 truncate px-0.5">{item.label}</span>
+              {/* 22px icon, 10.5px sentence-case label: the old 8px uppercase
+                  labels were close to unreadable on a budget phone. */}
+              <IconComponent className={`h-[22px] w-[22px] shrink-0 relative z-10 ${isActive ? "stroke-[2.5px] text-[#501537] dark:text-white" : "stroke-[2px]"}`} />
+              <span className="w-full text-center text-[10.5px] tracking-tight font-semibold leading-none mt-0.5 relative z-10 truncate px-0.5">{item.label}</span>
             </Link>
           );
         })}
       </nav>
 
+      <AnimatePresence>
+        {confirmLogout && (
+          <CenterModal
+            onClose={() => setConfirmLogout(false)}
+            labelledBy="logout-title"
+            footer={
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={doLogout}
+                  className="w-full h-12 rounded-xl bg-rose-600 text-white text-[15px] font-bold active:scale-[0.98] transition-transform"
+                >
+                  Yes, log out
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmLogout(false)}
+                  className="w-full h-12 rounded-xl border border-slate-200 dark:border-white/10 text-[15px] font-semibold text-slate-600 dark:text-slate-300"
+                >
+                  No, stay here
+                </button>
+              </div>
+            }
+          >
+            <div className="flex flex-col items-center text-center gap-2">
+              <div className="h-12 w-12 rounded-2xl bg-rose-500/10 flex items-center justify-center">
+                <LogOut className="h-6 w-6 text-rose-500" />
+              </div>
+              <h4 id="logout-title" className="text-base font-bold text-slate-800 dark:text-white">Log out?</h4>
+              <p className="text-[13px] leading-relaxed text-slate-500">
+                To come back in you will need your phone number and a new OTP.
+              </p>
+            </div>
+          </CenterModal>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

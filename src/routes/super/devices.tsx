@@ -8,16 +8,16 @@ export const Route = createFileRoute("/super/devices")({
 function DevicesPage() {
   return (
     <div className="min-h-screen">
-      <div className="flex items-center justify-between px-6 py-4 border-b bg-card">
+      <div className="border-b bg-card px-4 py-4 sm:px-6">
         <div>
           <h1 className="text-lg font-semibold">Machines</h1>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Biometric attendance terminals across all customers
+            Biometric attendance machines of every company
           </p>
         </div>
       </div>
 
-      <div className="p-6">
+      <div className="p-4 sm:p-6">
         <MachinesManager />
       </div>
     </div>

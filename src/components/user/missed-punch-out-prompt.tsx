@@ -59,7 +59,11 @@ const fmtTime = (iso?: string | null) =>
   iso ? new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: true }) : "--:--";
 
 export function MissedPunchOutPrompt() {
-  const { missedPunchOuts } = useMissedPunchOuts();
+  // Guarded: this prompt is mounted in the shell on every employee page, so a
+  // response that is not a list (a captive-portal page, a proxy's `{}`) used
+  // to throw on `.filter` and blank the entire app, not just this prompt.
+  const { missedPunchOuts: raw } = useMissedPunchOuts();
+  const missedPunchOuts: MissedPunchOut[] = Array.isArray(raw) ? raw : [];
   // Mutations only — the shell has no use for the full request list, and
   // fetching it on every app open would be a wasted round trip.
   const { submitRegularization, isSubmitting } = useRegularizationService({ enabled: false });
@@ -148,7 +152,7 @@ export function MissedPunchOutPrompt() {
               type="button"
               onClick={close}
               disabled={isSubmitting}
-              className="flex-1 rounded-xl px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-slate-500 hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-white/10"
+              className="flex-1 h-12 rounded-xl px-4 text-[15px] font-semibold text-slate-600 border border-slate-200 dark:border-white/10 hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-white/10"
             >
               Not now
             </button>
@@ -156,10 +160,10 @@ export function MissedPunchOutPrompt() {
               type="button"
               onClick={submit}
               disabled={isSubmitting || !leftAt}
-              className="relative flex-[1.6] rounded-xl bg-primary px-4 py-2.5 text-[11px] font-bold uppercase tracking-wider text-white shadow-lg shadow-primary/25 disabled:opacity-50"
+              className="relative flex-[1.6] h-12 rounded-xl bg-primary px-4 text-[15px] font-bold text-white shadow-lg shadow-primary/25 disabled:opacity-50"
             >
               <HapticOverlay radius="12px" />
-              {isSubmitting ? "Sending…" : "Raise request"}
+              {isSubmitting ? "Sending…" : "Send to admin"}
             </button>
           </div>
         }
@@ -171,12 +175,12 @@ export function MissedPunchOutPrompt() {
             </div>
             {/* pr-8 keeps the title clear of the modal's close button. */}
             <div className="min-w-0 flex-1 pr-8">
-              <h4 id="missed-punchout-title" className="text-sm font-bold text-slate-800 dark:text-white">
+              <h4 id="missed-punchout-title" className="text-base font-bold text-slate-800 dark:text-white">
                 You didn't punch out
               </h4>
-              <p className="text-[11px] leading-relaxed text-slate-500 mt-0.5">
-                We recorded your shift end for now. Tell us when you actually left
-                and we'll send it for approval.
+              <p className="text-[13px] leading-relaxed text-slate-500 mt-0.5">
+                We saved your shift end time for now. Tell us what time you really
+                left, and we will send it to your admin.
               </p>
             </div>
             {/* The close affordance now comes from CenterModal, so every
@@ -187,17 +191,17 @@ export function MissedPunchOutPrompt() {
             {[
               ["Date", fmtDay(pending.date)],
               ["Punched in", fmtTime(pending.punchIn)],
-              ["Recorded out", fmtTime(pending.systemPunchOut)],
+              ["Saved out", fmtTime(pending.systemPunchOut)],
             ].map(([label, value]) => (
               <div key={label}>
-                <p className="text-[9px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
-                <p className="text-[11px] font-semibold text-slate-700 dark:text-slate-200 mt-0.5">{value}</p>
+                <p className="text-[11px] font-semibold text-slate-500">{label}</p>
+                <p className="text-[13px] font-semibold text-slate-700 dark:text-slate-200 mt-0.5">{value}</p>
               </div>
             ))}
           </div>
 
           <div className="space-y-1.5">
-            <label htmlFor="left-at" className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+            <label htmlFor="left-at" className="text-[13px] font-semibold text-slate-600 dark:text-slate-300">
               What time did you leave?
             </label>
             <input
@@ -205,12 +209,12 @@ export function MissedPunchOutPrompt() {
               type="datetime-local"
               value={leftAt}
               onChange={(e) => setLeftAt(e.target.value)}
-              className="w-full rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 px-3 py-2.5 text-[12px] font-semibold text-slate-700 dark:text-slate-200 outline-none focus:border-primary"
+              className="w-full h-12 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 px-3 text-[15px] font-semibold text-slate-700 dark:text-slate-200 outline-none focus:border-primary"
             />
           </div>
 
           <div className="space-y-1.5">
-            <label htmlFor="left-reason" className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+            <label htmlFor="left-reason" className="text-[13px] font-semibold text-slate-600 dark:text-slate-300">
               Reason <span className="font-medium normal-case tracking-normal text-slate-300">(optional)</span>
             </label>
             <input
@@ -219,7 +223,7 @@ export function MissedPunchOutPrompt() {
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               placeholder="Forgot to punch out"
-              className="w-full rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 px-3 py-2.5 text-[12px] text-slate-700 dark:text-slate-200 outline-none focus:border-primary placeholder:text-slate-300"
+              className="w-full h-12 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-white/5 px-3 text-[15px] text-slate-700 dark:text-slate-200 outline-none focus:border-primary placeholder:text-slate-300"
             />
           </div>
 

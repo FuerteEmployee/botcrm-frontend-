@@ -22,6 +22,10 @@ export interface Regularization {
   reviewedAt?: string | null;
   /** What the punch-out said before approval — normally the shift-end fallback. */
   originalPunchOut?: string | null;
+  /** What the punch-in said before approval ("Forgot to punch in"). */
+  originalPunchIn?: string | null;
+  /** The employee's "Forgot to punch in/out" ticket this came from, if any. */
+  ticketId?: string | null;
   createdAt: string;
 
   /**
@@ -112,6 +116,9 @@ export function useRegularizationService({ enabled = true }: { enabled?: boolean
     // one and must drop out of the employee's prompt list.
     queryClient.invalidateQueries({ queryKey: ["missed-punch-outs"] });
     queryClient.invalidateQueries({ queryKey: ["user-history"] });
+    // A correction raised as a ticket mirrors its decision onto the ticket.
+    queryClient.invalidateQueries({ queryKey: ["tickets"] });
+    queryClient.invalidateQueries({ queryKey: ["user-tickets"] });
   };
 
   const submitMutation = useMutation({
