@@ -2,6 +2,13 @@ import axios from "axios";
 import { toast } from "sonner";
 import { getSession, clearSession } from "./auth";
 
+declare module "axios" {
+  interface AxiosRequestConfig {
+    /** Do not raise the plan-upgrade prompt if this request is refused for the plan. */
+    quietUpgrade?: boolean;
+  }
+}
+
 const API_BASE_URL = import.meta.env.VITE_API_URL || "https://gray-crab-756474.hostingersite.com/api";
 export const IMAGE_BASE_URL = API_BASE_URL.replace(/\/api$/, "");
 
@@ -110,8 +117,11 @@ apiClient.interceptors.response.use(
       }
     }
 
-    // Handle subscription/module gating 403 errors
-    if (error.response?.status === 403 && error.response?.data?.requiredUpgrade) {
+    // Handle subscription/module gating 403 errors. A background read the
+    // admin did not ask for (the header bell) opts out with `quietUpgrade`:
+    // a plan without the notice board would otherwise get an upgrade prompt
+    // on every page load.
+    if (error.response?.status === 403 && error.response?.data?.requiredUpgrade && !error.config?.quietUpgrade) {
       // Dispatch a custom event so UI components can show upgrade prompts
       if (typeof window !== "undefined") {
         window.dispatchEvent(

@@ -106,7 +106,7 @@ export const ActionButton = React.forwardRef<HTMLButtonElement, ActionButtonProp
       return (
         <Tooltip>
           <TooltipTrigger asChild>{button}</TooltipTrigger>
-          <TooltipContent className="rounded-lg text-[10px] font-black uppercase tracking-wider bg-white text-foreground border shadow-xl">
+          <TooltipContent className="rounded-lg text-[10px] font-black uppercase tracking-wider bg-card text-foreground border shadow-xl">
             {tooltip}
           </TooltipContent>
         </Tooltip>

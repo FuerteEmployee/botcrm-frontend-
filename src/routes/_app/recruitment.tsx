@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { Plus, Pencil, Trash2, Briefcase, Search } from "lucide-react";
+import { Plus, Briefcase, Search } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader }     from "@/components/shared/page-header";
 import { ActionButton }   from "@/components/shared/action-button";
@@ -37,7 +37,7 @@ function JobPostingPage() {
 
   const [open,     setOpen]     = useState(false);
   const [editing,  setEditing]  = useState<BackendJobPosting | null>(null);
-  const [form,     setForm]     = useState<Partial<BackendJobPosting>>({ title: "", department: "", openings: "", status: "" });
+  const [form,     setForm]     = useState<Partial<BackendJobPosting>>({ title: "", department: "", openings: 0, status: "" });
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [search,   setSearch]   = useState("");
   const { defaultLayout }       = useLayoutSettings();
@@ -49,7 +49,7 @@ function JobPostingPage() {
   const canDelete = can("recruitment", "delete");
 
   if (!hasMounted) return null;
-  if (isLoading)   return <SkeletonLoader />;
+  if (isLoading)   return <SkeletonLoader type="table" />;
 
   const filtered = (items as any[]).filter((r) =>
     (r.name ?? r.title ?? "").toLowerCase().includes(search.toLowerCase())
@@ -57,7 +57,7 @@ function JobPostingPage() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ title: "", department: "", openings: "", status: "" });
+    setForm({ title: "", department: "", openings: 0, status: "" });
     setOpen(true);
   };
   const openEdit = (item: BackendJobPosting) => {
@@ -85,7 +85,7 @@ function JobPostingPage() {
       <PageHeader
         title="Recruitment"
         description="Manage all recruitment records"
-        action={canCreate && (
+        actions={canCreate && (
           <Button onClick={openCreate} size="sm">
             <Plus className="h-4 w-4 mr-2" />Add New
           </Button>
@@ -103,13 +103,13 @@ function JobPostingPage() {
             className="w-full pl-10 pr-4 h-9 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/20"
           />
         </div>
-        <ViewToggle view={view} onChange={setView} />
+        <ViewToggle view={view} onViewChange={setView} />
       </div>
 
       {/* ── Content ── */}
       <AnimatePresence mode="wait">
         {view === "list" ? (
-          <DataTable columns={["Job Title", "Department", "Openings", "Status", "Actions"]}>
+          <DataTable headers={["Job Title", "Department", "Openings", "Status", "Actions"]}>
             {filtered.map((item: any) => (
               <DataTableRow key={item._id}>
                 <DataTableCell>{(item as any).title}</DataTableCell>
@@ -118,8 +118,8 @@ function JobPostingPage() {
                 <DataTableCell>{(item as any).status}</DataTableCell>
                 <DataTableCell>
                   <div className="flex gap-2">
-                    {canEdit   && <ActionButton icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => openEdit(item)} label="Edit" />}
-                    {canDelete && <ActionButton icon={<Trash2  className="h-3.5 w-3.5" />} onClick={() => setDeleteId(item._id)} label="Delete" variant="destructive" />}
+                    {canEdit   && <ActionButton variant="edit" tooltip="Edit" onClick={() => openEdit(item)} />}
+                    {canDelete && <ActionButton variant="delete" tooltip="Delete" onClick={() => setDeleteId(item._id)} />}
                   </div>
                 </DataTableCell>
               </DataTableRow>
@@ -134,21 +134,13 @@ function JobPostingPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.04 }}
               >
-                <GridCard>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-sm truncate">
-                        {item.name ?? item.title ?? item._id}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{(item as any).department}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{(item as any).openings}</p>
-                    </div>
-                    <div className="flex gap-1 shrink-0">
-                      {canEdit   && <ActionButton icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => openEdit(item)} label="Edit" />}
-                      {canDelete && <ActionButton icon={<Trash2  className="h-3.5 w-3.5" />} onClick={() => setDeleteId(item._id)} label="Delete" variant="destructive" />}
-                    </div>
-                  </div>
-                </GridCard>
+                <GridCard
+                  title={String(item.name ?? item.title ?? item._id)}
+                  subtitle={[item.department, item.openings].filter((v) => v !== undefined && v !== null && v !== "").join(" · ")}
+                  icon={<Briefcase className="h-5 w-5 text-primary" />}
+                  onEdit={canEdit ? () => openEdit(item) : undefined}
+                  onDelete={canDelete ? () => setDeleteId(item._id) : undefined}
+                />
               </motion.div>
             ))}
           </div>
@@ -163,10 +155,10 @@ function JobPostingPage() {
             <DialogDescription>Fill in the details and save.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <FormInput label="Job Title" value={(form as any).title ?? ""} onChange={(v) => setForm((p) => ({ ...p, title: v }))} />
-            <FormInput label="Department" value={(form as any).department ?? ""} onChange={(v) => setForm((p) => ({ ...p, department: v }))} />
-            <FormInput label="Openings" value={(form as any).openings ?? ""} onChange={(v) => setForm((p) => ({ ...p, openings: v }))} />
-            <FormInput label="Status" value={(form as any).status ?? ""} onChange={(v) => setForm((p) => ({ ...p, status: v }))} />
+            <FormInput label="Job Title" value={form.title ?? ""} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} />
+            <FormInput label="Department" value={form.department ?? ""} onChange={(e) => setForm((p) => ({ ...p, department: e.target.value }))} />
+            <FormInput label="Openings" type="number" min="0" value={form.openings ?? ""} onChange={(e) => setForm((p) => ({ ...p, openings: Number(e.target.value) || 0 }))} />
+            <FormInput label="Status" value={form.status ?? ""} onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>

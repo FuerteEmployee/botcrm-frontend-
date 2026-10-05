@@ -54,6 +54,7 @@ import { cn, formatTime12h, toISTDateKey } from "@/lib/utils";
 import { Loader2 } from "lucide-react";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { DAYS, WEEKS, DAY_LABELS } from "@/lib/constants";
+import { DEFAULT_ATTENDANCE_EXCEPTIONS, DEFAULT_SALARY_COMPONENTS, weeklyHolidaysFromWorkDays } from "@/lib/employee-defaults";
 import { usePermission } from "@/hooks/use-permission";
 
 type AddEmployeeSearch = {
@@ -169,32 +170,13 @@ function AddEmployeePage() {
       branchName: "",
       nameAsPerBank: "",
     },
-    attendanceExceptions: {
-      overrideGlobal: false,
-      requireLocation: false,
-      remotePunch: true,
-    },
+    attendanceExceptions: { ...DEFAULT_ATTENDANCE_EXCEPTIONS },
     // Top-level on the User, NOT inside attendanceExceptions — it is read by
     // the geofence engine (isFieldRole) regardless of whether the exceptions
     // block is switched on.
     geofenceExempt: false,
     leadDeletionPermission: false,
-    salaryComponents: {
-      tds: { enabled: false, percentage: 0, amount: 0, type: 'percentage', includeInTotal: true },
-      tdsCategory: "",
-      basic: { enabled: true, percentage: 50, amount: 0, type: 'percentage', includeInTotal: true },
-      da: { enabled: false, percentage: 0, amount: 0, type: 'percentage', includeInTotal: true },
-      hra: { enabled: true, percentage: 40, amount: 0, type: 'percentage', includeInTotal: true },
-      ca: { enabled: false, percentage: 0, amount: 0, type: 'percentage', includeInTotal: true },
-      pf: { enabled: false, percentage: 12, amount: 0, type: 'percentage', includeInTotal: true },
-      esic: { enabled: false, percentage: 0.75, amount: 0, type: 'percentage', includeInTotal: true },
-      epf: { enabled: false, percentage: 0, amount: 0, type: 'percentage', includeInTotal: true },
-      tdsOnProfession: { enabled: false, percentage: 0, amount: 0, type: 'percentage', includeInTotal: true },
-      retention: { enabled: false, percentage: 0, amount: 0, type: 'percentage', includeInTotal: true },
-      pt: { enabled: false, percentage: 0, amount: 0, type: 'percentage', includeInTotal: true },
-      adminCharge: { enabled: false, percentage: 0, amount: 0, type: 'percentage', includeInTotal: true },
-      bonus: { enabled: false, percentage: 0, amount: 0, type: 'percentage', includeInTotal: true },
-    }
+    salaryComponents: structuredClone(DEFAULT_SALARY_COMPONENTS),
     };
     // Restore an in-progress draft after a page refresh (create mode only).
     if (!employeeId) {
@@ -246,14 +228,10 @@ function AddEmployeePage() {
             if (prev.shiftIds.length === 0 && data?.attendance?.defaultShiftId) {
               updates.shiftIds = [data.attendance.defaultShiftId];
             }
-            if (prev.weeklyHolidays.length === 0 && data?.attendance?.workDays?.length) {
+            if (prev.weeklyHolidays.length === 0) {
               // Days NOT in workDays are holidays — pre-populate weeklyHolidays
-              const holidayDays = Object.entries(DAY_LABELS)
-                .filter(([key]) => !data.attendance.workDays.includes(key))
-                .map(([, fullName]) => fullName);
-              if (holidayDays.length > 0) {
-                updates.weeklyHolidays = holidayDays.map(day => ({ day, weeks: [] }));
-              }
+              const holidays = weeklyHolidaysFromWorkDays(data?.attendance?.workDays);
+              if (holidays.length > 0) updates.weeklyHolidays = holidays;
             }
             return Object.keys(updates).length > 0 ? { ...prev, ...updates } : prev;
           });
@@ -521,7 +499,7 @@ function AddEmployeePage() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 w-full">
           <div className="lg:col-span-8 space-y-6">
 
-            <Card id="general" className="p-8 border border-border/60 bg-white rounded-xl shadow-sm scroll-mt-28">
+            <Card id="general" className="p-8 border border-border/60 bg-card rounded-xl shadow-sm scroll-mt-28">
             <SectionTitle title="General Details" icon={User} className="mb-8" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-8">
 
@@ -563,7 +541,7 @@ function AddEmployeePage() {
               />{/* Gender */}
               <div className="space-y-2">
                 <Label className="text-[12px] font-bold text-muted-foreground tracking-wider">Gender Selection</Label>
-                <div className="flex bg-white border border-primary p-0 rounded-full h-12 overflow-hidden shadow-sm mt-2">
+                <div className="flex bg-card border border-primary p-0 rounded-full h-12 overflow-hidden shadow-sm mt-2">
                   {[
                     { id: 'male', label: 'Male' },
                     { id: 'female', label: 'Female' },
@@ -576,7 +554,7 @@ function AddEmployeePage() {
                         "flex-1 h-full font-bold text-[14px] transition-all duration-300",
                         form.gender === g.id
                           ? "bg-primary text-white"
-                          : "bg-white text-foreground hover:bg-muted/10"
+                          : "bg-card text-foreground hover:bg-muted/10"
                       )}
                     >
                       {g.label}
@@ -596,7 +574,7 @@ function AddEmployeePage() {
             </div>
           </Card>
 
-          <Card id="employment" className="p-6 border border-border/60 bg-white rounded-xl shadow-sm scroll-mt-28">
+          <Card id="employment" className="p-6 border border-border/60 bg-card rounded-xl shadow-sm scroll-mt-28">
             <SectionTitle title="Employment Terms" icon={Briefcase} className="mb-8" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-7">
 
@@ -617,7 +595,7 @@ function AddEmployeePage() {
                         "flex flex-col items-center justify-center gap-2 h-24 rounded-2xl border transition-all duration-300 shadow-sm",
                         form.employmentType === type.id
                           ? "bg-primary/5 border-primary ring-1 ring-primary/20"
-                          : "bg-white border-border/60 text-muted-foreground hover:border-primary/40 hover:bg-muted/5"
+                          : "bg-card border-border/60 text-muted-foreground hover:border-primary/40 hover:bg-muted/5"
                       )}
                     >
                       <type.icon className={cn("h-6 w-6", form.employmentType === type.id ? "text-primary" : "text-muted-foreground")} />
@@ -862,7 +840,7 @@ function AddEmployeePage() {
                             <span className={cn("text-[13px] font-semibold", !!holiday ? "text-primary" : "text-muted-foreground")}>{day}</span>
                           </div>
                           {holiday && (
-                            <div className="flex flex-wrap items-center gap-1.5 bg-white/60 p-1 rounded-lg border border-border/40">
+                            <div className="flex flex-wrap items-center gap-1.5 bg-card/60 p-1 rounded-lg border border-border/40">
                               <span className="text-[10px] font-bold text-muted-foreground px-2">WEEKS:</span>
                               {WEEKS.map(w => (
                                 <button
@@ -1003,7 +981,7 @@ function AddEmployeePage() {
             </div>
           </Card>
 
-          <Card id="personal" className="p-8 border border-border/60 bg-white rounded-xl shadow-sm scroll-mt-28">
+          <Card id="personal" className="p-8 border border-border/60 bg-card rounded-xl shadow-sm scroll-mt-28">
             <SectionTitle title="Personal Details" icon={User} className="mb-8" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-8">
               <FormInput
@@ -1039,7 +1017,7 @@ function AddEmployeePage() {
             </div>
           </Card>
 
-          <Card id="contact" className="p-8 border border-border/60 bg-white rounded-xl shadow-sm scroll-mt-28">
+          <Card id="contact" className="p-8 border border-border/60 bg-card rounded-xl shadow-sm scroll-mt-28">
             <SectionTitle title="Contact Information" icon={MapPin} className="mb-8" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-8">
               <div className="col-span-1 md:col-span-2">
@@ -1084,7 +1062,7 @@ function AddEmployeePage() {
             </div>
           </Card>
 
-          <Card id="bank" className="p-8 border border-border/60 bg-white rounded-xl shadow-sm scroll-mt-28">
+          <Card id="bank" className="p-8 border border-border/60 bg-card rounded-xl shadow-sm scroll-mt-28">
             <SectionTitle title="Bank Information" icon={Banknote} className="mb-8" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-8">
               <FormInput
@@ -1124,7 +1102,7 @@ function AddEmployeePage() {
         </div>
 
         <div className="lg:col-span-4 space-y-6">
-          <Card className="p-5 border border-border/60 bg-white rounded-xl shadow-sm">
+          <Card className="p-5 border border-border/60 bg-card rounded-xl shadow-sm">
             <div className="flex items-center gap-2 mb-4 pb-2 border-b">
               <ShieldCheck className="h-4 w-4 text-primary" />
               <h3 className="text-[14px] font-bold tracking-tight">Permissions</h3>
@@ -1141,7 +1119,7 @@ function AddEmployeePage() {
             </div>
           </Card>
 
-          <Card className="p-5 border border-border/60 bg-white rounded-xl shadow-sm">
+          <Card className="p-5 border border-border/60 bg-card rounded-xl shadow-sm">
             <div className="flex items-center justify-between mb-4 pb-2 border-b">
               <div className="flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-primary" />
@@ -1217,7 +1195,7 @@ function AddEmployeePage() {
                 {form.salaryComponents.tds.enabled && (
                   <Input
                     placeholder="Category (e.g. 92B)"
-                    className="h-8 text-[11px] font-normal rounded-lg bg-white mt-2"
+                    className="h-8 text-[11px] font-normal rounded-lg bg-card mt-2"
                     value={form.salaryComponents.tdsCategory}
                     onChange={(e) => setForm({ ...form, salaryComponents: { ...form.salaryComponents, tdsCategory: e.target.value } })}
                   />
@@ -1233,7 +1211,7 @@ function AddEmployeePage() {
                       key={key}
                       className={cn(
                         "flex items-center justify-between p-2.5 rounded-xl border transition-all",
-                        value?.enabled ? "bg-white border-primary/30 shadow-sm" : "bg-muted/10 border-transparent opacity-60"
+                        value?.enabled ? "bg-card border-primary/30 shadow-sm" : "bg-muted/10 border-transparent opacity-60"
                       )}
                     >
                       <div className="flex items-center gap-2.5">

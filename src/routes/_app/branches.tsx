@@ -423,7 +423,7 @@ function BranchesPage() {
       </div>
 
       {/* Multi-branch feature toggle */}
-      <Card className="p-4 sm:p-5 border border-border/60 bg-white rounded-2xl shadow-sm">
+      <Card className="p-4 sm:p-5 border border-border/60 bg-card rounded-2xl shadow-sm">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-start gap-3">
             <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary grid place-items-center shrink-0">
@@ -619,7 +619,7 @@ function BranchesPage() {
             bottom with nothing scrollable. The gradient bar and header stay
             fixed; only the middle fills the remaining height and scrolls;
             the footer stays pinned so Discard/Save are always reachable. */}
-        <DialogContent className="max-w-2xl max-h-[85vh] rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-white/95 backdrop-blur-xl flex flex-col">
+        <DialogContent className="max-w-2xl max-h-[85vh] rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-card/95 backdrop-blur-xl flex flex-col">
           <div className="h-2 w-full shrink-0 bg-linear-to-r from-primary via-primary/50 to-primary/80" />
           <div className="p-5 pb-0 shrink-0">
             <DialogHeader className="mb-4">
@@ -652,7 +652,7 @@ function BranchesPage() {
                     maxLength={MAX_NAME_LENGTH}
                     error={errors.branchName}
                     aria-invalid={!!errors.branchName}
-                    className="h-10 rounded-xl bg-muted/30 border-border/40 focus:bg-white transition-all shadow-sm text-[13px]"
+                    className="h-10 rounded-xl bg-muted/30 border-border/40 focus:bg-card transition-all shadow-sm text-[13px]"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -665,7 +665,7 @@ function BranchesPage() {
                     maxLength={MAX_NAME_LENGTH}
                     error={errors.city}
                     aria-invalid={!!errors.city}
-                    className="h-10 rounded-xl bg-muted/30 border-border/40 focus:bg-white transition-all shadow-sm text-[13px]"
+                    className="h-10 rounded-xl bg-muted/30 border-border/40 focus:bg-card transition-all shadow-sm text-[13px]"
                   />
                 </div>
               </div>
@@ -679,7 +679,7 @@ function BranchesPage() {
                   maxLength={MAX_ADDRESS_LENGTH}
                   error={errors.branchLocation}
                   aria-invalid={!!errors.branchLocation}
-                  className="h-10 rounded-xl bg-muted/30 border-border/40 focus:bg-white transition-all shadow-sm text-[13px]"
+                  className="h-10 rounded-xl bg-muted/30 border-border/40 focus:bg-card transition-all shadow-sm text-[13px]"
                 />
               </div>
 
@@ -733,7 +733,7 @@ function BranchesPage() {
                       onChange={(e) => setField("latitude", e.target.value)}
                       error={errors.latitude}
                       aria-invalid={!!errors.latitude}
-                      className="h-10 text-[13px] rounded-xl bg-white/50"
+                      className="h-10 text-[13px] rounded-xl bg-card/50"
                     />
                   </div>
                   <div className="space-y-1">
@@ -746,7 +746,7 @@ function BranchesPage() {
                       onChange={(e) => setField("longitude", e.target.value)}
                       error={errors.longitude}
                       aria-invalid={!!errors.longitude}
-                      className="h-10 text-[13px] rounded-xl bg-white/50"
+                      className="h-10 text-[13px] rounded-xl bg-card/50"
                     />
                   </div>
                 </div>
@@ -764,7 +764,7 @@ function BranchesPage() {
                         "h-10 sm:h-8 rounded-full px-3.5 text-[11px] font-black transition-colors border",
                         active
                           ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/25"
-                          : "bg-white/60 text-muted-foreground border-border/50 hover:bg-muted",
+                          : "bg-card/60 text-muted-foreground border-border/50 hover:bg-muted",
                       );
                       const isPreset = RADIUS_PRESETS.some((r) => String(r.value) === form.radius.trim());
                       return (
@@ -814,7 +814,7 @@ function BranchesPage() {
                       error={errors.radius}
                       aria-invalid={!!errors.radius}
                       aria-label="Radius in metres"
-                      className="h-10 text-[13px] rounded-xl bg-white/50 mt-1.5"
+                      className="h-10 text-[13px] rounded-xl bg-card/50 mt-1.5"
                     />
                   )}
 

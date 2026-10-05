@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { Plus, Pencil, Trash2, BookOpen, Search } from "lucide-react";
+import { Plus, BookOpen, Search } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader }     from "@/components/shared/page-header";
 import { ActionButton }   from "@/components/shared/action-button";
@@ -49,7 +49,7 @@ function TrainingPage() {
   const canDelete = can("training", "delete");
 
   if (!hasMounted) return null;
-  if (isLoading)   return <SkeletonLoader />;
+  if (isLoading)   return <SkeletonLoader type="table" />;
 
   const filtered = (items as any[]).filter((r) =>
     (r.name ?? r.title ?? "").toLowerCase().includes(search.toLowerCase())
@@ -85,7 +85,7 @@ function TrainingPage() {
       <PageHeader
         title="Training & Development"
         description="Manage all training & development records"
-        action={canCreate && (
+        actions={canCreate && (
           <Button onClick={openCreate} size="sm">
             <Plus className="h-4 w-4 mr-2" />Add New
           </Button>
@@ -103,13 +103,13 @@ function TrainingPage() {
             className="w-full pl-10 pr-4 h-9 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/20"
           />
         </div>
-        <ViewToggle view={view} onChange={setView} />
+        <ViewToggle view={view} onViewChange={setView} />
       </div>
 
       {/* ── Content ── */}
       <AnimatePresence mode="wait">
         {view === "list" ? (
-          <DataTable columns={["Training Title", "Trainer", "Start Date", "Status", "Actions"]}>
+          <DataTable headers={["Training Title", "Trainer", "Start Date", "Status", "Actions"]}>
             {filtered.map((item: any) => (
               <DataTableRow key={item._id}>
                 <DataTableCell>{(item as any).title}</DataTableCell>
@@ -118,8 +118,8 @@ function TrainingPage() {
                 <DataTableCell>{(item as any).status}</DataTableCell>
                 <DataTableCell>
                   <div className="flex gap-2">
-                    {canEdit   && <ActionButton icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => openEdit(item)} label="Edit" />}
-                    {canDelete && <ActionButton icon={<Trash2  className="h-3.5 w-3.5" />} onClick={() => setDeleteId(item._id)} label="Delete" variant="destructive" />}
+                    {canEdit   && <ActionButton variant="edit" tooltip="Edit" onClick={() => openEdit(item)} />}
+                    {canDelete && <ActionButton variant="delete" tooltip="Delete" onClick={() => setDeleteId(item._id)} />}
                   </div>
                 </DataTableCell>
               </DataTableRow>
@@ -134,21 +134,13 @@ function TrainingPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.04 }}
               >
-                <GridCard>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-sm truncate">
-                        {item.name ?? item.title ?? item._id}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{(item as any).trainer}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{(item as any).startDate}</p>
-                    </div>
-                    <div className="flex gap-1 shrink-0">
-                      {canEdit   && <ActionButton icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => openEdit(item)} label="Edit" />}
-                      {canDelete && <ActionButton icon={<Trash2  className="h-3.5 w-3.5" />} onClick={() => setDeleteId(item._id)} label="Delete" variant="destructive" />}
-                    </div>
-                  </div>
-                </GridCard>
+                <GridCard
+                  title={String(item.name ?? item.title ?? item._id)}
+                  subtitle={[item.trainer, item.startDate].filter((v) => v !== undefined && v !== null && v !== "").join(" · ")}
+                  icon={<BookOpen className="h-5 w-5 text-primary" />}
+                  onEdit={canEdit ? () => openEdit(item) : undefined}
+                  onDelete={canDelete ? () => setDeleteId(item._id) : undefined}
+                />
               </motion.div>
             ))}
           </div>
@@ -163,10 +155,10 @@ function TrainingPage() {
             <DialogDescription>Fill in the details and save.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <FormInput label="Training Title" value={(form as any).title ?? ""} onChange={(v) => setForm((p) => ({ ...p, title: v }))} />
-            <FormInput label="Trainer" value={(form as any).trainer ?? ""} onChange={(v) => setForm((p) => ({ ...p, trainer: v }))} />
-            <FormInput label="Start Date" value={(form as any).startDate ?? ""} onChange={(v) => setForm((p) => ({ ...p, startDate: v }))} />
-            <FormInput label="Status" value={(form as any).status ?? ""} onChange={(v) => setForm((p) => ({ ...p, status: v }))} />
+            <FormInput label="Training Title" value={form.title ?? ""} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} />
+            <FormInput label="Trainer" value={form.trainer ?? ""} onChange={(e) => setForm((p) => ({ ...p, trainer: e.target.value }))} />
+            <FormInput label="Start Date" type="date" value={form.startDate ?? ""} onChange={(e) => setForm((p) => ({ ...p, startDate: e.target.value }))} />
+            <FormInput label="Status" value={form.status ?? ""} onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>

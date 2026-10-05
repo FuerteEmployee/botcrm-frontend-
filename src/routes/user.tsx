@@ -17,6 +17,7 @@ import {
   type LucideIcon
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { NotificationBell } from "@/components/layout/notification-bell";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -299,6 +300,10 @@ function UserLayout() {
           </div>
 
           <div className="flex items-center gap-2">
+            <NotificationBell
+              href="/user/announcements"
+              className="h-10 w-10 flex items-center justify-center text-[#501537] dark:text-slate-300 hover:scale-100 active:scale-95"
+            />
             {/* Profile avatar — replaces the Profile item that used to live in the bottom bar */}
             <Link
               to="/user/account"
@@ -335,6 +340,7 @@ function UserLayout() {
           </div>
           
           <div className="flex items-center gap-4">
+            <NotificationBell href="/user/announcements" className="h-9 w-9 flex items-center justify-center text-[#501537] dark:text-slate-300" />
             {/* Live Ticking Time pill */}
             <div className="px-3.5 py-1.5 rounded-full bg-white/60 dark:bg-slate-900/60 border border-[#501537]/10 dark:border-white/5 backdrop-blur-md flex items-center gap-2 shadow-sm">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />

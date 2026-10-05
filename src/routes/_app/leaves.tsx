@@ -358,7 +358,7 @@ function LeavesPage() {
                 showLabel
                 label="Leave Types"
                 icon={Settings2}
-                className="bg-white text-primary border border-primary/20 hover:bg-primary/5 shadow-sm h-11 sm:h-10"
+                className="bg-card text-primary border border-primary/20 hover:bg-primary/5 shadow-sm h-11 sm:h-10"
               >
                 <Link to="/leave-types" />
               </ActionButton>
@@ -439,7 +439,7 @@ function LeavesPage() {
             initial={{ y: 50, opacity: 0, x: "-50%" }}
             animate={{ y: 0, opacity: 1, x: "-50%" }}
             exit={{ y: 50, opacity: 0, x: "-50%" }}
-            className="fixed bottom-8 left-1/2 z-50 bg-white/90 backdrop-blur-xl px-2 py-2 rounded-[24px] shadow-[0_20px_50px_rgba(0,0,0,0.15)] flex items-center gap-2 border border-white/40 ring-1 ring-black/5"
+            className="fixed bottom-8 left-1/2 z-50 bg-card/90 backdrop-blur-xl px-2 py-2 rounded-[24px] shadow-[0_20px_50px_rgba(0,0,0,0.15)] flex items-center gap-2 border border-white/40 ring-1 ring-black/5"
           >
             <div className="flex items-center gap-3 px-4 py-2 bg-primary/5 rounded-full border border-primary/10 ml-1">
               <span className="bg-gradient-primary text-white h-7 w-7 rounded-full flex items-center justify-center text-[12px] font-black shadow-lg shadow-primary/20">
@@ -668,7 +668,7 @@ function LeavesPage() {
                   </h4>
                   <div className="space-y-4 relative before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-px before:bg-border/60">
                     <div className="flex gap-4 relative pl-8">
-                      <div className="absolute left-0 top-1 h-6 w-6 rounded-full bg-white border-2 border-primary/20 flex items-center justify-center z-10 shadow-sm">
+                      <div className="absolute left-0 top-1 h-6 w-6 rounded-full bg-card border-2 border-primary/20 flex items-center justify-center z-10 shadow-sm">
                         <div className="h-2 w-2 rounded-full bg-primary" />
                       </div>
                       <div className="flex-1">
@@ -681,7 +681,7 @@ function LeavesPage() {
                     </div>
                     {selectedLeave.status !== "pending" && (
                       <div className="flex gap-4 relative pl-8">
-                        <div className="absolute left-0 top-1 h-6 w-6 rounded-full bg-white border-2 border-primary/20 flex items-center justify-center z-10 shadow-sm">
+                        <div className="absolute left-0 top-1 h-6 w-6 rounded-full bg-card border-2 border-primary/20 flex items-center justify-center z-10 shadow-sm">
                           <div className="h-2 w-2 rounded-full bg-primary" />
                         </div>
                         <div className="flex-1 min-w-0">
@@ -703,7 +703,7 @@ function LeavesPage() {
               </div>
 
               {selectedLeave.status === "pending" && canEdit && (
-                <div className="p-6 border-t border-border/40 bg-white/50 backdrop-blur-md">
+                <div className="p-6 border-t border-border/40 bg-card/50 backdrop-blur-md">
                   <div className="grid grid-cols-2 gap-3">
                     <ActionButton variant="approve" showLabel label="Approve" disabled={busyIds.includes(selectedLeave._id)} onClick={() => handleStatus(selectedLeave._id, "approved")} className="bg-emerald-500 text-white border-none h-12 shadow-lg shadow-emerald-500/20" />
                     <ActionButton variant="reject" showLabel label="Reject" disabled={busyIds.includes(selectedLeave._id)} onClick={() => handleStatus(selectedLeave._id, "rejected")} className="bg-destructive text-white border-none h-12 shadow-lg shadow-destructive/20" />

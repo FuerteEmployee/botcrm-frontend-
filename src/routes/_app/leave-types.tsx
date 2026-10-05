@@ -118,7 +118,7 @@ function BalancePeriodCard() {
   };
 
   return (
-    <Card data-balance-period-card className="p-5 border border-border/60 bg-white rounded-2xl shadow-sm">
+    <Card data-balance-period-card className="p-5 border border-border/60 bg-card rounded-2xl shadow-sm">
       <div className="flex items-start gap-3 mb-4">
         <div className="h-9 w-9 rounded-xl bg-primary/10 text-primary grid place-items-center shrink-0">
           <CalendarClock className="h-4 w-4" />
@@ -579,7 +579,7 @@ function LeaveTypesPage() {
               maxLength={MAX_DESCRIPTION_LENGTH}
               onChange={e => update({ description: e.target.value })}
               placeholder="Who can take this leave, and when..."
-              className="rounded-xl h-[calc(100%-25px)] min-h-[120px] md:min-h-[160px] text-[14px] bg-muted/30 border-border/40 focus:bg-white transition-all p-4 leading-relaxed resize-none"
+              className="rounded-xl h-[calc(100%-25px)] min-h-[120px] md:min-h-[160px] text-[14px] bg-muted/30 border-border/40 focus:bg-card transition-all p-4 leading-relaxed resize-none"
             />
             {errors.description && <p className="text-[12px] text-destructive font-medium ml-1">{errors.description}</p>}
           </div>

@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState, useEffect } from "react";
 import { z } from "zod";
-import { Plus, Search, Pencil, Trash2, Eye, Filter, LayoutGrid, List, MoreVertical, MoreHorizontal, Phone, Mail, MapPin, Building2, UserCircle2, Calendar, Check, Clock, UserX } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, Eye, Filter, LayoutGrid, List, MoreVertical, MoreHorizontal, Phone, Mail, MapPin, Building2, UserCircle2, Calendar, Check, Clock, UserX, FileSpreadsheet } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/shared/page-header";
 import { ActionButton } from "@/components/shared/action-button";
@@ -40,6 +40,7 @@ import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { OrgLoadError } from "@/components/branches/org-load-error";
 import { useLayoutSettings } from "@/hooks/use-layout-settings";
 import { usePermission } from "@/hooks/use-permission";
+import { EmployeeImportDialog } from "@/components/employees/employee-import-dialog";
 
 const employeesSearchSchema = z.object({
   departmentId: z.string().optional(),
@@ -83,6 +84,7 @@ function EmployeesPage() {
   const [deactivateTarget, setDeactivateTarget] = useState<{ id: string; name: string } | null>(null);
   const [deactivateReason, setDeactivateReason] = useState("");
   const [isDeactivating, setIsDeactivating] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
   const [view, setView] = useState<"grid" | "list">(defaultLayout);
   const { can } = usePermission();
@@ -220,6 +222,16 @@ function EmployeesPage() {
                   {seats.used} of {seats.limit} employees used on your plan (inactive included)
                 </span>
               )}
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 rounded-xl font-semibold gap-1.5"
+                disabled={atSeatLimit}
+                title={atSeatLimit ? "Your plan's employee limit is reached. Ask your provider to upgrade the plan to add more." : "Add many employees from an Excel or CSV file"}
+                onClick={() => setImportOpen(true)}
+              >
+                <FileSpreadsheet className="h-4 w-4" /> Import from Excel
+              </Button>
               {atSeatLimit ? (
                 <ActionButton
                   variant="add"
@@ -548,6 +560,10 @@ function EmployeesPage() {
         )}
       </AnimatePresence>
 
+
+      {/* Mounted only while open: it loads settings and the whole roster for
+          its duplicate checks, which the list itself does not need. */}
+      {importOpen && <EmployeeImportDialog open={importOpen} onOpenChange={setImportOpen} />}
 
       {/* Delete is only for employees with no history (someone added by
           mistake). The server refuses anyone with attendance, leave, salary,

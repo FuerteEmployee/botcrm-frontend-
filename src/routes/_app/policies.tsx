@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { Plus, Pencil, Trash2, Shield, Search } from "lucide-react";
+import { Plus, Shield, Search } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader }     from "@/components/shared/page-header";
 import { ActionButton }   from "@/components/shared/action-button";
@@ -49,7 +49,7 @@ function HrPolicyPage() {
   const canDelete = can("policies", "delete");
 
   if (!hasMounted) return null;
-  if (isLoading)   return <SkeletonLoader />;
+  if (isLoading)   return <SkeletonLoader type="table" />;
 
   const filtered = (items as any[]).filter((r) =>
     (r.name ?? r.title ?? "").toLowerCase().includes(search.toLowerCase())
@@ -85,7 +85,7 @@ function HrPolicyPage() {
       <PageHeader
         title="HR Policies"
         description="Manage all hr policies records"
-        action={canCreate && (
+        actions={canCreate && (
           <Button onClick={openCreate} size="sm">
             <Plus className="h-4 w-4 mr-2" />Add New
           </Button>
@@ -103,13 +103,13 @@ function HrPolicyPage() {
             className="w-full pl-10 pr-4 h-9 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/20"
           />
         </div>
-        <ViewToggle view={view} onChange={setView} />
+        <ViewToggle view={view} onViewChange={setView} />
       </div>
 
       {/* ── Content ── */}
       <AnimatePresence mode="wait">
         {view === "list" ? (
-          <DataTable columns={["Policy Title", "Category", "Effective Date", "Actions"]}>
+          <DataTable headers={["Policy Title", "Category", "Effective Date", "Actions"]}>
             {filtered.map((item: any) => (
               <DataTableRow key={item._id}>
                 <DataTableCell>{(item as any).title}</DataTableCell>
@@ -117,8 +117,8 @@ function HrPolicyPage() {
                 <DataTableCell>{(item as any).effectiveDate}</DataTableCell>
                 <DataTableCell>
                   <div className="flex gap-2">
-                    {canEdit   && <ActionButton icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => openEdit(item)} label="Edit" />}
-                    {canDelete && <ActionButton icon={<Trash2  className="h-3.5 w-3.5" />} onClick={() => setDeleteId(item._id)} label="Delete" variant="destructive" />}
+                    {canEdit   && <ActionButton variant="edit" tooltip="Edit" onClick={() => openEdit(item)} />}
+                    {canDelete && <ActionButton variant="delete" tooltip="Delete" onClick={() => setDeleteId(item._id)} />}
                   </div>
                 </DataTableCell>
               </DataTableRow>
@@ -133,21 +133,13 @@ function HrPolicyPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.04 }}
               >
-                <GridCard>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-sm truncate">
-                        {item.name ?? item.title ?? item._id}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{(item as any).category}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{(item as any).effectiveDate}</p>
-                    </div>
-                    <div className="flex gap-1 shrink-0">
-                      {canEdit   && <ActionButton icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => openEdit(item)} label="Edit" />}
-                      {canDelete && <ActionButton icon={<Trash2  className="h-3.5 w-3.5" />} onClick={() => setDeleteId(item._id)} label="Delete" variant="destructive" />}
-                    </div>
-                  </div>
-                </GridCard>
+                <GridCard
+                  title={String(item.name ?? item.title ?? item._id)}
+                  subtitle={[item.category, item.effectiveDate].filter((v) => v !== undefined && v !== null && v !== "").join(" · ")}
+                  icon={<Shield className="h-5 w-5 text-primary" />}
+                  onEdit={canEdit ? () => openEdit(item) : undefined}
+                  onDelete={canDelete ? () => setDeleteId(item._id) : undefined}
+                />
               </motion.div>
             ))}
           </div>
@@ -162,9 +154,9 @@ function HrPolicyPage() {
             <DialogDescription>Fill in the details and save.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <FormInput label="Policy Title" value={(form as any).title ?? ""} onChange={(v) => setForm((p) => ({ ...p, title: v }))} />
-            <FormInput label="Category" value={(form as any).category ?? ""} onChange={(v) => setForm((p) => ({ ...p, category: v }))} />
-            <FormInput label="Effective Date" value={(form as any).effectiveDate ?? ""} onChange={(v) => setForm((p) => ({ ...p, effectiveDate: v }))} />
+            <FormInput label="Policy Title" value={form.title ?? ""} onChange={(e) => setForm((p) => ({ ...p, title: e.target.value }))} />
+            <FormInput label="Category" value={form.category ?? ""} onChange={(e) => setForm((p) => ({ ...p, category: e.target.value }))} />
+            <FormInput label="Effective Date" type="date" value={form.effectiveDate ?? ""} onChange={(e) => setForm((p) => ({ ...p, effectiveDate: e.target.value }))} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>

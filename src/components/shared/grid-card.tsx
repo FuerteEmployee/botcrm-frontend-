@@ -53,7 +53,7 @@ export function GridCard({
       className="h-full"
     >
       <Card className={cn(
-        "group relative overflow-hidden p-5 border border-border/60 bg-white rounded-xl shadow-sm hover:shadow-md hover:border-primary/40 transition-all duration-300 h-full flex flex-col",
+        "group relative overflow-hidden p-5 border border-border/60 bg-card rounded-xl shadow-sm hover:shadow-md hover:border-primary/40 transition-all duration-300 h-full flex flex-col",
         className
       )}>
         {/* Header: Icon & Actions */}

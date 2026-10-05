@@ -2192,7 +2192,7 @@ function UserDashboard() {
                   <span className="text-[13px] font-bold text-[#501537] dark:text-[#C0467F]">Present</span>
                 </div>
                 {/* Purple calendar icon */}
-                <div className="h-7 w-7 rounded-xl bg-purple-50 dark:bg-purple-950/20 text-[#501537] dark:text-[#8C2059] flex items-center justify-center shrink-0">
+                <div className="h-7 w-7 rounded-xl bg-purple-50 dark:bg-purple-950/20 text-[#501537] dark:text-[#8C2059] dark:text-primary flex items-center justify-center shrink-0">
                   <Calendar className="h-3.5 w-3.5" />
                 </div>
               </div>
@@ -2421,7 +2421,7 @@ function UserDashboard() {
                       </div>
                       {/* By the festival's own type -- optional holidays and
                           events were all labelled "Paid Holiday". */}
-                      <Badge variant="outline" className="text-[11px] font-semibold bg-[#501537]/5 text-[#501537] dark:bg-[#8C2059]/10 dark:text-[#8C2059] border-none px-2 py-0.5 rounded-full">
+                      <Badge variant="outline" className="text-[11px] font-semibold bg-[#501537]/5 text-[#501537] dark:bg-[#8C2059]/10 dark:text-[#8C2059] dark:text-primary border-none px-2 py-0.5 rounded-full">
                         {holiday.type === "optional" ? "Optional Holiday" : holiday.type === "event" ? "Event" : "Paid Holiday"}
                       </Badge>
                     </div>
@@ -2926,7 +2926,7 @@ function UserDashboard() {
               <div className="relative w-full h-44 rounded-2xl overflow-hidden border border-slate-100 dark:border-white/5 flex items-center justify-center bg-slate-950 shadow-inner">
                 {locationLoading ? (
                   <div className="absolute inset-0 bg-black/50 backdrop-blur-xs flex flex-col items-center justify-center gap-2 z-10">
-                    <RefreshCw className="h-6 w-6 animate-spin text-[#8C2059]" />
+                    <RefreshCw className="h-6 w-6 animate-spin text-[#8C2059] dark:text-primary" />
                     <span className="text-[13px] font-semibold text-white">Finding your location…</span>
                   </div>
                 ) : null}
@@ -3127,7 +3127,7 @@ function UserDashboard() {
             >
               <div className="w-full text-center">
                 <div className="mx-auto mb-2 h-12 w-12 rounded-2xl bg-[#501537]/10 flex items-center justify-center">
-                  <Fingerprint className="h-6 w-6 text-[#8C2059]" />
+                  <Fingerprint className="h-6 w-6 text-[#8C2059] dark:text-primary" />
                 </div>
                 <h4 className="text-base font-bold text-slate-800 dark:text-white">
                   Punch in again?
@@ -3318,7 +3318,7 @@ function UserDashboard() {
                 {/* Processing/Uploading Loader Overlay */}
                 {scanLoading && (
                   <div className="absolute inset-0 bg-black/75 backdrop-blur-xs flex flex-col items-center justify-center gap-2">
-                    <RefreshCw className="h-7 w-7 animate-spin text-[#8C2059]" />
+                    <RefreshCw className="h-7 w-7 animate-spin text-[#8C2059] dark:text-primary" />
                     <span className="text-[14px] font-semibold text-white animate-pulse">Sending…</span>
                   </div>
                 )}

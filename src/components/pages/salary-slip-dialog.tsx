@@ -143,7 +143,7 @@ export function SalarySlipDialog({ record, onClose, onUndoPayment }: SlipDialogP
       <DialogContent className="max-w-md rounded-2xl overflow-hidden p-0 border-none shadow-2xl max-h-[90vh] flex flex-col">
         <div className="bg-linear-to-br from-primary/10 via-primary/5 to-transparent p-6 pb-4 shrink-0">
           <DialogHeader>
-            <div className="h-12 w-12 rounded-2xl bg-white shadow-sm border border-primary/10 grid place-items-center mb-3">
+            <div className="h-12 w-12 rounded-2xl bg-card shadow-sm border border-primary/10 grid place-items-center mb-3">
               <Receipt className="h-6 w-6 text-primary" />
             </div>
             <DialogTitle className="text-[18px] font-bold break-words">{r?.employeeId?.name || "—"}</DialogTitle>
@@ -154,7 +154,7 @@ export function SalarySlipDialog({ record, onClose, onUndoPayment }: SlipDialogP
         </div>
 
         {r && (
-          <div className="p-6 space-y-5 bg-white flex-1 overflow-y-auto min-h-0">
+          <div className="p-6 space-y-5 bg-card flex-1 overflow-y-auto min-h-0">
             <div className="grid grid-cols-2 gap-3 text-[13px]">
               <div className="min-w-0">
                 <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">Salary</p>

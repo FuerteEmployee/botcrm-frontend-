@@ -891,7 +891,7 @@ function TrackingPage() {
         description="Real-time location monitoring of your field staff."
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center gap-0.5 rounded-xl border border-border/60 bg-white px-0.5 h-11">
+            <div className="flex items-center gap-0.5 rounded-xl border border-border/60 bg-card px-0.5 h-11">
               <Button variant="ghost" size="icon" className="h-10 w-10" aria-label="Previous day" onClick={() => shiftDate(-1)}>
                 <ChevronLeft className="h-4 w-4" />
               </Button>
@@ -1002,7 +1002,7 @@ function TrackingPage() {
             className="grid grid-cols-1 lg:grid-cols-3 gap-4"
           >
             {/* Employee List Sidebar */}
-            <Card className="p-4 border border-border/60 bg-white rounded-xl shadow-sm lg:col-span-1 flex flex-col h-[560px] transition-all hover:border-primary/40">
+            <Card className="p-4 border border-border/60 bg-card rounded-xl shadow-sm lg:col-span-1 flex flex-col h-[560px] transition-all hover:border-primary/40">
               <div className="flex-1 overflow-y-auto scrollbar-thin space-y-1.5 pr-1">
                 {filtered.length === 0 && (
                   <p className="px-2 py-10 text-center text-[13px] text-muted-foreground">
@@ -1086,7 +1086,7 @@ function TrackingPage() {
             </Card>
 
             {/* Map Area */}
-            <Card className="p-0 border border-border/60 bg-white rounded-xl shadow-sm lg:col-span-2 overflow-hidden h-[560px] relative">
+            <Card className="p-0 border border-border/60 bg-card rounded-xl shadow-sm lg:col-span-2 overflow-hidden h-[560px] relative">
               <TrackingMap
                 locations={activeLocations}
                 employees={employees}
@@ -1104,7 +1104,7 @@ function TrackingPage() {
               />
 
               {/* Street / Satellite toggle */}
-              <div className="absolute top-3 left-3 z-[1000] flex items-center gap-1 rounded-xl bg-white/95 shadow-md border border-border/50 p-1">
+              <div className="absolute top-3 left-3 z-[1000] flex items-center gap-1 rounded-xl bg-card/95 shadow-md border border-border/50 p-1">
                 <button
                   type="button"
                   onClick={() => setTileMode("street")}

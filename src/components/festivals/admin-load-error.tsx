@@ -24,7 +24,7 @@ export function AdminLoadError({
   // Switched off by the plan or by the super admin: retrying cannot fix it.
   if (isModuleUnavailable(error) || data?.data?.featureDisabled) {
     return (
-      <div role="status" className="rounded-2xl border border-border/60 bg-white p-8 text-center shadow-sm">
+      <div role="status" className="rounded-2xl border border-border/60 bg-card p-8 text-center shadow-sm">
         <Ban className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" />
         <p className="text-[15px] font-bold text-foreground">This page is not turned on for your company</p>
         <p className="mx-auto mt-1 max-w-md text-[13px] leading-relaxed text-muted-foreground">

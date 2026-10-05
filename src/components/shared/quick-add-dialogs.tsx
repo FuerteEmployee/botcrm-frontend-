@@ -98,7 +98,7 @@ export function QuickAddBranchDialog({ open, onOpenChange, onCreated }: QuickAdd
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-white/95 backdrop-blur-xl max-h-[90vh] flex flex-col">
+      <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-card/95 backdrop-blur-xl max-h-[90vh] flex flex-col">
         <div className="h-2 w-full bg-linear-to-r from-primary via-primary/50 to-primary/80 shrink-0" />
         <div className="p-5 flex-1 overflow-y-auto min-h-0">
           <DialogHeader className="mb-4">
@@ -121,7 +121,7 @@ export function QuickAddBranchDialog({ open, onOpenChange, onCreated }: QuickAdd
                   value={form.branchName}
                   onChange={(e) => setForm({ ...form, branchName: e.target.value })}
                   required
-                  className="h-10 rounded-xl bg-muted/30 border-border/40 focus:bg-white transition-all shadow-sm text-[13px]"
+                  className="h-10 rounded-xl bg-muted/30 border-border/40 focus:bg-card transition-all shadow-sm text-[13px]"
                 />
               </div>
               <div className="space-y-1.5">
@@ -131,7 +131,7 @@ export function QuickAddBranchDialog({ open, onOpenChange, onCreated }: QuickAdd
                   value={form.city}
                   onChange={(e) => setForm({ ...form, city: e.target.value })}
                   required
-                  className="h-10 rounded-xl bg-muted/30 border-border/40 focus:bg-white transition-all shadow-sm text-[13px]"
+                  className="h-10 rounded-xl bg-muted/30 border-border/40 focus:bg-card transition-all shadow-sm text-[13px]"
                 />
               </div>
             </div>
@@ -142,7 +142,7 @@ export function QuickAddBranchDialog({ open, onOpenChange, onCreated }: QuickAdd
                 value={form.branchLocation}
                 onChange={(e) => setForm({ ...form, branchLocation: e.target.value })}
                 required
-                className="h-10 rounded-xl bg-muted/30 border-border/40 focus:bg-white transition-all shadow-sm text-[13px]"
+                className="h-10 rounded-xl bg-muted/30 border-border/40 focus:bg-card transition-all shadow-sm text-[13px]"
               />
             </div>
 
@@ -167,7 +167,7 @@ export function QuickAddBranchDialog({ open, onOpenChange, onCreated }: QuickAdd
                     step="any"
                     value={form.latitude}
                     onChange={(e) => setForm({ ...form, latitude: parseFloat(e.target.value) || 0 })}
-                    className="h-9 text-[13px] rounded-xl bg-white/50"
+                    className="h-9 text-[13px] rounded-xl bg-card/50"
                   />
                 </div>
                 <div className="space-y-1">
@@ -177,7 +177,7 @@ export function QuickAddBranchDialog({ open, onOpenChange, onCreated }: QuickAdd
                     step="any"
                     value={form.longitude}
                     onChange={(e) => setForm({ ...form, longitude: parseFloat(e.target.value) || 0 })}
-                    className="h-9 text-[13px] rounded-xl bg-white/50"
+                    className="h-9 text-[13px] rounded-xl bg-card/50"
                   />
                 </div>
               </div>
@@ -231,7 +231,7 @@ export function QuickAddDepartmentDialog({ open, onOpenChange, onCreated }: Quic
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-white/95 backdrop-blur-xl max-h-[90vh] flex flex-col">
+      <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-card/95 backdrop-blur-xl max-h-[90vh] flex flex-col">
         <div className="h-2 w-full bg-linear-to-r from-primary via-primary/50 to-primary/80 shrink-0" />
         <div className="p-5 flex-1 overflow-y-auto min-h-0">
           <DialogHeader className="mb-4">
@@ -254,7 +254,7 @@ export function QuickAddDepartmentDialog({ open, onOpenChange, onCreated }: Quic
                   value={form.name}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
                   required
-                  className="h-10 rounded-xl bg-muted/30 border-border/40 focus:bg-white transition-all shadow-sm text-[13px]"
+                  className="h-10 rounded-xl bg-muted/30 border-border/40 focus:bg-card transition-all shadow-sm text-[13px]"
                 />
               </div>
               <div className="space-y-1.5">
@@ -263,7 +263,7 @@ export function QuickAddDepartmentDialog({ open, onOpenChange, onCreated }: Quic
                   <div className="relative flex-1">
                     <FormInput
                       label=""
-                      className="h-10 pl-12 text-[13px] rounded-xl border-border/40 bg-muted/30 font-mono uppercase focus:bg-white transition-all shadow-sm"
+                      className="h-10 pl-12 text-[13px] rounded-xl border-border/40 bg-muted/30 font-mono uppercase focus:bg-card transition-all shadow-sm"
                       value={form.colorCode}
                       onChange={(e) => setForm({ ...form, colorCode: e.target.value })}
                       placeholder="#000000"
@@ -440,7 +440,7 @@ export function QuickAddShiftDialog({ open, onOpenChange, onCreated }: QuickAddD
                     <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
                       {which === "start" ? "Start Time" : "End Time"}
                     </label>
-                    <div className="flex items-center h-10 rounded-xl border border-border/60 bg-white overflow-hidden divide-x divide-border/40 focus-within:border-primary/60 transition-colors">
+                    <div className="flex items-center h-10 rounded-xl border border-border/60 bg-card overflow-hidden divide-x divide-border/40 focus-within:border-primary/60 transition-colors">
                       <select
                         value={hour}
                         onChange={e => setTime(e.target.value, minute, period)}
@@ -497,7 +497,7 @@ export function QuickAddShiftDialog({ open, onOpenChange, onCreated }: QuickAddD
                       "h-9 w-9 rounded-xl text-[12px] font-bold transition-all border",
                       active
                         ? "bg-primary text-white border-primary shadow-sm"
-                        : "bg-white text-muted-foreground border-border/50 hover:border-primary/40"
+                        : "bg-card text-muted-foreground border-border/50 hover:border-primary/40"
                     )}
                     title={DAY_LABELS[day]}
                   >

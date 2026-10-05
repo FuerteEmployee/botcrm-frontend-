@@ -7,19 +7,34 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { motion } from 'framer-motion'
 import { Plus, Edit, Trash2, Users, Clock } from 'lucide-react'
-import { mockShifts, mockShiftAssignments, Shift, employees } from '@/lib/mock-data'
+import { shifts as initialShifts, Shift, employees } from '@/lib/mock-data'
 import { toast } from 'sonner'
 
+interface ShiftAssignment {
+  id: string
+  employeeId: string
+  shiftId: string
+  startDate: Date
+  endDate?: Date
+}
+
+// mock-data has no assignment table; each employee's `shift` names the shift they work.
+const initialAssignments: ShiftAssignment[] = employees.flatMap(emp => {
+  const shift = initialShifts.find(s => s.name === emp.shift)
+  return shift
+    ? [{ id: `assign-${emp.id}`, employeeId: emp.id, shiftId: shift.id, startDate: new Date(emp.joinedAt) }]
+    : []
+})
+
 export function ShiftManagementPage() {
-  const [shifts, setShifts] = useState(mockShifts)
-  const [assignments, setAssignments] = useState(mockShiftAssignments)
+  const [shifts, setShifts] = useState<Shift[]>(initialShifts)
+  const [assignments, setAssignments] = useState<ShiftAssignment[]>(initialAssignments)
   const [isOpen, setIsOpen] = useState(false)
   const [editingShift, setEditingShift] = useState<Shift | null>(null)
   const [formData, setFormData] = useState({
     name: '',
-    startTime: '',
-    endTime: '',
-    breakTime: 0
+    start: '',
+    end: ''
   })
   const [selectedEmployee, setSelectedEmployee] = useState('')
   const [selectedShift, setSelectedShift] = useState('')
@@ -29,19 +44,18 @@ export function ShiftManagementPage() {
       setEditingShift(shift)
       setFormData({
         name: shift.name,
-        startTime: shift.startTime,
-        endTime: shift.endTime,
-        breakTime: shift.breakTime
+        start: shift.start,
+        end: shift.end
       })
     } else {
       setEditingShift(null)
-      setFormData({ name: '', startTime: '', endTime: '', breakTime: 0 })
+      setFormData({ name: '', start: '', end: '' })
     }
     setIsOpen(true)
   }
 
   const handleSaveShift = () => {
-    if (!formData.name || !formData.startTime || !formData.endTime) {
+    if (!formData.name || !formData.start || !formData.end) {
       toast.error('Please fill in all required fields')
       return
     }
@@ -56,7 +70,8 @@ export function ShiftManagementPage() {
     } else {
       const newShift: Shift = {
         id: `shift-${Date.now()}`,
-        ...formData
+        ...formData,
+        assigned: 0
       }
       setShifts(prev => [...prev, newShift])
       toast.success('Shift created successfully')
@@ -76,7 +91,7 @@ export function ShiftManagementPage() {
       return
     }
 
-    const newAssignment = {
+    const newAssignment: ShiftAssignment = {
       id: `assign-${Date.now()}`,
       employeeId: selectedEmployee,
       shiftId: selectedShift,
@@ -142,9 +157,9 @@ export function ShiftManagementPage() {
                       <div className="flex items-center gap-4 text-sm text-slate-600 dark:text-slate-400">
                         <span className="flex items-center gap-1">
                           <Clock className="w-4 h-4" />
-                          {shift.startTime} - {shift.endTime}
+                          {shift.start} - {shift.end}
                         </span>
-                        <span>Break: {shift.breakTime} min</span>
+                        <span>Assigned: {shift.assigned}</span>
                       </div>
                     </div>
                     <div className="flex gap-2">
@@ -210,7 +225,7 @@ export function ShiftManagementPage() {
                   <SelectContent>
                     {shifts.map(shift => (
                       <SelectItem key={shift.id} value={shift.id}>
-                        {shift.name} ({shift.startTime}-{shift.endTime})
+                        {shift.name} ({shift.start}-{shift.end})
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -268,7 +283,7 @@ export function ShiftManagementPage() {
                           {shift?.name}
                         </td>
                         <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-400">
-                          {shift?.startTime} - {shift?.endTime}
+                          {shift?.start} - {shift?.end}
                         </td>
                         <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-400">
                           {new Date(assignment.startDate).toLocaleDateString()}
@@ -291,7 +306,7 @@ export function ShiftManagementPage() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>{editingShift ? 'Edit Shift' : 'Create New Shift'}</DialogTitle>
-            <DialogDescription>Set shift timing and break duration</DialogDescription>
+            <DialogDescription>Set shift timing</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-4">
@@ -309,8 +324,8 @@ export function ShiftManagementPage() {
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">Start Time *</label>
                 <Input
                   type="time"
-                  value={formData.startTime}
-                  onChange={(e) => setFormData(prev => ({ ...prev, startTime: e.target.value }))}
+                  value={formData.start}
+                  onChange={(e) => setFormData(prev => ({ ...prev, start: e.target.value }))}
                   className="border-2 border-slate-200 dark:border-slate-700"
                 />
               </div>
@@ -318,21 +333,11 @@ export function ShiftManagementPage() {
                 <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">End Time *</label>
                 <Input
                   type="time"
-                  value={formData.endTime}
-                  onChange={(e) => setFormData(prev => ({ ...prev, endTime: e.target.value }))}
+                  value={formData.end}
+                  onChange={(e) => setFormData(prev => ({ ...prev, end: e.target.value }))}
                   className="border-2 border-slate-200 dark:border-slate-700"
                 />
               </div>
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">Break Time (minutes)</label>
-              <Input
-                type="number"
-                placeholder="60"
-                value={formData.breakTime}
-                onChange={(e) => setFormData(prev => ({ ...prev, breakTime: parseInt(e.target.value) }))}
-                className="border-2 border-slate-200 dark:border-slate-700"
-              />
             </div>
           </div>
 

@@ -68,7 +68,7 @@ export function AutoPunchOutPanel({
   const criteria = report ? Object.entries(report.criteria) : [];
 
   return (
-    <Card className="border border-border/60 bg-white rounded-xl shadow-sm overflow-hidden">
+    <Card className="border border-border/60 bg-card rounded-xl shadow-sm overflow-hidden">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}

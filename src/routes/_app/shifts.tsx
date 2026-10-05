@@ -685,7 +685,7 @@ function ShiftsPage() {
       <div className="space-y-6">
         <PageHeader title="Shift Management" description="Define working hours and assign shifts to your team." />
         {planBlocked ? (
-          <div role="status" className="rounded-2xl border border-border/60 bg-white p-8 text-center shadow-sm">
+          <div role="status" className="rounded-2xl border border-border/60 bg-card p-8 text-center shadow-sm">
             <Ban className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" />
             <p className="text-[15px] font-bold text-foreground">Shift management is not in your plan</p>
             <p className="mx-auto mt-1 max-w-md text-[13px] leading-relaxed text-muted-foreground">
@@ -793,7 +793,7 @@ function ShiftsPage() {
                   exit={{ opacity: 0, scale: 0.95 }}
                   transition={{ delay: i * 0.05 }}
                 >
-                  <Card className={`group relative overflow-hidden p-5 border border-border/50 bg-white rounded-xl shadow-sm hover:shadow-md hover:border-primary/40 transition-all duration-300 h-full flex flex-col`}>
+                  <Card className={`group relative overflow-hidden p-5 border border-border/50 bg-card rounded-xl shadow-sm hover:shadow-md hover:border-primary/40 transition-all duration-300 h-full flex flex-col`}>
                     {/* Top gradient bar */}
                     <div className={`absolute top-0 left-0 right-0 h-1.5 bg-linear-to-r ${gradient.replace("/15", "/60").replace("/5", "/30")} rounded-t-xl`} />
 
@@ -839,7 +839,7 @@ function ShiftsPage() {
                           })()}
                         </Badge>
                         {toMins(s.endTime) < toMins(s.startTime) && (
-                          <Badge variant="secondary" className="text-[11px] font-medium px-2 py-0.5 bg-slate-500/10 text-slate-700 border-none gap-1" title="Ends the next day">
+                          <Badge variant="secondary" className="text-[11px] font-medium px-2 py-0.5 bg-slate-500/10 text-slate-700 dark:text-slate-300 border-none gap-1" title="Ends the next day">
                             <Moon className="h-3 w-3" /> Overnight
                           </Badge>
                         )}
@@ -1050,7 +1050,7 @@ function ShiftsPage() {
                       <label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
                         {which === "start" ? "Start Time" : "End Time"}
                       </label>
-                      <div className="flex items-center h-11 rounded-xl border border-border/60 bg-white overflow-hidden divide-x divide-border/40 focus-within:border-primary/60 transition-colors">
+                      <div className="flex items-center h-11 rounded-xl border border-border/60 bg-card overflow-hidden divide-x divide-border/40 focus-within:border-primary/60 transition-colors">
                         <select
                           value={hour}
                           onChange={e => setTime(e.target.value, minute, period)}
@@ -1124,7 +1124,7 @@ function ShiftsPage() {
                         "h-10 min-w-0 flex-1 max-w-11 rounded-xl text-[12px] font-bold transition-all border",
                         active
                           ? "bg-primary text-white border-primary shadow-sm"
-                          : "bg-white text-muted-foreground border-border/50 hover:border-primary/40"
+                          : "bg-card text-muted-foreground border-border/50 hover:border-primary/40"
                       )}
                       title={DAY_LABELS[day]}
                     >
@@ -1205,7 +1205,7 @@ function ShiftsPage() {
                           "h-10 px-3 rounded-xl text-[12px] font-bold transition-all border",
                           Number(form.lunch.durationMins) === m
                             ? "bg-primary text-white border-primary shadow-sm"
-                            : "bg-white text-muted-foreground border-border/50 hover:border-primary/40",
+                            : "bg-card text-muted-foreground border-border/50 hover:border-primary/40",
                         )}
                       >
                         {m >= 60 && m % 60 === 0 ? `${m / 60} hour${m > 60 ? "s" : ""}` : `${m} min`}
@@ -1438,7 +1438,7 @@ function ShiftsPage() {
                         "px-3 py-2 rounded-xl text-left border transition-all",
                         active
                           ? "bg-primary text-white border-primary shadow-sm"
-                          : "bg-white text-foreground border-border/50 hover:border-primary/40"
+                          : "bg-card text-foreground border-border/50 hover:border-primary/40"
                       )}
                     >
                       <div className="text-[13px] font-bold leading-none">{s.name}</div>

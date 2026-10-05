@@ -364,7 +364,7 @@ function DepartmentsPage() {
       )}
 
       <Dialog open={open} onOpenChange={(o) => { if (!saving) setOpen(o); }}>
-        <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-white/95 backdrop-blur-xl max-h-[90vh] flex flex-col">
+        <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-card/95 backdrop-blur-xl max-h-[90vh] flex flex-col">
           <div className="h-2 w-full bg-linear-to-r from-primary via-primary/50 to-primary/80 shrink-0" />
           <div className="p-5 flex-1 flex flex-col min-h-0">
             <DialogHeader className="mb-4 shrink-0">
@@ -392,7 +392,7 @@ function DepartmentsPage() {
                     maxLength={MAX_NAME_LENGTH}
                     error={errors.name}
                     aria-invalid={!!errors.name}
-                    className="h-10 rounded-xl bg-muted/30 border-border/40 focus:bg-white transition-all shadow-sm text-[13px]"
+                    className="h-10 rounded-xl bg-muted/30 border-border/40 focus:bg-card transition-all shadow-sm text-[13px]"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -402,7 +402,7 @@ function DepartmentsPage() {
                       <FormInput
                         id="dept-color"
                         label=""
-                        className="h-10 pl-12 text-[13px] rounded-xl border-border/40 bg-muted/30 font-mono uppercase focus:bg-white transition-all shadow-sm"
+                        className="h-10 pl-12 text-[13px] rounded-xl border-border/40 bg-muted/30 font-mono uppercase focus:bg-card transition-all shadow-sm"
                         value={form.colorCode}
                         onChange={(e) => setField("colorCode", e.target.value)}
                         placeholder="#000000"

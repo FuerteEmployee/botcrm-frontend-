@@ -505,7 +505,7 @@ function AssetAllocatePage() {
               />
               {employeeId ? (
                 <div className="flex items-center gap-3 p-4 rounded-xl bg-primary/5 border border-primary/10 animate-in fade-in slide-in-from-right-4 duration-500">
-                  <div className="h-9 w-9 rounded-lg bg-white shadow-sm flex items-center justify-center">
+                  <div className="h-9 w-9 rounded-lg bg-card shadow-sm flex items-center justify-center">
                     <Icons.Mail className="h-4 w-4 text-primary" />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -522,7 +522,7 @@ function AssetAllocatePage() {
                 </div>
               ) : (
                 <div className="flex items-center gap-3 p-4 rounded-xl bg-muted/5 border border-dashed border-border/60 opacity-60">
-                  <div className="h-9 w-9 rounded-lg bg-white shadow-sm flex items-center justify-center">
+                  <div className="h-9 w-9 rounded-lg bg-card shadow-sm flex items-center justify-center">
                     <User className="h-4 w-4 text-muted-foreground" />
                   </div>
                   <div>
@@ -704,7 +704,7 @@ function AssetAllocatePage() {
                                     "flex flex-col items-center justify-center gap-1 h-14 rounded-xl border transition-all duration-300",
                                     device.unlockType === t.id 
                                       ? "bg-primary/5 border-primary ring-1 ring-primary/20 shadow-sm" 
-                                      : "bg-white border-border/60 text-muted-foreground hover:border-primary/40 hover:bg-muted/5"
+                                      : "bg-card border-border/60 text-muted-foreground hover:border-primary/40 hover:bg-muted/5"
                                   )}
                                 >
                                   <t.icon className={cn("h-3.5 w-3.5", device.unlockType === t.id ? "text-primary" : "text-muted-foreground")} />
@@ -719,7 +719,7 @@ function AssetAllocatePage() {
                               <div className="flex flex-col items-center gap-3 p-4 rounded-2xl border border-dashed border-primary/20 bg-primary/5 animate-in fade-in zoom-in-95 duration-300">
                                 <div className="w-full flex items-center justify-between mb-2">
                                   <Label className="text-[11px] font-bold text-primary tracking-widest uppercase">Grid Size</Label>
-                                  <div className="flex bg-white/50 p-0.5 rounded-lg border border-primary/10">
+                                  <div className="flex bg-card/50 p-0.5 rounded-lg border border-primary/10">
                                     {[3, 4].map(size => (
                                       <button
                                         key={size}

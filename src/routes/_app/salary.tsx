@@ -390,7 +390,7 @@ function SalaryPage() {
             </Select>
 
             <Select value={deptFilter} onValueChange={setDeptFilter}>
-              <SelectTrigger aria-label="Department" className="h-10 w-full md:w-[160px] border-border bg-white rounded-xl text-[13px] font-medium gap-2 px-3 shadow-none">
+              <SelectTrigger aria-label="Department" className="h-10 w-full md:w-[160px] border-border bg-card rounded-xl text-[13px] font-medium gap-2 px-3 shadow-none">
                 <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
                 <SelectValue placeholder="Department" />
               </SelectTrigger>
@@ -401,7 +401,7 @@ function SalaryPage() {
             </Select>
 
             <Select value={branchFilter} onValueChange={setBranchFilter}>
-              <SelectTrigger aria-label="Branch" className="col-span-2 md:col-auto h-10 w-full md:w-[160px] border-border bg-white rounded-xl text-[13px] font-medium gap-2 px-3 shadow-none">
+              <SelectTrigger aria-label="Branch" className="col-span-2 md:col-auto h-10 w-full md:w-[160px] border-border bg-card rounded-xl text-[13px] font-medium gap-2 px-3 shadow-none">
                 <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
                 <SelectValue placeholder="Branch" />
               </SelectTrigger>

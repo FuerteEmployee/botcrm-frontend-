@@ -319,7 +319,7 @@ function AnnouncementsPage() {
       )}
 
       <Dialog open={open} onOpenChange={(o) => { if (!isSaving) setOpen(o); }}>
-        <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-white/95 backdrop-blur-xl max-h-[90vh] flex flex-col">
+        <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-card/95 backdrop-blur-xl max-h-[90vh] flex flex-col">
           <div className="h-2 w-full bg-linear-to-r from-primary via-primary/50 to-primary/80 shrink-0" />
           <div className="p-5 flex-1 flex flex-col min-h-0">
             <DialogHeader className="mb-4 shrink-0">
@@ -344,7 +344,7 @@ function AnnouncementsPage() {
                       maxLength={ANNOUNCEMENT_TITLE_MAX}
                       onChange={(e) => setForm({ ...form, title: e.target.value })}
                       placeholder="e.g. Office closed on Friday"
-                      className="h-11 rounded-xl bg-muted/30 border-border/40 focus:bg-white transition-all shadow-sm text-[13px]"
+                      className="h-11 rounded-xl bg-muted/30 border-border/40 focus:bg-card transition-all shadow-sm text-[13px]"
                     />
                   </div>
 
@@ -360,7 +360,7 @@ function AnnouncementsPage() {
                         { label: "Company Event", value: "event" },
                         { label: "Policy Update", value: "policy" },
                       ]}
-                      className="h-11 rounded-xl bg-muted/30 border-border/40 focus:bg-white transition-all shadow-sm text-[13px]"
+                      className="h-11 rounded-xl bg-muted/30 border-border/40 focus:bg-card transition-all shadow-sm text-[13px]"
                     />
                   </div>
                 </div>
@@ -369,7 +369,7 @@ function AnnouncementsPage() {
                   <label htmlFor="notice-content" className="text-[11px] font-black uppercase tracking-[0.12em] text-muted-foreground ml-1">Message</label>
                   <Textarea
                     id="notice-content"
-                    className="min-h-[140px] text-[13px] rounded-xl bg-muted/30 border-border/40 focus:bg-white transition-all shadow-sm resize-y p-4 leading-relaxed"
+                    className="min-h-[140px] text-[13px] rounded-xl bg-muted/30 border-border/40 focus:bg-card transition-all shadow-sm resize-y p-4 leading-relaxed"
                     value={form.content}
                     maxLength={ANNOUNCEMENT_CONTENT_MAX}
                     onChange={(e) => setForm({ ...form, content: e.target.value })}

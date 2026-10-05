@@ -294,13 +294,13 @@ function FestivalsPage() {
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            className="flex flex-col md:flex-row items-center justify-between gap-4 p-2 bg-white/50 backdrop-blur-md rounded-2xl border border-border/40 shadow-sm"
+            className="flex flex-col md:flex-row items-center justify-between gap-4 p-2 bg-card/50 backdrop-blur-md rounded-2xl border border-border/40 shadow-sm"
           >
             <div className="flex items-center gap-3 w-full md:w-auto">
               <ViewToggle view={view} onViewChange={updateDefaultLayout} />
 
               <Select value={filterType} onValueChange={(v) => setFilterType(v as "all" | FestivalType)}>
-                <SelectTrigger aria-label="Filter by type" className="h-11 w-full md:w-[200px] border-border/40 bg-white/80 hover:bg-white rounded-xl text-[13px] font-medium transition-all gap-2 px-4 shadow-sm focus:ring-primary/20">
+                <SelectTrigger aria-label="Filter by type" className="h-11 w-full md:w-[200px] border-border/40 bg-card/80 hover:bg-card rounded-xl text-[13px] font-medium transition-all gap-2 px-4 shadow-sm focus:ring-primary/20">
                   <Filter className="h-4 w-4 text-primary/70" />
                   <SelectValue placeholder="All Holiday Types" />
                 </SelectTrigger>
@@ -318,7 +318,7 @@ function FestivalsPage() {
               <FormInput
                 placeholder="Search holidays..."
                 aria-label="Search holidays"
-                className="h-11 w-full pl-10 pr-4 bg-white/80 border-border/40 rounded-xl shadow-sm focus:ring-primary/20 transition-all"
+                className="h-11 w-full pl-10 pr-4 bg-card/80 border-border/40 rounded-xl shadow-sm focus:ring-primary/20 transition-all"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
@@ -392,7 +392,7 @@ function FestivalsPage() {
                         transition={{ duration: 0.4, delay: Math.min(i, 12) * 0.05 }}
                       >
                         <Card className={cn(
-                          "relative overflow-hidden p-0 border border-border/60 bg-white/70 backdrop-blur-xl rounded-[24px] shadow-sm transition-all duration-500 group hover:shadow-2xl hover:shadow-primary/5 hover:border-primary/30 h-full flex flex-col",
+                          "relative overflow-hidden p-0 border border-border/60 bg-card/70 backdrop-blur-xl rounded-[24px] shadow-sm transition-all duration-500 group hover:shadow-2xl hover:shadow-primary/5 hover:border-primary/30 h-full flex flex-col",
                           isPast && "opacity-75",
                           isToday && "border-emerald-300 ring-1 ring-emerald-200"
                         )}>
@@ -549,7 +549,7 @@ function FestivalsPage() {
 
       {/* Add/Edit Dialog */}
       <Dialog open={open} onOpenChange={(o) => { if (!saving) setOpen(o); }}>
-        <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-white/95 backdrop-blur-xl max-h-[90vh] flex flex-col">
+        <DialogContent className="max-w-2xl rounded-[28px] border-none shadow-2xl p-0 overflow-hidden bg-card/95 backdrop-blur-xl max-h-[90vh] flex flex-col">
           <div className="h-2 w-full bg-linear-to-r from-primary via-primary/50 to-primary/80 shrink-0" />
           <div className="p-5 flex-1 flex flex-col min-h-0">
             <DialogHeader className="mb-3 shrink-0">
@@ -575,7 +575,7 @@ function FestivalsPage() {
                       value={form.name}
                       maxLength={FESTIVAL_NAME_MAX}
                       onChange={(e) => setForm({ ...form, name: e.target.value })}
-                      className="h-11 rounded-xl bg-muted/30 border-border/40 focus:bg-white transition-all shadow-sm text-[13px]"
+                      className="h-11 rounded-xl bg-muted/30 border-border/40 focus:bg-card transition-all shadow-sm text-[13px]"
                     />
                   </div>
 
@@ -590,7 +590,7 @@ function FestivalsPage() {
                         { label: "Optional Holiday", value: "optional" },
                         { label: "Company Event", value: "event" },
                       ]}
-                      className="h-11 rounded-xl bg-muted/30 border-border/40 focus:bg-white transition-all shadow-sm text-[13px]"
+                      className="h-11 rounded-xl bg-muted/30 border-border/40 focus:bg-card transition-all shadow-sm text-[13px]"
                     />
                   </div>
                 </div>
@@ -617,7 +617,7 @@ function FestivalsPage() {
                         const endDate = !form.endDate || form.endDate < startDate || form.endDate === form.startDate ? startDate : form.endDate;
                         setForm({ ...form, startDate, endDate });
                       }}
-                      className="h-11 rounded-xl bg-muted/30 border-border/40 focus:bg-white transition-all shadow-sm text-[13px]"
+                      className="h-11 rounded-xl bg-muted/30 border-border/40 focus:bg-card transition-all shadow-sm text-[13px]"
                     />
                   </div>
                   <div className="space-y-1.5">
@@ -630,7 +630,7 @@ function FestivalsPage() {
                       min={form.startDate || "2000-01-01"}
                       max="2100-12-31"
                       aria-invalid={!!formDateProblem}
-                      className={cn("h-11 rounded-xl bg-muted/30 border-border/40 focus:bg-white transition-all shadow-sm text-[13px]", formDateProblem && "border-destructive")}
+                      className={cn("h-11 rounded-xl bg-muted/30 border-border/40 focus:bg-card transition-all shadow-sm text-[13px]", formDateProblem && "border-destructive")}
                     />
                   </div>
                 </div>
@@ -658,7 +658,7 @@ function FestivalsPage() {
                           <img src={preview} alt="Poster preview" className="w-full h-full object-cover" />
                         </div>
                       ) : (
-                        <div className="h-12 w-16 rounded-lg bg-white/50 border border-white flex flex-col items-center justify-center shrink-0 shadow-sm text-muted-foreground/40">
+                        <div className="h-12 w-16 rounded-lg bg-card/50 border border-white flex flex-col items-center justify-center shrink-0 shadow-sm text-muted-foreground/40">
                           <Gift className="h-4 w-4" />
                         </div>
                       )}
@@ -676,7 +676,7 @@ function FestivalsPage() {
                         <div className="flex flex-wrap gap-2">
                           <label
                             htmlFor="poster-upload"
-                            className="inline-flex h-10 items-center cursor-pointer px-3 rounded-lg bg-white border border-border/40 text-[12px] font-bold text-primary hover:bg-primary hover:text-white transition-all shadow-sm"
+                            className="inline-flex h-10 items-center cursor-pointer px-3 rounded-lg bg-card border border-border/40 text-[12px] font-bold text-primary hover:bg-primary hover:text-white transition-all shadow-sm"
                           >
                             {preview ? "Change" : "Upload"}
                           </label>
@@ -684,7 +684,7 @@ function FestivalsPage() {
                             <button
                               type="button"
                               onClick={() => { setPreview(null); setPoster(null); }}
-                              className="inline-flex h-10 items-center gap-1 px-3 rounded-lg bg-white border border-border/40 text-[12px] font-bold text-destructive hover:bg-destructive/5 transition-all shadow-sm"
+                              className="inline-flex h-10 items-center gap-1 px-3 rounded-lg bg-card border border-border/40 text-[12px] font-bold text-destructive hover:bg-destructive/5 transition-all shadow-sm"
                             >
                               <Trash2 className="h-3.5 w-3.5" /> Remove
                             </button>
@@ -703,7 +703,7 @@ function FestivalsPage() {
                       value={form.description}
                       maxLength={FESTIVAL_DESCRIPTION_MAX}
                       onChange={(e) => setForm({ ...form, description: e.target.value })}
-                      className="min-h-[64px] rounded-xl bg-muted/30 border-border/40 focus:bg-white transition-all shadow-sm text-[13px] resize-none"
+                      className="min-h-[64px] rounded-xl bg-muted/30 border-border/40 focus:bg-card transition-all shadow-sm text-[13px] resize-none"
                     />
                     <p className="text-right text-[11px] text-muted-foreground">{form.description.length}/{FESTIVAL_DESCRIPTION_MAX}</p>
                   </div>
@@ -738,7 +738,7 @@ function FestivalsPage() {
 
       {/* Delete Dialog */}
       <AlertDialog open={!!deleting} onOpenChange={(o) => { if (!o && !isDeleting) setDeleting(null); }}>
-        <AlertDialogContent className="rounded-[28px] border-none shadow-2xl p-6 sm:p-8 bg-white/95 backdrop-blur-xl">
+        <AlertDialogContent className="rounded-[28px] border-none shadow-2xl p-6 sm:p-8 bg-card/95 backdrop-blur-xl">
           <AlertDialogHeader>
             <div className="h-16 w-16 rounded-[20px] bg-destructive/10 text-destructive flex items-center justify-center mb-4 shadow-inner mx-auto">
               <Trash2 className="h-8 w-8" />

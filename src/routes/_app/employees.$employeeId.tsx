@@ -979,7 +979,7 @@ function EmployeeDetailsPage() {
                         <UserCheck className="h-4 w-4 text-primary" />
                         <h4 className="font-semibold text-primary uppercase tracking-wider text-[10px]">Step 1: Punch In (Login)</h4>
                       </div>
-                      <div className="bg-white p-4 rounded-2xl shadow-sm border border-border/40">
+                      <div className="bg-card p-4 rounded-2xl shadow-sm border border-border/40">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
                             <Clock className="h-4 w-4 text-muted-foreground" />
@@ -994,7 +994,7 @@ function EmployeeDetailsPage() {
                       </div>
                     </div>
                     <div className="flex flex-col items-center gap-2">
-                      <div className="w-32 h-32 rounded-xl overflow-hidden shadow-md border border-border/50 bg-white flex items-center justify-center transition-transform hover:scale-105">
+                      <div className="w-32 h-32 rounded-xl overflow-hidden shadow-md border border-border/50 bg-card flex items-center justify-center transition-transform hover:scale-105">
                         {selectedLog.punchInPhoto ? (
                           <img src={selectedLog.punchInPhoto} alt="Login Selfie" className="w-full h-full object-cover" />
                         ) : (
@@ -1019,7 +1019,7 @@ function EmployeeDetailsPage() {
                       transition={{ duration: 0.25 }}
                       className="overflow-hidden"
                     >
-                      <div className="bg-white p-4 rounded-2xl shadow-sm border border-border/40">
+                      <div className="bg-card p-4 rounded-2xl shadow-sm border border-border/40">
                         <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-2">
                           All Sessions Today ({selectedLog.shifts?.length ?? 0})
                         </span>
@@ -1056,7 +1056,7 @@ function EmployeeDetailsPage() {
                         <Utensils className="h-4 w-4 text-amber-500" />
                         <h4 className="font-semibold text-amber-600 uppercase tracking-wider text-[10px]">Step 2: Lunch Break In</h4>
                       </div>
-                      <div className="bg-white p-4 rounded-2xl shadow-sm border border-border/40 border-l-4 border-l-amber-500">
+                      <div className="bg-card p-4 rounded-2xl shadow-sm border border-border/40 border-l-4 border-l-amber-500">
                         <div className="flex items-center gap-2 mb-2">
                           <Clock className="h-4 w-4 text-muted-foreground" />
                           <span className="text-lg font-semibold">{new Date(selectedLog.lunchInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
@@ -1079,7 +1079,7 @@ function EmployeeDetailsPage() {
                         <Utensils className="h-4 w-4 text-amber-400" />
                         <h4 className="font-semibold text-amber-500 uppercase tracking-wider text-[10px]">Step 3: Lunch Break Out</h4>
                       </div>
-                      <div className="bg-white p-4 rounded-2xl shadow-sm border border-border/40 border-l-4 border-l-amber-400">
+                      <div className="bg-card p-4 rounded-2xl shadow-sm border border-border/40 border-l-4 border-l-amber-400">
                         <div className="flex items-center gap-2 mb-2">
                           <Clock className="h-4 w-4 text-muted-foreground" />
                           <span className="text-lg font-semibold">{new Date(selectedLog.lunchOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
@@ -1102,7 +1102,7 @@ function EmployeeDetailsPage() {
                         <UserMinus className="h-4 w-4 text-slate-500" />
                         <h4 className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">Step 4: Punch Out (Logout)</h4>
                       </div>
-                      <div className="bg-white p-4 rounded-2xl shadow-sm border border-border/40">
+                      <div className="bg-card p-4 rounded-2xl shadow-sm border border-border/40">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
                             <Clock className="h-4 w-4 text-muted-foreground" />
@@ -1117,7 +1117,7 @@ function EmployeeDetailsPage() {
                       </div>
                     </div>
                     <div className="flex flex-col items-center gap-2">
-                      <div className="w-32 h-32 rounded-xl overflow-hidden shadow-md border border-border/50 bg-white flex items-center justify-center transition-transform hover:scale-105">
+                      <div className="w-32 h-32 rounded-xl overflow-hidden shadow-md border border-border/50 bg-card flex items-center justify-center transition-transform hover:scale-105">
                         {selectedLog.punchOutPhoto && getDisplayPunchOut(selectedLog) ? (
                           <img src={selectedLog.punchOutPhoto} alt="Logout Selfie" className="w-full h-full object-cover" />
                         ) : (
@@ -1133,7 +1133,7 @@ function EmployeeDetailsPage() {
                 </div>
               </div>
 
-              <div className="mt-auto shrink-0 bg-white p-6 border-t border-border/40 flex justify-end">
+              <div className="mt-auto shrink-0 bg-card p-6 border-t border-border/40 flex justify-end">
                 <ActionButton
                   variant="view"
                   showLabel

@@ -1,10 +1,11 @@
-import { Bell, Menu, Moon, Search, Sun } from "lucide-react";
+import { Menu, Moon, Search, Sun } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/hooks/use-auth";
+import { NotificationBell } from "@/components/layout/notification-bell";
 
 export function AppHeader({ onMenuClick }: { onMenuClick: () => void }) {
   const { session } = useAuth();
@@ -36,7 +37,7 @@ export function AppHeader({ onMenuClick }: { onMenuClick: () => void }) {
   const initials = (session?.name ?? "Admin").split(" ").map((s) => s[0]).slice(0, 2).join("");
 
   return (
-    <header className="sticky top-0 z-30 bg-white/90 dark:bg-card/90 backdrop-blur-md border-b border-border/50 shadow-sm">
+    <header className="sticky top-0 z-30 bg-card/90 backdrop-blur-md border-b border-border/50 shadow-sm">
       <div className="flex h-14 items-center gap-3 px-4 sm:px-6">
         <button
           onClick={onMenuClick}
@@ -71,10 +72,8 @@ export function AppHeader({ onMenuClick }: { onMenuClick: () => void }) {
             {dark ? <Sun className="h-[17px] w-[17px]" /> : <Moon className="h-[17px] w-[17px]" />}
           </button>
 
-          <button className="relative rounded-lg p-1.5 hover:bg-muted text-muted-foreground transition-all hover:scale-105" aria-label="Notifications">
-            <Bell className="h-[17px] w-[17px]" />
-            <span className="absolute top-1 right-1 h-1.5 w-1.5 rounded-full bg-primary ring-1 ring-white" />
-          </button>
+          {/* Was a static button whose "unread" dot was always lit. */}
+          <NotificationBell href="/announcements" />
 
           <div className="flex items-center gap-2.5 pl-3 ml-1 border-l border-border/60">
             <div className="hidden sm:block leading-tight text-right">

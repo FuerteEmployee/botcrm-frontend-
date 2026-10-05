@@ -34,7 +34,7 @@ export function ViewToggle({ view, onViewChange, options }: ViewToggleProps) {
             className={cn(
               "h-8 w-8 p-0 rounded-lg transition-all",
               isActive 
-                ? "bg-white text-primary shadow-sm border border-border/10" 
+                ? "bg-card text-primary shadow-sm border border-border/10" 
                 : "text-muted-foreground hover:text-foreground hover:bg-transparent"
             )}
             onClick={() => onViewChange(option.value)}

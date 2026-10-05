@@ -514,8 +514,8 @@ function SettingsPage() {
                 className={cn(
                   "relative flex items-center gap-2.5 px-5 py-2.5 rounded-xl text-[13px] font-bold transition-all duration-300 whitespace-nowrap",
                   isActive 
-                    ? "bg-white text-primary shadow-sm ring-1 ring-border/20" 
-                    : "text-muted-foreground hover:bg-white/50 hover:text-foreground"
+                    ? "bg-card text-primary shadow-sm ring-1 ring-border/20" 
+                    : "text-muted-foreground hover:bg-card/50 hover:text-foreground"
                 )}
               >
                 <Icon className={cn("h-4 w-4 transition-transform duration-300", isActive && "scale-110")} />
@@ -523,7 +523,7 @@ function SettingsPage() {
                 {isActive && (
                   <motion.div 
                     layoutId="active-settings-tab"
-                    className="absolute inset-0 bg-white rounded-xl -z-10 shadow-sm"
+                    className="absolute inset-0 bg-card rounded-xl -z-10 shadow-sm"
                     transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
                   />
                 )}
@@ -543,7 +543,7 @@ function SettingsPage() {
         >
           {activeTab === "attendance" && (
             <div className="space-y-6">
-              <Card className="p-5 sm:p-8 border border-border/60 bg-white rounded-2xl shadow-sm">
+              <Card className="p-5 sm:p-8 border border-border/60 bg-card rounded-2xl shadow-sm">
                 <form
                   onSubmit={async (e) => {
                     e.preventDefault();
@@ -907,7 +907,7 @@ function SettingsPage() {
 
           {activeTab === "payroll" && (
             <div className="space-y-6">
-              <Card className="p-5 sm:p-8 border border-border/60 bg-white rounded-2xl shadow-sm">
+              <Card className="p-5 sm:p-8 border border-border/60 bg-card rounded-2xl shadow-sm">
                 <form
                   onSubmit={async (e) => {
                     e.preventDefault();
@@ -1051,7 +1051,7 @@ function SettingsPage() {
 
           {activeTab === "salary_templates" && (
             <div className="space-y-6">
-              <Card className="p-8 border border-border/60 bg-white rounded-2xl shadow-sm">
+              <Card className="p-8 border border-border/60 bg-card rounded-2xl shadow-sm">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8 pb-6 border-b border-border/40">
                   <div>
                     <h3 className="text-lg font-black text-foreground">Pay Templates</h3>
@@ -1083,7 +1083,7 @@ function SettingsPage() {
                       <div className="flex gap-3">
                         <Input 
                           placeholder="Template Name (e.g. Senior Developer)" 
-                          className="h-11 bg-white rounded-xl"
+                          className="h-11 bg-card rounded-xl"
                           value={newTemplateName}
                           maxLength={60}
                           onChange={(e) => setNewTemplateName(e.target.value)}
@@ -1106,7 +1106,7 @@ function SettingsPage() {
                               "p-5 border rounded-2xl transition-all duration-300 relative",
                               isEditing 
                                 ? "col-span-full border-primary bg-primary/5 shadow-elegant ring-1 ring-primary/20" 
-                                : "border-border/60 bg-muted/10 hover:bg-white hover:border-primary/30 hover:shadow-md cursor-pointer group"
+                                : "border-border/60 bg-muted/10 hover:bg-card hover:border-primary/30 hover:shadow-md cursor-pointer group"
                             )}
                             onClick={() => !isEditing && canEdit && editingIdx === null && startEditTemplate(idx)}
                           >
@@ -1114,7 +1114,7 @@ function SettingsPage() {
                               <div className="flex items-center gap-3">
                                 <div className={cn(
                                   "h-10 w-10 rounded-xl grid place-items-center shadow-sm border",
-                                  isEditing ? "bg-primary text-white border-primary" : cn("bg-white border-border/60", getTemplateColor(template.name).split(' ')[1])
+                                  isEditing ? "bg-primary text-white border-primary" : cn("bg-card border-border/60", getTemplateColor(template.name).split(' ')[1])
                                 )}>
                                   <div className={cn("absolute h-10 w-10 rounded-xl opacity-10", isEditing ? "bg-white" : getTemplateColor(template.name).split(' ')[0])} />
                                   <Receipt className="h-5 w-5 relative z-10" />
@@ -1151,7 +1151,7 @@ function SettingsPage() {
                                       key={key}
                                       className={cn(
                                         "flex items-center justify-between p-3 rounded-xl border transition-all",
-                                        value?.enabled ? "bg-white border-primary/30 shadow-sm" : "bg-muted/5 border-transparent opacity-60"
+                                        value?.enabled ? "bg-card border-primary/30 shadow-sm" : "bg-muted/5 border-transparent opacity-60"
                                       )}
                                     >
                                       <div className="flex items-center gap-2.5">
@@ -1247,7 +1247,7 @@ function SettingsPage() {
               {branchesLoading ? (
                 <SkeletonLoader type="card" count={3} />
               ) : branchList.length === 0 ? (
-                <Card className="p-10 border border-border/60 bg-white rounded-2xl shadow-sm flex flex-col items-center justify-center text-center">
+                <Card className="p-10 border border-border/60 bg-card rounded-2xl shadow-sm flex flex-col items-center justify-center text-center">
                   <div className="h-14 w-14 bg-primary/10 rounded-2xl flex items-center justify-center mb-4 text-primary">
                     <GitBranch className="h-7 w-7" />
                   </div>
@@ -1260,7 +1260,7 @@ function SettingsPage() {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {branchList.map((b) => (
-                    <Card key={b._id} className="p-4 border border-border/60 bg-white rounded-2xl shadow-sm hover:shadow-md transition-shadow">
+                    <Card key={b._id} className="p-4 border border-border/60 bg-card rounded-2xl shadow-sm hover:shadow-md transition-shadow">
                       <div className="flex items-start gap-3">
                         <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary grid place-items-center shrink-0">
                           <MapPin className="h-5 w-5" />
@@ -1295,7 +1295,7 @@ function SettingsPage() {
           {activeTab === "general" && (
             <div className="space-y-6">
               {/* Profile Overview Card */}
-              <Card className="p-0 border border-border/60 bg-white rounded-2xl shadow-sm overflow-hidden">
+              <Card className="p-0 border border-border/60 bg-card rounded-2xl shadow-sm overflow-hidden">
                 <div className="p-5 sm:p-8 bg-linear-to-br from-primary/5 via-transparent to-transparent border-b border-border/40">
                   <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
                     <div className="relative group">
@@ -1318,7 +1318,7 @@ function SettingsPage() {
                           type="button"
                           aria-label="Choose a new logo"
                           onClick={() => document.getElementById("logo-upload")?.click()}
-                          className="absolute -bottom-2 -right-2 h-10 w-10 rounded-xl bg-white text-primary shadow-xl border border-border/60 grid place-items-center hover:scale-110 active:scale-95 transition-all"
+                          className="absolute -bottom-2 -right-2 h-10 w-10 rounded-xl bg-card text-primary shadow-xl border border-border/60 grid place-items-center hover:scale-110 active:scale-95 transition-all"
                         >
                           <Camera className="h-4 w-4" />
                         </button>
@@ -1473,7 +1473,7 @@ function SettingsPage() {
           {activeTab === "preferences" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Notifications Card */}
-              <Card className="p-5 sm:p-7 border border-border/60 bg-white rounded-2xl shadow-sm">
+              <Card className="p-5 sm:p-7 border border-border/60 bg-card rounded-2xl shadow-sm">
                 <SectionHeader icon={Bell} label="Email and push alerts" description="Not available yet." />
                 <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">
                   No email, SMS or push service is connected yet, so the app does not send any alerts. These switches will be turned on once alerts are available.
@@ -1503,7 +1503,7 @@ function SettingsPage() {
               </Card>
 
               {/* Appearance Card */}
-              <Card className="p-5 sm:p-7 border border-border/60 bg-white rounded-2xl shadow-sm">
+              <Card className="p-5 sm:p-7 border border-border/60 bg-card rounded-2xl shadow-sm">
                 <SectionHeader icon={Palette} label="Default view" description="How lists such as Employees and Branches open: as a list or as cards." />
                 <div className="mt-8 space-y-6">
                   <div>
@@ -1544,7 +1544,7 @@ function SettingsPage() {
                         >
                           <div className={cn(
                             "h-12 w-12 rounded-xl grid place-items-center mb-3 transition-all duration-500",
-                            defaultLayout === v.id ? "bg-primary text-white scale-110 shadow-lg" : "bg-white group-hover:bg-primary/10 shadow-sm"
+                            defaultLayout === v.id ? "bg-primary text-white scale-110 shadow-lg" : "bg-card group-hover:bg-primary/10 shadow-sm"
                           )}>
                             <v.icon className="h-6 w-6" />
                           </div>
@@ -1561,7 +1561,7 @@ function SettingsPage() {
 
           {activeTab === "security" && (
             <div className="space-y-6">
-              <Card className="p-8 border border-border/60 bg-white rounded-2xl shadow-sm">
+              <Card className="p-8 border border-border/60 bg-card rounded-2xl shadow-sm">
                 <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
                   <div className="flex items-center gap-5">
                     <div className="h-16 w-16 rounded-2xl bg-success/10 text-success grid place-items-center shadow-inner ring-1 ring-success/20">
@@ -1593,7 +1593,7 @@ function SettingsPage() {
               {/* What employees may change about themselves in the app. Here
                   rather than under Org because it is about who can redirect
                   a salary: the bank account on file is where pay goes. */}
-              <Card className="p-6 sm:p-8 border border-border/60 bg-white rounded-2xl shadow-sm">
+              <Card className="p-6 sm:p-8 border border-border/60 bg-card rounded-2xl shadow-sm">
                 <SectionHeader icon={User} label="Employee App" description="What employees can change about themselves." />
                 <label
                   htmlFor="allow-sensitive-edits"
@@ -1622,7 +1622,7 @@ function SettingsPage() {
               <button
                 type="button"
                 onClick={() => setAccessLogsOpen(true)}
-                className="w-full text-left p-6 border border-border/60 bg-white hover:border-primary/30 hover:shadow-elegant rounded-2xl transition-all cursor-pointer group"
+                className="w-full text-left p-6 border border-border/60 bg-card hover:border-primary/30 hover:shadow-elegant rounded-2xl transition-all cursor-pointer group"
               >
                 <div className="flex items-center gap-3 mb-2">
                   <Lock className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
@@ -1680,7 +1680,7 @@ function SettingsPage() {
       />
 
       <Dialog open={accessLogsOpen} onOpenChange={setAccessLogsOpen}>
-        <DialogContent className="rounded-3xl p-4 sm:p-6 md:p-8 border border-border/40 shadow-elegant max-w-2xl bg-white focus:outline-hidden max-h-[90vh] flex flex-col">
+        <DialogContent className="rounded-3xl p-4 sm:p-6 md:p-8 border border-border/40 shadow-elegant max-w-2xl bg-card focus:outline-hidden max-h-[90vh] flex flex-col">
           <DialogHeader className="space-y-1 mb-4 shrink-0">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary grid place-items-center">
@@ -1724,7 +1724,7 @@ function SettingsPage() {
                   className={cn(
                     "h-10 min-w-10 px-3 rounded-lg text-[12px] font-bold transition-all cursor-pointer",
                     logsFilter === filter
-                      ? "bg-white text-primary shadow-sm"
+                      ? "bg-card text-primary shadow-sm"
                       : "text-muted-foreground hover:text-foreground"
                   )}
                 >
@@ -1786,7 +1786,7 @@ function SettingsPage() {
                     <div className="flex items-start sm:items-end flex-col justify-between sm:text-right shrink-0 gap-1">
                       {log.ipAddress ? (
                         <div className="flex items-center gap-1.5">
-                          <code className="text-[11px] font-bold text-foreground/80 bg-white border border-border/50 px-2 py-0.5 rounded-lg select-all">
+                          <code className="text-[11px] font-bold text-foreground/80 bg-card border border-border/50 px-2 py-0.5 rounded-lg select-all">
                             {log.ipAddress}
                           </code>
                           <CopyButton text={log.ipAddress} />
@@ -1879,7 +1879,7 @@ function CopyButton({ text }: { text: string }) {
     <button 
       onClick={handleCopy}
       type="button"
-      className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-border/50 hover:bg-muted bg-white transition-all text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+      className="h-10 w-10 inline-flex items-center justify-center rounded-lg border border-border/50 hover:bg-muted bg-card transition-all text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
       title="Copy IP address"
       aria-label="Copy IP address"
     >

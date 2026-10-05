@@ -230,7 +230,11 @@
   --success-foreground: oklch(0.14 0.03 155);
 
   --warning: oklch(0.8 0.16 75);
-  --warning-foreground: oklch(0.2 0.05 75);
+  /* Light, not dark: every use of text-warning-foreground sits on a faint
+     bg-warning/5..15 tint over the dark page (the Employees shift filter and
+     badges, attendance and leave pills), never on solid amber, so a dark
+     brown here was unreadable. */
+  --warning-foreground: oklch(0.86 0.13 80);
 
   --info: oklch(0.7 0.18 240);
   --info-foreground: oklch(0.14 0.03 240);

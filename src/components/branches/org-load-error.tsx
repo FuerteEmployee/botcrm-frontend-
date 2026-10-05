@@ -29,7 +29,7 @@ export function OrgLoadError({
     return (
       <div
         role="status"
-        className="rounded-2xl border border-border/60 bg-white p-8 text-center shadow-sm"
+        className="rounded-2xl border border-border/60 bg-card p-8 text-center shadow-sm"
       >
         <Ban className="mx-auto mb-3 h-10 w-10 text-muted-foreground/40" />
         <p className="text-[15px] font-bold text-foreground">

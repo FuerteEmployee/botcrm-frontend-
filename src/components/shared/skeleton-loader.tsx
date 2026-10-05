@@ -15,7 +15,7 @@ export function SkeletonLoader({ type, count = 3, className }: SkeletonLoaderPro
           <Skeleton className="h-9 w-[250px] rounded-xl" />
           <Skeleton className="h-9 w-[120px] rounded-xl" />
         </div>
-        <div className="border border-border/40 rounded-xl overflow-hidden bg-white/50">
+        <div className="border border-border/40 rounded-xl overflow-hidden bg-card/50">
           <div className="bg-muted/30 p-4 border-b border-border/40 flex gap-4">
             {[1, 2, 3, 4, 5].map((i) => (
               <Skeleton key={i} className="h-4 flex-1" />
@@ -42,7 +42,7 @@ export function SkeletonLoader({ type, count = 3, className }: SkeletonLoaderPro
     return (
       <div className={cn("grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4", className)}>
         {Array.from({ length: count }).map((_, i) => (
-          <div key={i} className="p-5 border border-border/50 rounded-2xl bg-white space-y-4">
+          <div key={i} className="p-5 border border-border/50 rounded-2xl bg-card space-y-4">
             <div className="flex items-center justify-between">
               <Skeleton className="h-10 w-10 rounded-xl" />
               <Skeleton className="h-6 w-16 rounded-full" />
@@ -65,7 +65,7 @@ export function SkeletonLoader({ type, count = 3, className }: SkeletonLoaderPro
     return (
       <div className={cn("grid grid-cols-2 lg:grid-cols-4 gap-4", className)}>
         {Array.from({ length: count }).map((_, i) => (
-          <div key={i} className="p-4 border border-border/40 rounded-xl bg-white space-y-3">
+          <div key={i} className="p-4 border border-border/40 rounded-xl bg-card space-y-3">
             <div className="flex items-center justify-between">
               <Skeleton className="h-8 w-8 rounded-lg" />
               <Skeleton className="h-4 w-12 rounded-full" />

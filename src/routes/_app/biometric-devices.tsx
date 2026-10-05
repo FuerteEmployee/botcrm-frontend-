@@ -283,7 +283,7 @@ function BiometricDevicesPage() {
           { label: "Employees with an ID", value: `${data?.mapped ?? 0}/${employees.length}`, icon: Users },
           { label: "Unmatched punches", value: totalUnmatched, icon: AlertTriangle },
         ].map((s) => (
-          <Card key={s.label} className="border-none shadow-sm bg-white">
+          <Card key={s.label} className="border-none shadow-sm bg-card">
             <div className="p-4">
               <div className="flex items-center gap-2 mb-1">
                 <s.icon className="h-3.5 w-3.5 text-muted-foreground" />
@@ -298,7 +298,7 @@ function BiometricDevicesPage() {
       </div>
 
       {/* ── MACHINES ── */}
-      <Card className="border-none shadow-sm bg-white rounded-2xl overflow-hidden">
+      <Card className="border-none shadow-sm bg-card rounded-2xl overflow-hidden">
         <CardHeader className="border-b border-border/40 px-6 py-4">
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -348,7 +348,7 @@ function BiometricDevicesPage() {
       </Card>
 
       {/* ── PUNCH RULES ── */}
-      <Card className="border-none shadow-sm bg-white rounded-2xl overflow-hidden">
+      <Card className="border-none shadow-sm bg-card rounded-2xl overflow-hidden">
         <CardHeader className="border-b border-border/40 px-6 py-4 flex flex-row items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -378,7 +378,7 @@ function BiometricDevicesPage() {
       </Card>
 
       {/* ── PIN MAPPING ── */}
-      <Card className="border-none shadow-sm bg-white rounded-2xl overflow-hidden">
+      <Card className="border-none shadow-sm bg-card rounded-2xl overflow-hidden">
         <CardHeader className="border-b border-border/40 px-6 py-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="flex items-center gap-3">

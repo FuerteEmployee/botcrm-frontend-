@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
 import { requestErrorMessage } from "@/services/request-error";
@@ -22,6 +22,21 @@ const EMPLOYEE_DEPENDENT_QUERIES = [
   "salaries", "dashboard-summary", "tracking-stats", "my-subscription", "client-devices",
   "leaves", "tickets", "user-tickets", "advance-salary-requests", "expenses", "coworkers",
 ];
+
+export function refreshEmployeeViews(queryClient: QueryClient) {
+  for (const key of EMPLOYEE_DEPENDENT_QUERIES) queryClient.invalidateQueries({ queryKey: [key] });
+}
+
+/**
+ * POST one employee with no toast and no cache refresh, for callers that save
+ * many in a row (the Excel import) and report the outcome themselves. Runs the
+ * same server checks as the Add Employee form: phone, biometric ID, the
+ * company's own branch/department/shift, and the plan's seat limit.
+ */
+export async function postEmployee(payload: Record<string, unknown>) {
+  const { data } = await apiClient.post("/users/employees", payload);
+  return data as Employee;
+}
 
 // Fetch everyone unless a caller asks for a page. The API returns the whole
 // roster and pages client-side below, so the old default of 10 only hid
@@ -194,17 +209,13 @@ export function useEmployeeService(params: EmployeeParams = {}) {
     staleTime: 5000,
   });
 
-  const refreshEmployeeViews = () => {
-    for (const key of EMPLOYEE_DEPENDENT_QUERIES) queryClient.invalidateQueries({ queryKey: [key] });
-  };
-
   const createMutation = useMutation({
     mutationFn: async (formData: FormData | Partial<Employee>) => {
       const { data } = await apiClient.post("/users/employees", formData);
       return data;
     },
     onSuccess: () => {
-      refreshEmployeeViews();
+      refreshEmployeeViews(queryClient);
       toast.success("Employee created successfully");
     },
     onError: (error) => toastError(error, "Could not create the employee. Please try again."),
@@ -216,7 +227,7 @@ export function useEmployeeService(params: EmployeeParams = {}) {
       return response;
     },
     onSuccess: () => {
-      refreshEmployeeViews();
+      refreshEmployeeViews(queryClient);
       toast.success("Employee updated successfully");
     },
     onError: (error) => toastError(error, "Could not save the changes. Please try again."),
@@ -228,7 +239,7 @@ export function useEmployeeService(params: EmployeeParams = {}) {
       return data;
     },
     onSuccess: () => {
-      refreshEmployeeViews();
+      refreshEmployeeViews(queryClient);
       toast.success("Employee deleted successfully");
     },
     // There was no handler at all, so a refused or failed delete closed

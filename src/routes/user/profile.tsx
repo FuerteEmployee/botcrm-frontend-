@@ -375,12 +375,12 @@ function UserProfilePage() {
           <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-[24px] overflow-hidden">
             <CardContent className="p-6 space-y-5">
               <h4 className={sectionCls}>
-                <ShieldAlert className="h-4 w-4 text-[#501537]" /> Contact Details
+                <ShieldAlert className="h-4 w-4 text-[#501537] dark:text-primary" /> Contact Details
               </h4>
 
               <div className="space-y-4 pt-1">
                 <div className="flex items-center gap-3.5">
-                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] flex items-center justify-center shrink-0">
+                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] dark:text-primary flex items-center justify-center shrink-0">
                     <Mail className="h-4 w-4" />
                   </div>
                   <div className="min-w-0">
@@ -390,7 +390,7 @@ function UserProfilePage() {
                 </div>
 
                 <div className="flex items-center gap-3.5">
-                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] flex items-center justify-center shrink-0">
+                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] dark:text-primary flex items-center justify-center shrink-0">
                     <Phone className="h-4 w-4" />
                   </div>
                   <div>
@@ -400,7 +400,7 @@ function UserProfilePage() {
                 </div>
 
                 <div className="flex items-center gap-3.5">
-                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] flex items-center justify-center shrink-0">
+                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] dark:text-primary flex items-center justify-center shrink-0">
                     <MapPin className="h-4 w-4" />
                   </div>
                   <div className="min-w-0">
@@ -415,7 +415,7 @@ function UserProfilePage() {
           <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-[28px] overflow-hidden">
             <CardContent className="p-6 space-y-5">
               <h4 className={sectionCls}>
-                <Settings className="h-4 w-4 text-[#501537]" /> Work Details
+                <Settings className="h-4 w-4 text-[#501537] dark:text-primary" /> Work Details
               </h4>
 
               <div className="grid grid-cols-2 gap-5 pt-1">
@@ -453,7 +453,7 @@ function UserProfilePage() {
           <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-[28px] overflow-hidden">
             <CardContent className="p-6 space-y-5">
               <h4 className={sectionCls}>
-                <Landmark className="h-4 w-4 text-[#501537]" /> Salary Bank Account
+                <Landmark className="h-4 w-4 text-[#501537] dark:text-primary" /> Salary Bank Account
               </h4>
 
               {profile.bankDetails?.accountNumber ? (
@@ -523,12 +523,12 @@ function UserProfilePage() {
           <Card className="border-0 shadow-xs bg-white dark:bg-slate-900 rounded-[28px] overflow-hidden">
             <CardContent className="p-6 space-y-5">
               <h4 className={sectionCls}>
-                <IdCard className="h-4 w-4 text-[#501537]" /> ID &amp; Other Details
+                <IdCard className="h-4 w-4 text-[#501537] dark:text-primary" /> ID &amp; Other Details
               </h4>
 
               <div className="space-y-4 pt-1">
                 <div className="flex items-center gap-3.5">
-                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] flex items-center justify-center shrink-0">
+                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] dark:text-primary flex items-center justify-center shrink-0">
                     <IdCard className="h-4 w-4" />
                   </div>
                   <div>
@@ -538,7 +538,7 @@ function UserProfilePage() {
                 </div>
 
                 <div className="flex items-center gap-3.5">
-                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] flex items-center justify-center shrink-0">
+                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] dark:text-primary flex items-center justify-center shrink-0">
                     <IdCard className="h-4 w-4" />
                   </div>
                   <div>
@@ -548,7 +548,7 @@ function UserProfilePage() {
                 </div>
 
                 <div className="flex items-center gap-3.5">
-                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] flex items-center justify-center shrink-0">
+                  <div className="h-8 w-8 rounded-lg bg-[#501537]/5 text-[#501537] dark:text-primary flex items-center justify-center shrink-0">
                     <HeartPulse className="h-4 w-4" />
                   </div>
                   <div>

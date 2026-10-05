@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { Plus, Pencil, Trash2, FolderOpen, Search } from "lucide-react";
+import { Plus, FolderOpen, Search } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader }     from "@/components/shared/page-header";
 import { ActionButton }   from "@/components/shared/action-button";
@@ -49,7 +49,7 @@ function ProjectPage() {
   const canDelete = can("projects", "delete");
 
   if (!hasMounted) return null;
-  if (isLoading)   return <SkeletonLoader />;
+  if (isLoading)   return <SkeletonLoader type="table" />;
 
   const filtered = (items as any[]).filter((r) =>
     (r.name ?? r.title ?? "").toLowerCase().includes(search.toLowerCase())
@@ -85,7 +85,7 @@ function ProjectPage() {
       <PageHeader
         title="Projects"
         description="Manage all projects records"
-        action={canCreate && (
+        actions={canCreate && (
           <Button onClick={openCreate} size="sm">
             <Plus className="h-4 w-4 mr-2" />Add New
           </Button>
@@ -103,13 +103,13 @@ function ProjectPage() {
             className="w-full pl-10 pr-4 h-9 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/20"
           />
         </div>
-        <ViewToggle view={view} onChange={setView} />
+        <ViewToggle view={view} onViewChange={setView} />
       </div>
 
       {/* ── Content ── */}
       <AnimatePresence mode="wait">
         {view === "list" ? (
-          <DataTable columns={["Project Name", "Client", "Deadline", "Status", "Actions"]}>
+          <DataTable headers={["Project Name", "Client", "Deadline", "Status", "Actions"]}>
             {filtered.map((item: any) => (
               <DataTableRow key={item._id}>
                 <DataTableCell>{(item as any).name}</DataTableCell>
@@ -118,8 +118,8 @@ function ProjectPage() {
                 <DataTableCell>{(item as any).status}</DataTableCell>
                 <DataTableCell>
                   <div className="flex gap-2">
-                    {canEdit   && <ActionButton icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => openEdit(item)} label="Edit" />}
-                    {canDelete && <ActionButton icon={<Trash2  className="h-3.5 w-3.5" />} onClick={() => setDeleteId(item._id)} label="Delete" variant="destructive" />}
+                    {canEdit   && <ActionButton variant="edit" tooltip="Edit" onClick={() => openEdit(item)} />}
+                    {canDelete && <ActionButton variant="delete" tooltip="Delete" onClick={() => setDeleteId(item._id)} />}
                   </div>
                 </DataTableCell>
               </DataTableRow>
@@ -134,21 +134,13 @@ function ProjectPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.04 }}
               >
-                <GridCard>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-sm truncate">
-                        {item.name ?? item.title ?? item._id}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{(item as any).client}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{(item as any).deadline}</p>
-                    </div>
-                    <div className="flex gap-1 shrink-0">
-                      {canEdit   && <ActionButton icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => openEdit(item)} label="Edit" />}
-                      {canDelete && <ActionButton icon={<Trash2  className="h-3.5 w-3.5" />} onClick={() => setDeleteId(item._id)} label="Delete" variant="destructive" />}
-                    </div>
-                  </div>
-                </GridCard>
+                <GridCard
+                  title={String(item.name ?? item.title ?? item._id)}
+                  subtitle={[item.client, item.deadline].filter((v) => v !== undefined && v !== null && v !== "").join(" · ")}
+                  icon={<FolderOpen className="h-5 w-5 text-primary" />}
+                  onEdit={canEdit ? () => openEdit(item) : undefined}
+                  onDelete={canDelete ? () => setDeleteId(item._id) : undefined}
+                />
               </motion.div>
             ))}
           </div>
@@ -163,10 +155,10 @@ function ProjectPage() {
             <DialogDescription>Fill in the details and save.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <FormInput label="Project Name" value={(form as any).name ?? ""} onChange={(v) => setForm((p) => ({ ...p, name: v }))} />
-            <FormInput label="Client" value={(form as any).client ?? ""} onChange={(v) => setForm((p) => ({ ...p, client: v }))} />
-            <FormInput label="Deadline" value={(form as any).deadline ?? ""} onChange={(v) => setForm((p) => ({ ...p, deadline: v }))} />
-            <FormInput label="Status" value={(form as any).status ?? ""} onChange={(v) => setForm((p) => ({ ...p, status: v }))} />
+            <FormInput label="Project Name" value={form.name ?? ""} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} />
+            <FormInput label="Client" value={form.client ?? ""} onChange={(e) => setForm((p) => ({ ...p, client: e.target.value }))} />
+            <FormInput label="Deadline" type="date" value={form.deadline ?? ""} onChange={(e) => setForm((p) => ({ ...p, deadline: e.target.value }))} />
+            <FormInput label="Status" value={form.status ?? ""} onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>

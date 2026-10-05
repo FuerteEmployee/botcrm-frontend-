@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { Plus, Pencil, Trash2, Star, Search } from "lucide-react";
+import { Plus, Star, Search } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader }     from "@/components/shared/page-header";
 import { ActionButton }   from "@/components/shared/action-button";
@@ -37,7 +37,7 @@ function PerformanceReviewPage() {
 
   const [open,     setOpen]     = useState(false);
   const [editing,  setEditing]  = useState<BackendPerformanceReview | null>(null);
-  const [form,     setForm]     = useState<Partial<BackendPerformanceReview>>({ period: "", rating: "", comments: "", status: "" });
+  const [form,     setForm]     = useState<Partial<BackendPerformanceReview>>({ period: "", rating: 0, comments: "", status: "" });
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [search,   setSearch]   = useState("");
   const { defaultLayout }       = useLayoutSettings();
@@ -49,7 +49,7 @@ function PerformanceReviewPage() {
   const canDelete = can("performance", "delete");
 
   if (!hasMounted) return null;
-  if (isLoading)   return <SkeletonLoader />;
+  if (isLoading)   return <SkeletonLoader type="table" />;
 
   const filtered = (items as any[]).filter((r) =>
     (r.name ?? r.title ?? "").toLowerCase().includes(search.toLowerCase())
@@ -57,7 +57,7 @@ function PerformanceReviewPage() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ period: "", rating: "", comments: "", status: "" });
+    setForm({ period: "", rating: 0, comments: "", status: "" });
     setOpen(true);
   };
   const openEdit = (item: BackendPerformanceReview) => {
@@ -85,7 +85,7 @@ function PerformanceReviewPage() {
       <PageHeader
         title="Performance Reviews"
         description="Manage all performance reviews records"
-        action={canCreate && (
+        actions={canCreate && (
           <Button onClick={openCreate} size="sm">
             <Plus className="h-4 w-4 mr-2" />Add New
           </Button>
@@ -103,13 +103,13 @@ function PerformanceReviewPage() {
             className="w-full pl-10 pr-4 h-9 rounded-lg border bg-background text-sm outline-none focus:ring-2 focus:ring-primary/20"
           />
         </div>
-        <ViewToggle view={view} onChange={setView} />
+        <ViewToggle view={view} onViewChange={setView} />
       </div>
 
       {/* ── Content ── */}
       <AnimatePresence mode="wait">
         {view === "list" ? (
-          <DataTable columns={["Review Period", "Rating (1-5)", "Comments", "Status", "Actions"]}>
+          <DataTable headers={["Review Period", "Rating (1-5)", "Comments", "Status", "Actions"]}>
             {filtered.map((item: any) => (
               <DataTableRow key={item._id}>
                 <DataTableCell>{(item as any).period}</DataTableCell>
@@ -118,8 +118,8 @@ function PerformanceReviewPage() {
                 <DataTableCell>{(item as any).status}</DataTableCell>
                 <DataTableCell>
                   <div className="flex gap-2">
-                    {canEdit   && <ActionButton icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => openEdit(item)} label="Edit" />}
-                    {canDelete && <ActionButton icon={<Trash2  className="h-3.5 w-3.5" />} onClick={() => setDeleteId(item._id)} label="Delete" variant="destructive" />}
+                    {canEdit   && <ActionButton variant="edit" tooltip="Edit" onClick={() => openEdit(item)} />}
+                    {canDelete && <ActionButton variant="delete" tooltip="Delete" onClick={() => setDeleteId(item._id)} />}
                   </div>
                 </DataTableCell>
               </DataTableRow>
@@ -134,21 +134,13 @@ function PerformanceReviewPage() {
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: i * 0.04 }}
               >
-                <GridCard>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-semibold text-sm truncate">
-                        {item.name ?? item.title ?? item._id}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{(item as any).period}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{(item as any).rating}</p>
-                    </div>
-                    <div className="flex gap-1 shrink-0">
-                      {canEdit   && <ActionButton icon={<Pencil className="h-3.5 w-3.5" />} onClick={() => openEdit(item)} label="Edit" />}
-                      {canDelete && <ActionButton icon={<Trash2  className="h-3.5 w-3.5" />} onClick={() => setDeleteId(item._id)} label="Delete" variant="destructive" />}
-                    </div>
-                  </div>
-                </GridCard>
+                <GridCard
+                  title={String(item.name ?? item.title ?? item._id)}
+                  subtitle={[item.period, item.rating].filter((v) => v !== undefined && v !== null && v !== "").join(" · ")}
+                  icon={<Star className="h-5 w-5 text-primary" />}
+                  onEdit={canEdit ? () => openEdit(item) : undefined}
+                  onDelete={canDelete ? () => setDeleteId(item._id) : undefined}
+                />
               </motion.div>
             ))}
           </div>
@@ -163,10 +155,10 @@ function PerformanceReviewPage() {
             <DialogDescription>Fill in the details and save.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
-            <FormInput label="Review Period" value={(form as any).period ?? ""} onChange={(v) => setForm((p) => ({ ...p, period: v }))} />
-            <FormInput label="Rating (1-5)" value={(form as any).rating ?? ""} onChange={(v) => setForm((p) => ({ ...p, rating: v }))} />
-            <FormInput label="Comments" value={(form as any).comments ?? ""} onChange={(v) => setForm((p) => ({ ...p, comments: v }))} />
-            <FormInput label="Status" value={(form as any).status ?? ""} onChange={(v) => setForm((p) => ({ ...p, status: v }))} />
+            <FormInput label="Review Period" value={form.period ?? ""} onChange={(e) => setForm((p) => ({ ...p, period: e.target.value }))} />
+            <FormInput label="Rating (1-5)" type="number" min="0" value={form.rating ?? ""} onChange={(e) => setForm((p) => ({ ...p, rating: Number(e.target.value) || 0 }))} />
+            <FormInput label="Comments" value={form.comments ?? ""} onChange={(e) => setForm((p) => ({ ...p, comments: e.target.value }))} />
+            <FormInput label="Status" value={form.status ?? ""} onChange={(e) => setForm((p) => ({ ...p, status: e.target.value }))} />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>

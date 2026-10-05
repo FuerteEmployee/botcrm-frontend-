@@ -28,6 +28,39 @@ const toastError = (error: unknown, fallback: string) => {
   if (message) toast.error(message);
 };
 
+/**
+ * The notices behind the header bell, newest first. A separate cache entry
+ * from the Notice Board page (which sorts pinned first), but under the same
+ * ["announcements"] prefix, so posting or deleting a notice refreshes both.
+ *
+ * Read quietly: on a plan without the notice board this answers
+ * `unavailable` instead of raising the upgrade prompt from a page the admin
+ * did not open.
+ */
+export function useNoticeFeed(enabled = true) {
+  const { data, isLoading, error } = useQuery<Announcement[]>({
+    queryKey: ["announcements", "feed"],
+    queryFn: async () => {
+      const { data } = await apiClient.get("/announcements", { quietUpgrade: true });
+      const list: Announcement[] = Array.isArray(data) ? data : [];
+      return [...list].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    },
+    enabled,
+    retry: retryUnlessUnavailable,
+    staleTime: 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
+  });
+  const status = (error as { response?: { status?: number } } | null)?.response?.status;
+  return {
+    notices: data ?? [],
+    isLoading,
+    // 403: the plan has no notice board, or the super admin switched it off.
+    unavailable: status === 403,
+    failed: !!error && status !== 403,
+  };
+}
+
 export function useAnnouncementService() {
   const queryClient = useQueryClient();
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["announcements"] });

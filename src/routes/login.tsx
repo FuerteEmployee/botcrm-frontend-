@@ -428,7 +428,7 @@ function LoginPage() {
   };
 
   const otpInputClass = [
-    "h-12 w-10 sm:h-14 sm:w-12 rounded-xl border bg-white text-center text-xl font-extrabold text-foreground",
+    "h-12 w-10 sm:h-14 sm:w-12 rounded-xl border bg-card text-center text-xl font-extrabold text-foreground",
     "focus:ring-4 outline-none transition-all shadow-sm disabled:opacity-60",
     otpError
       ? "border-destructive focus:border-destructive focus:ring-destructive/10"
@@ -453,7 +453,7 @@ function LoginPage() {
         : "Enter your mobile number to get an OTP.";
 
   return (
-    <div className="min-h-[100dvh] w-full flex bg-white overflow-x-hidden">
+    <div className="min-h-[100dvh] w-full flex bg-card overflow-x-hidden">
       {/* ── Left Side: Brand panel (desktop only) ─────────────────────────── */}
       <div className="hidden lg:flex lg:w-1/2 relative bg-primary overflow-hidden items-center justify-center">
         <div className="absolute inset-0 z-0 flex items-center justify-center overflow-hidden">
@@ -535,7 +535,7 @@ function LoginPage() {
             <p className="text-muted-foreground font-medium text-base sm:text-lg">{subheading}</p>
           </div>
 
-          <div className="bg-white/50 backdrop-blur-sm lg:bg-transparent rounded-3xl p-0">
+          <div className="bg-card/50 backdrop-blur-sm lg:bg-transparent rounded-3xl p-0">
             <AnimatePresence mode="wait">
               {/* ── Step 0: Already signed in ─────────────────────────────── */}
               {step === "session" && existingSession && (

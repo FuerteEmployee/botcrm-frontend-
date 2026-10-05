@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge'
 import { motion } from 'framer-motion'
 import { Plus, Search, Edit, Trash2, Eye, AlertCircle } from 'lucide-react'
-import { employees, branches, mockDepartments, Employee } from '@/lib/mock-data'
+import { employees, departments, type Employee } from '@/lib/mock-data'
 import { toast } from 'sonner'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
 
@@ -44,8 +44,8 @@ export function EmployeesPage() {
         email: employee.email,
         phone: employee.phone,
         position: employee.role,
-        departmentId: '',
-        branchId: '',
+        departmentId: employee.departmentId,
+        branchId: employee.branchId,
         salary: employee.salary,
         status: employee.status
       })
@@ -71,17 +71,23 @@ export function EmployeesPage() {
       return
     }
 
+    // The form calls the job title "position"; the record calls it "role".
+    const { position, ...fields } = formData
+
     if (editingEmployee) {
       setEmployeeList(prev => prev.map(emp =>
         emp.id === editingEmployee.id
-          ? { ...emp, ...formData }
+          ? { ...emp, ...fields, role: position }
           : emp
       ))
       toast.success('Employee updated successfully')
     } else {
       const newEmployee: Employee = {
         id: `EMP${(employeeList.length + 1).toString().padStart(3, '0')}`,
-        ...formData
+        ...fields,
+        role: position,
+        joinedAt: new Date().toISOString(),
+        shift: '',
       }
       setEmployeeList(prev => [...prev, newEmployee])
       toast.success('Employee added successfully')
@@ -180,7 +186,7 @@ export function EmployeesPage() {
                       </td>
                       <td className="px-6 py-4 text-slate-600 dark:text-slate-400">{employee.role}</td>
                       <td className="px-6 py-4 text-slate-600 dark:text-slate-400 text-sm">{employee.email}</td>
-                      <td className="px-6 py-4 font-semibold text-slate-900 dark:text-white">৳{employee.salary.toLocaleString()}</td>
+                      <td className="px-6 py-4 font-semibold text-slate-900 dark:text-white">₹{employee.salary.toLocaleString('en-IN')}</td>
                       <td className="px-6 py-4">
                         <Badge variant={employee.status === 'active' ? 'default' : 'secondary'}>
                           {employee.status}
@@ -191,8 +197,9 @@ export function EmployeesPage() {
                           <Button variant="ghost" size="sm" onClick={() => handleOpenDialog(employee)}>
                             <Edit className="w-4 h-4" />
                           </Button>
-                          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700">
-                            <Trash2 className="w-4 h-4" onClick={() => handleDelete(employee.id)} />
+                          {/* On the button, not the icon: clicking the padding around the icon did nothing. */}
+                          <Button variant="ghost" size="sm" className="text-red-600 hover:text-red-700" onClick={() => handleDelete(employee.id)}>
+                            <Trash2 className="w-4 h-4" />
                           </Button>
                         </div>
                       </td>
@@ -236,7 +243,7 @@ export function EmployeesPage() {
             <div>
               <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">Phone</label>
               <Input
-                placeholder="017XXXXXXXX"
+                placeholder="9876543210"
                 value={formData.phone}
                 onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                 className="border-2 border-slate-200 dark:border-slate-700"
@@ -258,7 +265,7 @@ export function EmployeesPage() {
                   <SelectValue placeholder="Select department" />
                 </SelectTrigger>
                 <SelectContent>
-                  {mockDepartments.map(dept => (
+                  {departments.map(dept => (
                     <SelectItem key={dept.id} value={dept.id}>{dept.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -270,7 +277,7 @@ export function EmployeesPage() {
                 type="number"
                 placeholder="50000"
                 value={formData.salary}
-                onChange={(e) => setFormData(prev => ({ ...prev, salary: parseFloat(e.target.value) }))}
+                onChange={(e) => setFormData(prev => ({ ...prev, salary: Number(e.target.value) || 0 }))}
                 className="border-2 border-slate-200 dark:border-slate-700"
               />
             </div>

@@ -95,7 +95,7 @@ function CardContent({ theme, Icon, label, value, trend, trendUp }: any) {
   return (
     <div
       className={cn(
-        "relative h-full overflow-hidden rounded-xl border border-border/50 bg-white p-3 sm:p-4 shadow-sm transition-all duration-500 hover:shadow-lg hover:shadow-primary/5",
+        "relative h-full overflow-hidden rounded-xl border border-border/50 bg-card p-3 sm:p-4 shadow-sm transition-all duration-500 hover:shadow-lg hover:shadow-primary/5",
         theme.border
       )}
     >
