@@ -36,6 +36,12 @@ export default defineConfig(({ command }) => ({
       includeAssets: ["favicon.ico", "favicon.png", "favicon.svg"],
       devOptions: {
         enabled: true,
+        // Dev serves modules unbundled, so dev-dist never holds the files the
+        // production globPatterns below look for (assets/index-*.js, the CSS,
+        // the icons) and every `npm run dev` logged two "glob pattern doesn't
+        // match any files" warnings. This swaps the patterns for a placeholder
+        // in DEV only; production builds still precache exactly as configured.
+        suppressWarnings: true,
       },
       workbox: {
         // Increase max file size limit to 5 MB so precaching won't fail on large bundles
