@@ -23,6 +23,7 @@ import {
   CreditCard,
   Coins,
   Fingerprint,
+  ScanFace,
   Search,
 } from "lucide-react";
 import { useState, useCallback, useRef } from "react";
@@ -45,7 +46,12 @@ type NavItem = {
   /** Feature toggle key — when set, the item is hidden if the super admin
    *  has disabled this feature for the tenant. */
   featureKey?: string;
+  /** External URL — when set, the item opens this in a new tab instead of
+   *  routing to `to` (which then only serves as the item's unique key). */
+  href?: string;
 };
+
+const BOTLENS_URL = import.meta.env.VITE_BOTLENS_URL || "http://localhost:8000";
 
 const NAV: NavItem[] = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -64,6 +70,8 @@ const NAV: NavItem[] = [
   { to: "/leave-types", label: "Leave Types", icon: Settings2 },
   { to: "/shifts", label: "Shift Management", icon: Clock },
   { to: "/biometric-devices", label: "Biometric Device", icon: Fingerprint, featureKey: "biometricDevices" },
+  // BOTLens login is admin-only server-side, so sub-admins never see this.
+  { to: "/lens", label: "Lens", icon: ScanFace, adminOnly: true, href: BOTLENS_URL },
   { to: "/assets", label: "Assets Management", icon: Monitor, featureKey: "assets" },
   { to: "/expenses", label: "Expense Management", icon: Receipt, featureKey: "expenses" },
   { to: "/users", label: "Users", icon: UserCog, adminOnly: true },
@@ -443,17 +451,35 @@ function NavLink({
   onClose: () => void;
 }) {
   const Icon = item.icon;
+  const className = cn(
+    "relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-all duration-300 group",
+    active
+      ? "bg-primary/10 text-primary"
+      : "text-sidebar-foreground/60 hover:text-primary hover:bg-primary/3",
+  );
+
+  if (item.href) {
+    return (
+      <a
+        href={item.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={onClose}
+        draggable={false}
+        className={className}
+      >
+        <Icon className="h-[18px] w-[18px] shrink-0 transition-all duration-300 group-hover:text-primary group-hover:scale-110" />
+        <span className="truncate">{item.label}</span>
+      </a>
+    );
+  }
+
   return (
     <Link
       to={item.to}
       onClick={onClose}
       draggable={false}
-      className={cn(
-        "relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-all duration-300 group",
-        active
-          ? "bg-primary/10 text-primary"
-          : "text-sidebar-foreground/60 hover:text-primary hover:bg-primary/3",
-      )}
+      className={className}
     >
       {active && (
         <motion.div

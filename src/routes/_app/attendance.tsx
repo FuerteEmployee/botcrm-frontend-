@@ -333,6 +333,20 @@ function WfhMark({ record, size = "sm" }: { record: { isWFH?: boolean }; size?: 
   );
 }
 
+// Next to a punch-out a machine or the face kiosk recorded today: shown, but
+// not yet final, because a device cannot tell a lunch exit from going home.
+function ProvisionalOutTag() {
+  return (
+    <Badge
+      variant="outline"
+      title="Recorded by a machine or the face kiosk, which cannot tell a lunch break from leaving for the day. It becomes final when the day ends, or is replaced if they punch in again."
+      className="ml-1.5 align-middle border-transparent bg-warning/15 text-warning-foreground font-bold rounded-full text-[9px] px-1.5 py-0 font-sans"
+    >
+      may be lunch
+    </Badge>
+  );
+}
+
 // ─── Page Size Constants ─────────────────────────────────────────────────────
 const PAGE_SIZE = 10;
 const CARD_PAGE_SIZE = 12;
@@ -490,11 +504,23 @@ function AttendancePage() {
   // regardless.
 
 
-  // Once the employee explicitly punches out via the app, punchOutIsProvisional
-  // is cleared server-side even on a Lens-started day — so this shows their
-  // real exit immediately instead of waiting for the day to pass.
-  const getDisplayPunchOut = (t: AttendanceRecord) =>
-    t.punchOutIsProvisional && isToday(t.date) ? null : t.punchOut;
+  // The punch-out time is always shown. It used to be hidden for the rest of
+  // the day when a device set it, so an admin saw "--:--" after someone had
+  // clearly left, and only the Edit dialog (whose save clears the flag) showed
+  // it. It is still marked provisional -- see isProvisionalOut -- and the
+  // status stays "On Duty" until the day is final, so nobody reads as Half Day
+  // over a lunch break.
+  const getDisplayPunchOut = (t: AttendanceRecord) => t.punchOut;
+
+  // No punch photo on an absent day, and no punch-out photo without a
+  // punch-out. The server now clears both; these also hide the leftovers
+  // already stored, which showed an old punch-out selfie beside a new punch-in.
+  const inPhoto = (t: AttendanceRecord) => (t.status === "absent" || !t.punchIn ? undefined : t.punchInPhoto);
+  const outPhoto = (t: AttendanceRecord) => (t.status === "absent" || !t.punchOut ? undefined : t.punchOutPhoto);
+
+  // A device punch-out today that may only be a lunch exit: the next tap or
+  // the end of the day settles it. An explicit app punch-out clears the flag.
+  const isProvisionalOut = (t: AttendanceRecord) => !!t.punchOut && !!t.punchOutIsProvisional && isToday(t.date);
 
   // lunchInTime/lunchOutTime are only ever written by the lunchIn/lunchOut
   // handlers, and a device reaches those two ways — an explicit `action:
@@ -1199,9 +1225,9 @@ function AttendancePage() {
                   return shift ? `${dateStr} · ${shift.name}${shift.hours ? ` (${shift.hours})` : ""}` : `${dateStr} · No Shift`;
                 })()}
                 icon={
-                  t.punchInPhoto ? (
+                  inPhoto(t) ? (
                     <img
-                      src={t.punchInPhoto}
+                      src={inPhoto(t)}
                       alt={t.employeeId?.name}
                       className="h-full w-full object-cover"
                     />
@@ -1295,6 +1321,7 @@ function AttendancePage() {
                     </p>
                     <p className="text-[12px] font-mono font-bold text-foreground">
                       {getDisplayPunchOut(t) ? fmtClock(getDisplayPunchOut(t)) : <span className="text-muted-foreground/40">--:--</span>}
+                      {isProvisionalOut(t) && <ProvisionalOutTag />}
                     </p>
                   </div>
                 </div>
@@ -1344,9 +1371,9 @@ function AttendancePage() {
                       {/* Avatar and phone only from sm up: at 360px they took a
                           third of the row and pushed Hours and Status off-screen. */}
                       <Avatar className="h-9 w-9 shrink-0 ring-2 ring-primary/5 hidden sm:flex">
-                        {t.punchInPhoto ? (
+                        {inPhoto(t) ? (
                           <img
-                            src={t.punchInPhoto}
+                            src={inPhoto(t)}
                             alt={t.employeeId?.name}
                             className="h-full w-full object-cover"
                           />
@@ -1381,6 +1408,7 @@ function AttendancePage() {
                   )}
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
                     {getDisplayPunchOut(t) ? fmtClock(getDisplayPunchOut(t)) : <span className="text-muted-foreground/40">--:--</span>}
+                    {isProvisionalOut(t) && <ProvisionalOutTag />}
                     {(() => {
                       const meta = getCloseMeta(t);
                       return meta ? (
@@ -1399,7 +1427,7 @@ function AttendancePage() {
                   {!isMobile && (
                       <DataTableCell>
                         <div className="flex items-center gap-1.5">
-                          {([["IN", t.punchInPhoto], ["OUT", t.punchOutPhoto]] as const).map(([label, src]) => (
+                          {([["IN", inPhoto(t)], ["OUT", outPhoto(t)]] as const).map(([label, src]) => (
                             <div key={label} className="flex flex-col items-center gap-0.5">
                               <span className="text-[8px] font-bold uppercase tracking-wider text-muted-foreground/60">{label}</span>
                               {src ? (
@@ -2026,8 +2054,8 @@ function AttendancePage() {
                   <div className="space-y-2">
                     <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Punch In</p>
                     <div className="h-28 rounded-xl overflow-hidden bg-muted/30 border border-border/40 flex items-center justify-center">
-                      {detailRecord.punchInPhoto ? (
-                        <img src={detailRecord.punchInPhoto} alt="Punch in selfie" className="h-full w-full object-cover" />
+                      {inPhoto(detailRecord) ? (
+                        <img src={inPhoto(detailRecord)} alt="Punch in selfie" className="h-full w-full object-cover" />
                       ) : (
                         <span className="text-[11px] text-muted-foreground">No photo</span>
                       )}
@@ -2052,14 +2080,15 @@ function AttendancePage() {
                   <div className="space-y-2">
                     <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Punch Out</p>
                     <div className="h-28 rounded-xl overflow-hidden bg-muted/30 border border-border/40 flex items-center justify-center">
-                      {detailRecord.punchOutPhoto ? (
-                        <img src={detailRecord.punchOutPhoto} alt="Punch out selfie" className="h-full w-full object-cover" />
+                      {outPhoto(detailRecord) ? (
+                        <img src={outPhoto(detailRecord)} alt="Punch out selfie" className="h-full w-full object-cover" />
                       ) : (
                         <span className="text-[11px] text-muted-foreground">No photo</span>
                       )}
                     </div>
                     <p className="text-[13px] font-mono font-bold text-foreground">
                       {getDisplayPunchOut(detailRecord) ? fmtClock(getDisplayPunchOut(detailRecord)) : "—"}
+                      {isProvisionalOut(detailRecord) && <ProvisionalOutTag />}
                     </p>
                     <p className="text-[11px] text-muted-foreground flex items-center gap-1">
                       <MapPin className="h-3 w-3 shrink-0" />

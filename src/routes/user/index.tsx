@@ -1823,7 +1823,7 @@ function UserDashboard() {
                       </div>
                     </div>
                   )}
-                  {todayLog.punchOutPhoto && (
+                  {todayLog.punchOutPhoto && todayLog.punchOut && (
                     <div className="flex items-center gap-1.5 border-l border-white/10 pl-2">
                       <span className="text-[11px] font-semibold text-white/60">Out</span>
                       <div className="h-10 w-10 rounded-lg overflow-hidden border border-white/10 relative shadow-xs">
@@ -2870,7 +2870,7 @@ function UserDashboard() {
                                     </div>
                                   </div>
                                 )}
-                                {record.punchOutPhoto && (
+                                {record.punchOutPhoto && record.punchOut && (
                                   <div className="flex flex-col gap-1">
                                     <span className="text-[11px] font-semibold text-slate-500">Out photo</span>
                                     <div className="h-10 w-16 rounded-lg overflow-hidden border border-slate-100 dark:border-slate-800 relative group/listphoto cursor-zoom-in">
