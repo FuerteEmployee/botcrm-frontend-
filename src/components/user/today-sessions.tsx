@@ -144,7 +144,11 @@ interface ActivityRow {
   distance?: number | null;
   session: number;
   closeReason?: string | null;
+  source?: string | null;
 }
+
+// Where a punch came from, when it was not this app.
+const DEVICE_LABEL: Record<string, string> = { biometric: "Fingerprint machine", lens: "Face camera" };
 
 /**
  * Every punch today as a flat timeline.
@@ -164,11 +168,11 @@ export function TodayActivity({
 }) {
   const rows: ActivityRow[] = [];
   for (const s of sessions) {
-    if (s.punchIn) rows.push({ kind: "in", at: s.punchIn, distance: s.punchInDistance, session: s.n });
+    if (s.punchIn) rows.push({ kind: "in", at: s.punchIn, distance: s.punchInDistance, session: s.n, source: s.punchInSource });
     if (s.punchOut) {
       rows.push({
         kind: "out", at: s.punchOut, distance: s.punchOutDistance, session: s.n,
-        closeReason: s.closeReason,
+        closeReason: s.closeReason, source: s.punchOutSource,
       });
     }
   }
@@ -189,7 +193,9 @@ export function TodayActivity({
           // An auto punch-out was not something the employee did, and labelling
           // it identically to one they pressed is how "I never punched out"
           // turns into an argument nobody can settle.
-          const auto = r.kind === "out" && r.closeReason && r.closeReason !== "manual";
+          // A machine tap is the employee's own action, just not in this app.
+          const device = r.source ? DEVICE_LABEL[r.source] : undefined;
+          const auto = r.kind === "out" && !!r.closeReason && r.closeReason !== "manual" && r.closeReason !== "device";
 
           return (
             <div key={`${r.kind}-${r.at}-${i}`} className="flex items-center gap-3 px-4 py-2.5">
@@ -211,7 +217,7 @@ export function TodayActivity({
                   <span className="tabular-nums">{fmtTime(r.at)}</span>
                 </p>
                 <p className="text-[12px] text-slate-500 dark:text-slate-400 truncate">
-                  {dist ? `${dist} from ${branchName || "branch"}` : "Location not recorded"}
+                  {device ?? (dist ? `${dist} from ${branchName || "branch"}` : "Location not recorded")}
                   {auto && (
                     <span className="text-amber-600 dark:text-amber-400 font-semibold">
                       {" "}&middot; {r.closeReason === "auto_geofence" ? "auto: you left the area" : "closed by the system"}

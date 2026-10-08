@@ -351,6 +351,13 @@ function punchInClosesAt(
   return new Date(end + Math.max(0, rule?.graceMins ?? 0) * 60_000);
 }
 
+// Marks a time the fingerprint machine recorded (or the server read from its
+// taps) rather than a button pressed in this app.
+function MachineTag() {
+  // Its own line: beside the time it pushed "PM" onto a second line at 360px.
+  return <span className="block text-[10px] font-semibold leading-tight text-white/60">on machine</span>;
+}
+
 function UserDashboard() {
   useAuth();
 
@@ -608,6 +615,10 @@ function UserDashboard() {
   // the app, even on a day that started via Lens — so an app punch-out
   // always shows immediately instead of waiting for "today" to pass.
   const displayPunchOut = todayLog?.punchOutIsProvisional ? undefined : todayLog?.punchOut;
+  // The machine's latest tap. It IS the punch-out the day is paid on unless
+  // the employee taps again or punches out here, so the card shows it (tagged)
+  // instead of "--", while the buttons above still treat the day as open.
+  const machineOut = !!todayLog?.punchOut && !!todayLog?.punchOutIsProvisional;
 
   const isPunchedIn = !!todayLog?.punchIn;
 
@@ -1734,11 +1745,13 @@ function UserDashboard() {
                     {time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}
                   </h3>
                   <div className="flex items-center gap-2 mt-1.5">
-                    <Badge className={`border-none px-3 py-1 text-[11px] font-bold uppercase tracking-wide rounded-full shadow-xs ${isPunchedIn && !isPunchedOut
+                    <Badge className={`border-none px-3 py-1 text-[11px] font-bold uppercase tracking-wide rounded-full shadow-xs ${isPunchedIn && !isPunchedOut && !machineOut
                       ? "bg-emerald-500 text-white animate-pulse"
                       : "bg-white/15 text-white/90"
                       }`}>
-                      {isPunchedIn && !isPunchedOut ? "PUNCHED IN" : isPunchedOut ? "PUNCHED OUT" : "NOT PUNCHED IN"}
+                      {machineOut
+                        ? "OUT ON MACHINE"
+                        : isPunchedIn && !isPunchedOut ? "PUNCHED IN" : isPunchedOut ? "PUNCHED OUT" : "NOT PUNCHED IN"}
                     </Badge>
                   </div>
                 </div>
@@ -1786,19 +1799,22 @@ function UserDashboard() {
                   <div>
                     <span className="text-[11px] font-semibold text-white/60 block">Punch out</span>
                     <span className="text-[16px] font-semibold text-white block mt-0.5">
-                      {formatTimeStr(displayPunchOut)}
+                      {formatTimeStr(todayLog?.punchOut)}
+                      {machineOut && <MachineTag />}
                     </span>
                   </div>
                   <div>
                     <span className="text-[11px] font-semibold text-white/60 block">Lunch start</span>
                     <span className="text-[14px] font-medium text-white/90 block mt-0.5">
-                      {formatTimeStr(displayLunchInTime)}
+                      {formatTimeStr(todayLog?.lunchInTime)}
+                      {todayLog?.lunchInTime && !displayLunchInTime && <MachineTag />}
                     </span>
                   </div>
                   <div>
                     <span className="text-[11px] font-semibold text-white/60 block">Lunch end</span>
                     <span className="text-[14px] font-medium text-white/90 block mt-0.5">
-                      {formatTimeStr(displayLunchOutTime)}
+                      {formatTimeStr(todayLog?.lunchOutTime)}
+                      {todayLog?.lunchOutTime && !displayLunchOutTime && <MachineTag />}
                     </span>
                   </div>
                 </div>
