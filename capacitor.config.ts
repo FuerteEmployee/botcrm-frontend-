@@ -22,6 +22,13 @@ const config: CapacitorConfig = {
       // the separate staging stack exists to prevent.
       //   CAP_OTA_URL=https://staging-api.beontimeofficial.com/api/app/update npx cap sync android
       updateUrl: process.env.CAP_OTA_URL || 'https://api2.beontimeofficial.com/api/app/update',
+      // Never talk to Capgo's cloud. Left unset, these default to
+      // plugin.capgo.app, which answers our unregistered app with 429
+      // `on_premise_app` and a one-hour Retry-After; the plugin then blocks
+      // every request for that hour, the update check to our own server
+      // included. Empty strings switch statistics and channel calls off.
+      statsUrl: '',
+      channelUrl: '',
       autoUpdate: true,
 
       // The safety net, and the reason self-hosting is acceptable here.

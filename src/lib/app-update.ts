@@ -163,6 +163,23 @@ export async function getVersionInfo(): Promise<VersionInfo> {
 }
 
 /**
+ * The updater plugin also reports usage statistics to Capgo's own cloud, which
+ * our app is not registered with. Capgo answers 429 `on_premise_app` with a
+ * one-hour Retry-After, and the plugin then skips EVERY request for that hour,
+ * including the update check to our own server, and hands back Capgo's code as
+ * the error. The block lives in memory only, so reopening the app clears it.
+ * APKs from 2.0.4 switch the statistics off (`statsUrl: ""`); this keeps phones
+ * on older APKs from showing a raw code nobody can act on.
+ */
+const PLUGIN_BLOCK_CODES = /on_premise_app|too_many_requests/i;
+const PLUGIN_BLOCK_MESSAGE =
+  "Could not check right now. Close the app fully and open it again, then check for updates.";
+
+function friendlyCheckError(raw: string): string {
+  return PLUGIN_BLOCK_CODES.test(raw) ? PLUGIN_BLOCK_MESSAGE : raw;
+}
+
+/**
  * Ask the server whether there is a newer bundle.
  *
  * Deliberately does NOT download. A check that silently pulls 1.5 MB on
@@ -194,7 +211,7 @@ export async function checkForUpdate(): Promise<UpdateCheck> {
       /* private mode */
     }
 
-    if (latest?.error) return { status: "error", message: String(latest.error) };
+    if (latest?.error) return { status: "error", message: friendlyCheckError(String(latest.error)) };
 
     // The server answers "Up to date" with a message and no url; the plugin also
     // has its own `kind`. Treat either as up to date rather than trusting one,
@@ -251,7 +268,7 @@ export async function checkForUpdate(): Promise<UpdateCheck> {
     if (/up[\s-]?to[\s-]?date|no release|no update/i.test(msg)) {
       return { status: "up-to-date", current: "unknown" };
     }
-    return { status: "error", message: msg };
+    return { status: "error", message: friendlyCheckError(msg) };
   }
 }
 
