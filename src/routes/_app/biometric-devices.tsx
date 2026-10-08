@@ -957,7 +957,7 @@ function SetupGuideDialog({ onClose }: { onClose: () => void }) {
     },
     {
       title: "Point it at B.O.T",
-      body: "Menu → Comm → Cloud Server Settings. Server Mode: ADMS. Enable Domain Name: ON. Server Address: api.beontimeofficial.com. Enable Proxy: OFF. Then reboot — the machine only connects on startup, not when you save.",
+      body: "Menu → Comm → Cloud Server Settings. Server Mode: ADMS. Enable Domain Name: ON. Server Address: api2.beontimeofficial.com. Enable Proxy: OFF. Then reboot — the machine only connects on startup, not when you save.",
     },
     {
       title: "Add the machine here",

@@ -9,13 +9,18 @@ import { initLiveUpdates, markBundleHealthy } from "./lib/live-update";
 import "./styles.css";
 import { initPwaUpdates } from "./lib/pwa-update";
 
+// Set by the inline script in index.html when this browser is being moved to
+// the classic site (a company kept on the previous release). Nothing below may
+// start: above all no service worker, which would trap the browser here.
+const MOVING_TO_CLASSIC = (window as unknown as { __BOT_LEGACY__?: boolean }).__BOT_LEGACY__ === true;
+
 // In the Capacitor native app a service worker must not persist. Capacitor
 // serves the bundled web assets locally, and a Workbox precache survives APK
 // updates (Android keeps app data on update), so a stale service worker keeps
 // serving OLD code and freshly built changes never appear. Tear down any
 // service worker + caches left over from earlier builds so the WebView always
 // runs the code shipped inside the current APK.
-if (!Capacitor.isNativePlatform()) {
+if (!Capacitor.isNativePlatform() && !MOVING_TO_CLASSIC) {
   // Web + installed PWA only. The native shell deliberately removes service
   // workers (see below), so registering one there would undo that.
   initPwaUpdates();
@@ -77,7 +82,7 @@ window.addEventListener("load", () => {
 // Installs the global error handlers and reports the build/permission state.
 // Safe before login — the senders no-op without a session and pick it up from
 // the bot-auth-change event.
-initClientTelemetry();
+if (!MOVING_TO_CLASSIC) initClientTelemetry();
 
 // Must run before anything can raise a toast, so no action's feedback is
 // missed on the way to the first screen.
@@ -85,13 +90,16 @@ installHapticToasts();
 
 const router = getRouter();
 
-initLiveUpdates();
+if (!MOVING_TO_CLASSIC) initLiveUpdates();
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <RouterProvider router={router} />
-  </React.StrictMode>,
-);
+// Moving to the classic site: draw nothing, the boot screen stays up.
+if (!MOVING_TO_CLASSIC) {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <RouterProvider router={router} />
+    </React.StrictMode>,
+  );
+}
 
 // Confirm to the live-update plugin that this bundle actually runs. If this
 // never fires, the plugin rolls back to the previous bundle after
@@ -128,5 +136,7 @@ function clearBootScreen() {
   window.setTimeout(() => boot.remove(), 320);
 }
 
-requestAnimationFrame(() => requestAnimationFrame(clearBootScreen));
-window.setTimeout(clearBootScreen, 8000);
+if (!MOVING_TO_CLASSIC) {
+  requestAnimationFrame(() => requestAnimationFrame(clearBootScreen));
+  window.setTimeout(clearBootScreen, 8000);
+}

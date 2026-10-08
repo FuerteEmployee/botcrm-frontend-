@@ -21,7 +21,7 @@ const config: CapacitorConfig = {
       // therefore the production database, silently, which is the one outcome
       // the separate staging stack exists to prevent.
       //   CAP_OTA_URL=https://staging-api.beontimeofficial.com/api/app/update npx cap sync android
-      updateUrl: process.env.CAP_OTA_URL || 'https://api.beontimeofficial.com/api/app/update',
+      updateUrl: process.env.CAP_OTA_URL || 'https://api2.beontimeofficial.com/api/app/update',
       autoUpdate: true,
 
       // The safety net, and the reason self-hosting is acceptable here.

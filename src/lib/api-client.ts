@@ -1,6 +1,7 @@
 import axios from "axios";
 import { toast } from "sonner";
 import { getSession, clearSession } from "./auth";
+import { switchToLegacyUi, isSwitchingToLegacy } from "./legacy-switch";
 
 declare module "axios" {
   interface AxiosRequestConfig {
@@ -115,6 +116,14 @@ apiClient.interceptors.response.use(
         // A fixed id: however many requests fail at once, one toast.
         toast.error(toastMessage, { id: "forced-logout", duration: LOGOUT_TOAST_DURATION_MS });
       }
+    }
+
+    // A company kept on the previous release: this browser belongs on the
+    // classic site. Switch, and keep the request pending so no screen shows an
+    // error (or clears the session) in the moment before the page reloads.
+    if (error.response?.status === 403 && error.response?.data?.code === "frozen_tenant") {
+      void switchToLegacyUi();
+      if (isSwitchingToLegacy()) return new Promise(() => {});
     }
 
     // Handle subscription/module gating 403 errors. A background read the
