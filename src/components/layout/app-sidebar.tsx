@@ -51,7 +51,10 @@ type NavItem = {
   href?: string;
 };
 
-const BOTLENS_URL = import.meta.env.VITE_BOTLENS_URL || "http://localhost:8000";
+// Only .env.development sets this. Staging and production builds used to fall
+// back to localhost:8000, giving every admin a "Lens" link to their own PC.
+// With it unset the item is left out of the sidebar entirely.
+const BOTLENS_URL: string | undefined = import.meta.env.VITE_BOTLENS_URL || undefined;
 
 const NAV: NavItem[] = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -71,7 +74,9 @@ const NAV: NavItem[] = [
   { to: "/shifts", label: "Shift Management", icon: Clock },
   { to: "/biometric-devices", label: "Biometric Device", icon: Fingerprint, featureKey: "biometricDevices" },
   // BOTLens login is admin-only server-side, so sub-admins never see this.
-  { to: "/lens", label: "Lens", icon: ScanFace, adminOnly: true, href: BOTLENS_URL },
+  ...(BOTLENS_URL
+    ? [{ to: "/lens", label: "Lens", icon: ScanFace, adminOnly: true, href: BOTLENS_URL }]
+    : []),
   { to: "/assets", label: "Assets Management", icon: Monitor, featureKey: "assets" },
   { to: "/expenses", label: "Expense Management", icon: Receipt, featureKey: "expenses" },
   { to: "/users", label: "Users", icon: UserCog, adminOnly: true },

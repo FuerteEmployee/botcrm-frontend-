@@ -450,7 +450,11 @@ export function parseEmployeeRows(
     if (joinParsed === null) problems.push(`Joining date "${get(r, "joiningDate")}" is not a date. Use DD-MM-YYYY.`);
     const joiningDate = joinParsed || ctx.today;
 
-    const deviceUserId = get(r, "deviceUserId");
+    // The text the sheet shows, not the parsed value: a CSV (or a number cell
+    // formatted 0000) turns "0007" into the number 7, and the machine matches
+    // PINs exactly, so that person's taps would never be credited.
+    const shownDeviceId = f ? cellText(f[keyToHeader.get("deviceUserId") ?? ""]) : "";
+    const deviceUserId = shownDeviceId || get(r, "deviceUserId");
 
     // Branch
     let branchIds: string[] = [];
