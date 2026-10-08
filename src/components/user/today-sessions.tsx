@@ -1,5 +1,6 @@
-import { LogIn, LogOut, History } from "lucide-react";
+import { LogIn, LogOut, History, Smartphone, Fingerprint, ScanFace, UserCog, MapPinOff, CloudOff, UtensilsCrossed } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CHANNEL_LABEL, closeTag, lateTag, type PunchTag } from "@/lib/punch-labels";
 
 /**
  * Today's punch sessions on the employee's own home screen.
@@ -98,6 +99,51 @@ export function buildSessions(log?: {
     .map((s, i) => ({ ...s, n: i + 1 }));
 }
 
+// ── shared marks: the same ones the admin Sessions list shows ────────────────
+
+const CHANNEL_ICON: Record<string, typeof Smartphone> = {
+  app: Smartphone,
+  biometric: Fingerprint,
+  lens: ScanFace,
+  admin: UserCog,
+  system: MapPinOff,
+};
+
+/** Small icon for where one end of a session came from. */
+function ChannelIcon({ channel, className }: { channel?: string | null; className?: string }) {
+  const Icon = channel ? CHANNEL_ICON[channel] : undefined;
+  if (!Icon || !channel) return null;
+  return (
+    <span title={CHANNEL_LABEL[channel]} aria-label={CHANNEL_LABEL[channel]} className="inline-flex shrink-0">
+      <Icon className={cn("h-3.5 w-3.5", className)} />
+    </span>
+  );
+}
+
+const TAG_TONE: Record<PunchTag["tone"], { dark: string; light: string }> = {
+  rose: { dark: "border-rose-300/40 bg-rose-400/15 text-rose-200", light: "border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-500/30 dark:bg-rose-500/10 dark:text-rose-300" },
+  amber: { dark: "border-amber-300/40 bg-amber-400/15 text-amber-200", light: "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300" },
+  sky: { dark: "border-sky-300/40 bg-sky-400/15 text-sky-200", light: "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300" },
+  slate: { dark: "border-white/20 bg-white/10 text-white/80", light: "border-slate-200 bg-slate-50 text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300" },
+};
+
+/** A flag on a punch: "Auto exit", "Shift end", "Sent 23 min late", ... */
+export function TagPill({ tag, dark = false }: { tag: PunchTag; dark?: boolean }) {
+  const late = tag.label.startsWith("Sent ");
+  return (
+    <span
+      title={tag.hint}
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[10.5px] font-bold leading-tight whitespace-nowrap",
+        dark ? TAG_TONE[tag.tone].dark : TAG_TONE[tag.tone].light,
+      )}
+    >
+      {late && <CloudOff className="h-3 w-3" />}
+      {tag.label}
+    </span>
+  );
+}
+
 // ── compact strip, inside the dark status card ────────────────────────────────
 
 /**
@@ -105,33 +151,56 @@ export function buildSessions(log?: {
  * has its times in the punch-in/punch-out grid above, and repeating them as
  * "Session 1" adds a row that says nothing.
  */
-export function TodaySessions({ sessions }: { sessions: NumberedSession[] }) {
-  if (sessions.length < 2) return null;
+export function TodaySessions({ sessions, minSessions = 2 }: { sessions: NumberedSession[]; minSessions?: number }) {
+  if (sessions.length < minSessions) return null;
 
   return (
     <div className="mt-3 space-y-1.5">
       {sessions.map((s) => {
         const open = !!s.punchIn && !s.punchOut;
+        // The same flags the admin's Sessions list shows for this session.
+        const tags = [
+          lateTag(s.punchIn, s.punchInReceivedAt),
+          s.punchOut ? lateTag(s.punchOut, s.punchOutReceivedAt) : null,
+          s.punchOut ? closeTag(s.closeReason) : null,
+        ].filter((t): t is PunchTag => !!t);
         return (
           <div
             key={`${s.n}-${s.punchIn}`}
             className={cn(
-              "flex items-center gap-2.5 rounded-[14px] border px-3 py-2 backdrop-blur-md",
+              "rounded-[14px] border px-3 py-2 backdrop-blur-md space-y-1",
               open ? "border-emerald-300/30 bg-emerald-400/10" : "border-white/10 bg-black/15",
             )}
           >
-            <LogIn className={cn("h-3.5 w-3.5 shrink-0", open ? "text-emerald-300" : "text-white/50")} />
-            <span className="text-[12.5px] font-semibold text-white/90 shrink-0">Session {s.n}</span>
+            <div className="flex items-center gap-2">
+              <LogIn className={cn("h-3.5 w-3.5 shrink-0", open ? "text-emerald-300" : "text-white/50")} />
+              {/* "S1", as on the admin's Sessions list, so both read the same;
+                  the full word left no room for the times at 360px. */}
+              <span title={`Session ${s.n}`} className="text-[12.5px] font-bold text-white/90 shrink-0">S{s.n}</span>
 
-            <span className="flex items-center gap-1.5 text-[12.5px] text-white/80 tabular-nums min-w-0">
-              <span className="truncate">{fmtTime(s.punchIn)}</span>
-              <span className="text-white/30">&rarr;</span>
-              <span className="truncate">{open ? "now" : fmtTime(s.punchOut)}</span>
-            </span>
+              <span className="flex items-center gap-1.5 text-[12.5px] text-white/80 tabular-nums min-w-0 whitespace-nowrap">
+                <span>{fmtTime(s.punchIn)}</span>
+                <ChannelIcon channel={s.punchInSource} className="text-white/50" />
+                <span className="text-white/30">&rarr;</span>
+                {open ? (
+                  <span className="font-bold text-emerald-300">Live</span>
+                ) : (
+                  <>
+                    <span>{fmtTime(s.punchOut)}</span>
+                    <ChannelIcon channel={s.punchOutSource} className="text-white/50" />
+                  </>
+                )}
+              </span>
 
-            <span className="ml-auto text-[12px] font-mono font-semibold text-white/70 shrink-0">
-              {open ? "working" : fmtDuration(s.punchIn, s.punchOut, s.workMs)}
-            </span>
+              <span className="ml-auto text-[12px] font-mono font-semibold text-white/70 shrink-0">
+                {open ? "working" : fmtDuration(s.punchIn, s.punchOut, s.workMs)}
+              </span>
+            </div>
+            {tags.length > 0 && (
+              <div className="flex flex-wrap gap-1 pl-5">
+                {tags.map((t, i) => <TagPill key={i} tag={t} dark />)}
+              </div>
+            )}
           </div>
         );
       })}
@@ -149,10 +218,16 @@ interface ActivityRow {
   closeReason?: string | null;
   source?: string | null;
   receivedAt?: string | null;
+  open?: boolean;
 }
 
 // Where a punch came from, when it was not this app.
-const DEVICE_LABEL: Record<string, string> = { biometric: "Fingerprint machine", lens: "Face camera" };
+const DEVICE_LABEL: Record<string, string> = {
+  biometric: CHANNEL_LABEL.biometric,
+  lens: CHANNEL_LABEL.lens,
+  admin: CHANNEL_LABEL.admin,
+  system: CHANNEL_LABEL.system,
+};
 
 /**
  * Every punch today as a flat timeline.
@@ -166,13 +241,16 @@ const DEVICE_LABEL: Record<string, string> = { biometric: "Fingerprint machine",
 export function TodayActivity({
   sessions,
   branchName,
+  totalWorkMs,
 }: {
   sessions: NumberedSession[];
   branchName?: string;
+  /** The day's credited hours from the server, to explain any lunch deduction. */
+  totalWorkMs?: number | null;
 }) {
   const rows: ActivityRow[] = [];
   for (const s of sessions) {
-    if (s.punchIn) rows.push({ kind: "in", at: s.punchIn, distance: s.punchInDistance, session: s.n, source: s.punchInSource, receivedAt: s.punchInReceivedAt });
+    if (s.punchIn) rows.push({ kind: "in", at: s.punchIn, distance: s.punchInDistance, session: s.n, source: s.punchInSource, receivedAt: s.punchInReceivedAt, open: !s.punchOut });
     if (s.punchOut) {
       rows.push({
         kind: "out", at: s.punchOut, distance: s.punchOutDistance, session: s.n,
@@ -199,7 +277,11 @@ export function TodayActivity({
           // turns into an argument nobody can settle.
           // A machine tap is the employee's own action, just not in this app.
           const device = r.source ? DEVICE_LABEL[r.source] : undefined;
-          const auto = r.kind === "out" && !!r.closeReason && r.closeReason !== "manual" && r.closeReason !== "device";
+          // The same flags the admin's Sessions list shows for this punch.
+          const tags = [
+            lateTag(r.at, r.receivedAt),
+            r.kind === "out" ? closeTag(r.closeReason) : null,
+          ].filter((t): t is PunchTag => !!t);
 
           return (
             <div key={`${r.kind}-${r.at}-${i}`} className="flex items-center gap-3 px-4 py-2.5">
@@ -219,32 +301,62 @@ export function TodayActivity({
                   {r.kind === "in" ? "Punched in" : "Punched out"}
                   <span className="text-slate-400 font-normal"> &mdash; </span>
                   <span className="tabular-nums">{fmtTime(r.at)}</span>
+                  {r.open && <span className="ml-1.5 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">Live</span>}
                 </p>
-                <p className="text-[12px] text-slate-500 dark:text-slate-400 truncate">
-                  {device ?? (dist ? `${dist} from ${branchName || "branch"}` : "Location not recorded")}
-                  {r.receivedAt && (
-                    <span className="text-sky-600 dark:text-sky-400 font-semibold">
-                      {" "}&middot; machine was offline, sent at {fmtTime(r.receivedAt)}
-                    </span>
-                  )}
-                  {auto && (
-                    <span className="text-amber-600 dark:text-amber-400 font-semibold">
-                      {" "}&middot; {r.closeReason === "auto_geofence" ? "auto: you left the area" : "closed by the system"}
-                    </span>
-                  )}
+                <p className="flex items-center gap-1 text-[12px] text-slate-500 dark:text-slate-400 truncate">
+                  <ChannelIcon channel={r.source || "app"} className="h-3 w-3 text-slate-400" />
+                  {device ?? (dist ? `${CHANNEL_LABEL.app} · ${dist} from ${branchName || "branch"}` : `${CHANNEL_LABEL.app} · location not recorded`)}
                 </p>
+                {tags.length > 0 && (
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {tags.map((t, k) => <TagPill key={k} tag={t} />)}
+                  </div>
+                )}
+                {r.receivedAt && (
+                  <p className="mt-0.5 text-[11.5px] leading-snug text-sky-700 dark:text-sky-300">
+                    The machine was offline. It saved this punch and sent it at {fmtTime(r.receivedAt)}.
+                  </p>
+                )}
               </div>
 
               {/* "S1" means nothing to most people, and on a one-session
                   day there is nothing to tell apart. */}
               {sessions.length > 1 && (
                 <span className="shrink-0 text-[11px] font-semibold text-slate-500 dark:text-slate-400 border border-slate-200 dark:border-white/10 rounded-full px-2 py-0.5">
-                  Session {r.session}
+                  S{r.session}
                 </span>
               )}
             </div>
           );
         })}
+      </div>
+
+      {/* Same as the admin's Sessions panel: when the server credited less
+          than the sessions add up to, the difference is the unpaid lunch, and
+          saying so is what stops "the app shows 1h 16m but I was paid 17m". */}
+      <LunchSummary sessions={sessions} totalWorkMs={totalWorkMs} />
+    </div>
+  );
+}
+
+function LunchSummary({ sessions, totalWorkMs }: { sessions: NumberedSession[]; totalWorkMs?: number | null }) {
+  const summed = sessions.reduce((n, s) => n + (s.workMs || 0), 0);
+  const deducted = typeof totalWorkMs === "number" && summed > 0 && summed - totalWorkMs >= 60000 ? summed - totalWorkMs : null;
+  if (deducted === null || typeof totalWorkMs !== "number") return null;
+  const hm = (ms: number) => `${Math.floor(ms / 3_600_000)}h ${Math.floor((ms % 3_600_000) / 60_000)}m`;
+  return (
+    <div className="border-t border-slate-100 dark:border-white/5 px-4 py-2.5 text-[12.5px] space-y-0.5">
+      <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+        <span>Sessions add up to</span>
+        <span className="font-mono font-semibold">{hm(summed)}</span>
+      </div>
+      <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
+        <span className="inline-flex items-center gap-1"><UtensilsCrossed className="h-3 w-3" /> Unpaid lunch</span>
+        <span className="font-mono font-semibold text-rose-600 dark:text-rose-400">-{hm(deducted)}</span>
+      </div>
+      <div className="flex items-center justify-between border-t border-slate-100 dark:border-white/5 pt-1 mt-1 font-bold text-slate-700 dark:text-slate-200">
+        <span>Counted for pay</span>
+        <span className="font-mono">{hm(totalWorkMs)}</span>
       </div>
     </div>
   );

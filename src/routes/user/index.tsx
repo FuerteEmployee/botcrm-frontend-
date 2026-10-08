@@ -2159,7 +2159,11 @@ function UserDashboard() {
           {/* Every punch today, in order, with how far from the branch each one
               was taken. The distance is what makes a disputed punch checkable
               instead of a matter of recollection. */}
-          <TodayActivity sessions={todaySessions} branchName={profile?.branchId?.branchName ?? profile?.branchId?.name} />
+          <TodayActivity
+            sessions={todaySessions}
+            branchName={profile?.branchId?.branchName ?? profile?.branchId?.name}
+            totalWorkMs={todayLog?.punchOut ? todayLog?.totalWorkMs : null}
+          />
 
           {/* No standing "records your location all the time" notice here (owner,
               2026-10-01): the setup screen says it once, and the phone's own
@@ -2653,20 +2657,10 @@ function UserDashboard() {
                                 <span className="text-[12px] font-semibold text-white/60 block mb-2">
                                   All punches ({selectedDayLog.shifts?.length ?? 0})
                                 </span>
-                                <div className="max-h-48 overflow-y-auto pr-1 space-y-2 rounded-xl">
-                                  {(selectedDayLog.shifts ?? []).map((shift, i) => (
-                                    <div
-                                      key={i}
-                                      className="flex items-center justify-between p-2.5 bg-white/5 rounded-lg border border-white/10 text-[11px]"
-                                    >
-                                      <span className="text-white/40 font-bold w-14">#{i + 1}</span>
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="text-emerald-300 font-black">{formatTimeStr(shift.punchIn)}</span>
-                                        <span className="text-white/30">→</span>
-                                        <span className="text-rose-300 font-black">{shift.punchOut ? formatTimeStr(shift.punchOut) : "Still In"}</span>
-                                      </div>
-                                    </div>
-                                  ))}
+                                {/* The same session rows, icons and flags as Home and as
+                                    the admin's Sessions list, so a past day reads the same. */}
+                                <div className="max-h-72 overflow-y-auto pr-1 rounded-xl -mt-3">
+                                  <TodaySessions sessions={buildSessions(selectedDayLog)} minSessions={1} />
                                 </div>
                               </div>
                             </motion.div>

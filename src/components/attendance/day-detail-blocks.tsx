@@ -23,6 +23,7 @@ import { cn, toISTDateKey } from "@/lib/utils";
 import { statusLabel, statusClass, NEEDS_REVIEW_HINT } from "@/lib/attendance-status";
 import type { AttendanceRecord, AttendanceSession, DayGrading, PunchChannel } from "@/services/attendance-service";
 import { CorrectionLog, type PunchCorrectionEntry } from "@/components/tickets/correction-log";
+import { CHANNEL_LABEL, closeTag, lateTag } from "@/lib/punch-labels";
 
 // Read-only blocks for the Attendance Dashboard detail sheet.
 //
@@ -41,12 +42,14 @@ import { CorrectionLog, type PunchCorrectionEntry } from "@/components/tickets/c
 const LABEL = "text-[10px] font-black uppercase tracking-widest text-muted-foreground/60";
 
 /** Which channel reported a punch. Same three the day-level source icon uses. */
+// Labels shared with the employee app (lib/punch-labels.ts), so the admin and
+// the employee read the same words for the same punch.
 const CHANNEL: Record<PunchChannel, { icon: typeof Smartphone; label: string }> = {
-  app: { icon: Smartphone, label: "Phone app" },
-  lens: { icon: ScanFace, label: "Lens camera" },
-  biometric: { icon: Fingerprint, label: "Biometric machine" },
-  system: { icon: MapPinOff, label: "Automatic" },
-  admin: { icon: UserCog, label: "Admin correction" },
+  app: { icon: Smartphone, label: CHANNEL_LABEL.app },
+  lens: { icon: ScanFace, label: CHANNEL_LABEL.lens },
+  biometric: { icon: Fingerprint, label: CHANNEL_LABEL.biometric },
+  system: { icon: MapPinOff, label: CHANNEL_LABEL.system },
+  admin: { icon: UserCog, label: CHANNEL_LABEL.admin },
 };
 
 export const fmtHM = (ms: number | null | undefined) => {
@@ -161,17 +164,16 @@ function ChannelMark({ channel, title }: { channel?: PunchChannel | null; title:
  * this says why.
  */
 function OfflineMark({ at, receivedAt }: { at?: string | null; receivedAt?: string | null }) {
-  if (!at || !receivedAt) return null;
-  const mins = Math.max(1, Math.round((+new Date(receivedAt) - +new Date(at)) / 60000));
-  const late = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins} min`;
+  const tag = lateTag(at, receivedAt);
+  if (!tag) return null;
   return (
     <Badge
       variant="outline"
-      title={`Recorded on the machine at ${fmtTime(at)} while it was offline. It reached the server at ${fmtTime(receivedAt)}, ${late} later.`}
+      title={tag.hint}
       className="border-sky-500/25 bg-sky-500/10 text-sky-700 dark:text-sky-300 text-[9px] font-black uppercase px-1.5 py-0 gap-1"
     >
       <CloudOff className="h-2.5 w-2.5" />
-      Sent {late} late
+      {tag.label}
     </Badge>
   );
 }
@@ -288,6 +290,15 @@ export function SessionTimeline({
                     Auto exit
                   </Badge>
                 ))}
+              {(s.closeReason === "admin" || s.closeReason === "regularized") && (
+                <Badge
+                  variant="outline"
+                  title={closeTag(s.closeReason)?.hint}
+                  className="border-border/60 bg-muted/40 text-muted-foreground text-[9px] font-black uppercase px-1.5 py-0"
+                >
+                  {closeTag(s.closeReason)?.label}
+                </Badge>
+              )}
               {s.closeReason === "shift_end" && (
                 <Badge
                   variant="outline"
