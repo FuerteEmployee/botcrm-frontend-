@@ -21,6 +21,9 @@ export interface AttendanceSession {
   punchOutDistance?: number | null;
   punchInSource?: string | null;
   punchOutSource?: string | null;
+  /** Set when a machine tap was recorded offline and reached the server later. */
+  punchInReceivedAt?: string | null;
+  punchOutReceivedAt?: string | null;
   workMs?: number | null;
   /** How the session closed: 'manual' | 'auto_geofence' | 'shift_end' | ... */
   closeReason?: string | null;
@@ -145,6 +148,7 @@ interface ActivityRow {
   session: number;
   closeReason?: string | null;
   source?: string | null;
+  receivedAt?: string | null;
 }
 
 // Where a punch came from, when it was not this app.
@@ -168,11 +172,11 @@ export function TodayActivity({
 }) {
   const rows: ActivityRow[] = [];
   for (const s of sessions) {
-    if (s.punchIn) rows.push({ kind: "in", at: s.punchIn, distance: s.punchInDistance, session: s.n, source: s.punchInSource });
+    if (s.punchIn) rows.push({ kind: "in", at: s.punchIn, distance: s.punchInDistance, session: s.n, source: s.punchInSource, receivedAt: s.punchInReceivedAt });
     if (s.punchOut) {
       rows.push({
         kind: "out", at: s.punchOut, distance: s.punchOutDistance, session: s.n,
-        closeReason: s.closeReason, source: s.punchOutSource,
+        closeReason: s.closeReason, source: s.punchOutSource, receivedAt: s.punchOutReceivedAt,
       });
     }
   }
@@ -218,6 +222,11 @@ export function TodayActivity({
                 </p>
                 <p className="text-[12px] text-slate-500 dark:text-slate-400 truncate">
                   {device ?? (dist ? `${dist} from ${branchName || "branch"}` : "Location not recorded")}
+                  {r.receivedAt && (
+                    <span className="text-sky-600 dark:text-sky-400 font-semibold">
+                      {" "}&middot; machine was offline, sent at {fmtTime(r.receivedAt)}
+                    </span>
+                  )}
                   {auto && (
                     <span className="text-amber-600 dark:text-amber-400 font-semibold">
                       {" "}&middot; {r.closeReason === "auto_geofence" ? "auto: you left the area" : "closed by the system"}

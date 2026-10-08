@@ -104,6 +104,13 @@ export interface AttendanceSession {
   punchOutAccuracy?: number | null;
   punchInDistance?: number | null;
   punchOutDistance?: number | null;
+  /**
+   * When the server received a machine tap that arrived late: the terminal was
+   * offline, kept the tap and sent it when the network came back. Only set when
+   * it arrived well after it was made, so a value means "recorded offline".
+   */
+  punchInReceivedAt?: string | null;
+  punchOutReceivedAt?: string | null;
   /** Gross worked ms for this session, clamped to the shift window. */
   workMs?: number | null;
   /**

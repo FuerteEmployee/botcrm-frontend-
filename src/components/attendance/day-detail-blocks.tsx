@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import {
   AlertTriangle,
   ArrowRight,
+  CloudOff,
   Clock,
   Fingerprint,
   LogIn,
@@ -153,6 +154,28 @@ function ChannelMark({ channel, title }: { channel?: PunchChannel | null; title:
   );
 }
 
+/**
+ * A machine punch recorded while the terminal was offline and sent later.
+ * Such a tap keeps its real time, so it can land after the day has moved on
+ * (for example after a phone punch-out) and look like an odd extra session;
+ * this says why.
+ */
+function OfflineMark({ at, receivedAt }: { at?: string | null; receivedAt?: string | null }) {
+  if (!at || !receivedAt) return null;
+  const mins = Math.max(1, Math.round((+new Date(receivedAt) - +new Date(at)) / 60000));
+  const late = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins} min`;
+  return (
+    <Badge
+      variant="outline"
+      title={`Recorded on the machine at ${fmtTime(at)} while it was offline. It reached the server at ${fmtTime(receivedAt)}, ${late} later.`}
+      className="border-sky-500/25 bg-sky-500/10 text-sky-700 dark:text-sky-300 text-[9px] font-black uppercase px-1.5 py-0 gap-1"
+    >
+      <CloudOff className="h-2.5 w-2.5" />
+      Sent {late} late
+    </Badge>
+  );
+}
+
 // ─── Sessions ────────────────────────────────────────────────────────────────
 
 /**
@@ -221,6 +244,7 @@ export function SessionTimeline({
 
               <span className="font-mono">{fmtTime(s.punchIn)}</span>
               <ChannelMark channel={s.punchInSource} title="Punched in via" />
+              <OfflineMark at={s.punchIn} receivedAt={s.punchInReceivedAt} />
 
               <ArrowRight className="h-3 w-3 opacity-40 shrink-0" />
 
@@ -228,6 +252,7 @@ export function SessionTimeline({
                 <>
                   <span className="font-mono">{fmtTime(s.punchOut)}</span>
                   <ChannelMark channel={s.punchOutSource} title="Punched out via" />
+                  <OfflineMark at={s.punchOut} receivedAt={s.punchOutReceivedAt} />
                 </>
               ) : (
                 <span className="font-black text-success">Live</span>
