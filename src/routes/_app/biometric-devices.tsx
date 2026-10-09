@@ -63,6 +63,7 @@ import {
   validateSequence,
   type PunchSequenceConfig,
 } from "@/components/pages/punch-sequence-editor";
+import { FaceKiosksCard } from "@/components/lens/face-kiosks-card";
 
 export const Route = createFileRoute("/_app/biometric-devices")({
   component: BiometricDevicesPage,
@@ -346,6 +347,9 @@ function BiometricDevicesPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* ── FACE KIOSKS (BOTLens) ── */}
+      <FaceKiosksCard canEdit={canEdit} />
 
       {/* ── PUNCH RULES ── */}
       <Card className="border-none shadow-sm bg-card rounded-2xl overflow-hidden">
