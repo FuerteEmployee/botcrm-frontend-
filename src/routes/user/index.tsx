@@ -611,6 +611,14 @@ function UserDashboard() {
   const inferredByDevice = new Set(todayLog?.derivedFields ?? []);
   const displayLunchInTime = inferredByDevice.has("lunchInTime") ? undefined : todayLog?.lunchInTime;
   const displayLunchOutTime = inferredByDevice.has("lunchOutTime") ? undefined : todayLog?.lunchOutTime;
+  // The BUTTONS follow the server's day, machine-made lunch included. Hiding a
+  // lunch the machine started made Home offer "Start Lunch", which the server
+  // then refused ("Lunch already started at 02:09 pm"), with no End Lunch to
+  // press (10 Oct, a machine lunch-in under the company's tap order). The day
+  // rebuild keeps an app End Lunch as the person's own, so ending a machine
+  // lunch here is safe. The display variables above only decide the tag.
+  const lunchStartedAt = todayLog?.lunchInTime;
+  const lunchEndedAt = todayLog?.lunchOutTime;
   // Cleared server-side the moment the employee explicitly punches out via
   // the app, even on a day that started via Lens — so an app punch-out
   // always shows immediately instead of waiting for "today" to pass.
@@ -860,7 +868,7 @@ function UserDashboard() {
   useEffect(() => {
     if (todayLog?.punchIn && !displayPunchOut) {
       const calculateDiff = () => {
-        const ms = workedTodayMs(todayLog, displayLunchInTime, displayLunchOutTime, Date.now());
+        const ms = workedTodayMs(todayLog, lunchStartedAt, lunchEndedAt, Date.now());
         setElapsedSeconds(Math.floor(ms / 1000));
       };
       calculateDiff();
@@ -2013,7 +2021,7 @@ function UserDashboard() {
               // Punched in, not punched out
               <div className="flex flex-col gap-3">
                 {/* Lunch states layout */}
-                {!displayLunchInTime ? (
+                {!lunchStartedAt ? (
                   // Punched In but hasn't started lunch: Can start lunch OR punch out
                   <div className="grid grid-cols-2 gap-3">
                     <Button
@@ -2040,23 +2048,34 @@ function UserDashboard() {
                       )}
                     </Button>
                   </div>
-                ) : !displayLunchOutTime ? (
-                  // Currently on lunch: Must end lunch break
-                  <Button
-                    onClick={() => lunchOutMutation.mutate()}
-                    disabled={lunchOutMutation.isPending}
-                    className="relative w-full h-14 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-[15px] tracking-wide"
-                  >
-                    <HapticOverlay radius="16px" />
-                    {lunchOutMutation.isPending ? (
-                      <RefreshCw className="h-5 w-5 animate-spin" />
-                    ) : (
-                      <>
-                        <Coffee className="h-5 w-5 text-white" />
-                        <span>End Lunch</span>
-                      </>
-                    )}
-                  </Button>
+                ) : !lunchEndedAt ? (
+                  // On lunch (started here or on the machine): End Lunch, or
+                  // Punch Out for someone who leaves for the day from lunch.
+                  <div className="grid grid-cols-2 gap-3">
+                    <Button
+                      onClick={() => beginPunch("punch-out")}
+                      className="relative h-14 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-700 hover:to-red-600 text-white font-semibold rounded-[16px] shadow-xs border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all text-[15px] tracking-wide"
+                    >
+                      <HapticOverlay radius="16px" />
+                      <Fingerprint className="h-5 w-5 text-white" />
+                      <span>Punch Out</span>
+                    </Button>
+                    <Button
+                      onClick={() => lunchOutMutation.mutate()}
+                      disabled={lunchOutMutation.isPending}
+                      className="relative h-14 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-[15px] tracking-wide"
+                    >
+                      <HapticOverlay radius="16px" />
+                      {lunchOutMutation.isPending ? (
+                        <RefreshCw className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <>
+                          <Coffee className="h-5 w-5 text-white" />
+                          <span>End Lunch</span>
+                        </>
+                      )}
+                    </Button>
+                  </div>
                 ) : (
                   // Lunch completed: Only Punch Out button is available
                   <Button
@@ -2114,7 +2133,7 @@ function UserDashboard() {
                     <span className="text-[12px] font-semibold text-slate-500 dark:text-slate-400">Worked today</span>
                   </div>
                   <span className="text-[16px] font-mono font-bold text-slate-700 dark:text-slate-200">
-                    {formatMs(todayLog?.totalWorkMs || workedTodayMs(todayLog, displayLunchInTime, displayLunchOutTime, Date.now()))}
+                    {formatMs(todayLog?.totalWorkMs || workedTodayMs(todayLog, lunchStartedAt, lunchEndedAt, Date.now()))}
                   </span>
                 </div>
 
