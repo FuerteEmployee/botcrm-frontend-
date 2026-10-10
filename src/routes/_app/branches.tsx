@@ -26,6 +26,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { useBranchService, type Branch as BackendBranch } from "@/services/branch-service";
 import { requestErrorMessage } from "@/services/request-error";
+import { BranchFenceOffNote } from "@/components/settings/location-rule-notes";
 import { acquirePosition, openLocationSettings, getIOSUnblockInstructions, isNativeApp } from "@/lib/geolocation";
 
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
@@ -708,6 +709,7 @@ function BranchesPage() {
                   onCheckedChange={(v) => setField("geoFenceEnabled", v)}
                 />
               </div>
+              {!form.geoFenceEnabled && <BranchFenceOffNote />}
 
               <div className="space-y-1.5 bg-muted/20 p-4 rounded-2xl border border-border/40">
                 <div className="flex items-center justify-between gap-2 mb-2">

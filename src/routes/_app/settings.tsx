@@ -27,6 +27,7 @@ import { DeleteDialog } from "@/components/shared/delete-dialog";
 import { useShiftService } from "@/services/shift-service";
 import { useBranchService } from "@/services/branch-service";
 import { SettingsGuide, settingsGuideLines } from "@/components/settings/settings-guide";
+import { OwnLocationRulesNote } from "@/components/settings/location-rule-notes";
 import { usePermission } from "@/hooks/use-permission";
 import { useFeatureToggles } from "@/hooks/use-feature-toggles";
 import { formatINRFull } from "@/lib/format";
@@ -597,6 +598,7 @@ function SettingsPage() {
                             onCheckedChange={(v) => setAttendance(p => ({ ...p, requireLocation: v }))} 
                           />
                         </div>
+                        <OwnLocationRulesNote />
                         <div className="flex items-center justify-between p-3.5 rounded-xl bg-muted/20 border border-border/40">
                           <div>
                             <div className="text-[13px] font-bold">Remote Punch</div>
