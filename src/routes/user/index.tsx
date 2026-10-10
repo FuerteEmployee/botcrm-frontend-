@@ -2021,7 +2021,37 @@ function UserDashboard() {
               // Punched in, not punched out
               <div className="flex flex-col gap-3">
                 {/* Lunch states layout */}
-                {!lunchStartedAt ? (
+                {machineOut && !lunchStartedAt ? (
+                  // The machine's last tap read as an "out": the person may have
+                  // gone home, or gone for lunch. Back from lunch makes that tap
+                  // the lunch start (the server does this); Start Lunch here
+                  // would have started the lunch NOW, at the wrong time.
+                  <div className="grid grid-cols-2 gap-3">
+                    <Button
+                      onClick={() => beginPunch("punch-out")}
+                      className="relative h-14 bg-gradient-to-r from-rose-600 to-red-500 hover:from-rose-700 hover:to-red-600 text-white font-semibold rounded-[16px] shadow-xs border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all text-[15px] tracking-wide"
+                    >
+                      <HapticOverlay radius="16px" />
+                      <Fingerprint className="h-5 w-5 text-white" />
+                      <span>Punch Out</span>
+                    </Button>
+                    <Button
+                      onClick={() => lunchOutMutation.mutate()}
+                      disabled={lunchOutMutation.isPending}
+                      className="relative h-14 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-semibold rounded-[16px] shadow-md border-none flex items-center justify-center gap-2 active:scale-98 cursor-pointer transition-all duration-300 text-[15px] tracking-wide"
+                    >
+                      <HapticOverlay radius="16px" />
+                      {lunchOutMutation.isPending ? (
+                        <RefreshCw className="h-5 w-5 animate-spin" />
+                      ) : (
+                        <>
+                          <Coffee className="h-5 w-5 text-white" />
+                          <span>Back from lunch</span>
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                ) : !lunchStartedAt ? (
                   // Punched In but hasn't started lunch: Can start lunch OR punch out
                   <div className="grid grid-cols-2 gap-3">
                     <Button
@@ -2180,6 +2210,12 @@ function UserDashboard() {
               instead of a matter of recollection. */}
           <TodayActivity
             sessions={todaySessions}
+            lunch={{
+              start: lunchStartedAt,
+              end: lunchEndedAt,
+              startByMachine: inferredByDevice.has("lunchInTime"),
+              endByMachine: inferredByDevice.has("lunchOutTime"),
+            }}
             branchName={profile?.branchId?.branchName ?? profile?.branchId?.name}
             totalWorkMs={todayLog?.punchOut ? todayLog?.totalWorkMs : null}
           />

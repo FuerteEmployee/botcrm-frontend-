@@ -1,4 +1,4 @@
-import { LogIn, LogOut, History, Smartphone, Fingerprint, ScanFace, UserCog, MapPinOff, CloudOff, UtensilsCrossed } from "lucide-react";
+import { LogIn, LogOut, History, Smartphone, Fingerprint, ScanFace, UserCog, MapPinOff, CloudOff, UtensilsCrossed, Coffee } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CHANNEL_LABEL, closeTag, lateTag, type PunchTag } from "@/lib/punch-labels";
 
@@ -211,7 +211,9 @@ export function TodaySessions({ sessions, minSessions = 2 }: { sessions: Numbere
 // ── chronological activity list ───────────────────────────────────────────────
 
 interface ActivityRow {
-  kind: "in" | "out";
+  kind: "in" | "out" | "lunch-start" | "lunch-end";
+  /** Lunch read from machine or camera taps (the server's derivedFields). */
+  byMachine?: boolean;
   at: string;
   distance?: number | null;
   session: number;
@@ -242,13 +244,18 @@ export function TodayActivity({
   sessions,
   branchName,
   totalWorkMs,
+  lunch,
 }: {
   sessions: NumberedSession[];
   branchName?: string;
   /** The day's credited hours from the server, to explain any lunch deduction. */
   totalWorkMs?: number | null;
+  /** The day's lunch, so it is listed like every other punch (it used to be missing). */
+  lunch?: { start?: string | null; end?: string | null; startByMachine?: boolean; endByMachine?: boolean };
 }) {
   const rows: ActivityRow[] = [];
+  if (lunch?.start) rows.push({ kind: "lunch-start", at: lunch.start, session: 0, byMachine: lunch.startByMachine });
+  if (lunch?.end) rows.push({ kind: "lunch-end", at: lunch.end, session: 0, byMachine: lunch.endByMachine });
   for (const s of sessions) {
     if (s.punchIn) rows.push({ kind: "in", at: s.punchIn, distance: s.punchInDistance, session: s.n, source: s.punchInSource, receivedAt: s.punchInReceivedAt, open: !s.punchOut });
     if (s.punchOut) {
@@ -271,6 +278,35 @@ export function TodayActivity({
 
       <div className="divide-y divide-slate-100 dark:divide-white/5">
         {rows.map((r, i) => {
+          if (r.kind === "lunch-start" || r.kind === "lunch-end") {
+            return (
+              <div key={`${r.kind}-${r.at}-${i}`} className="flex items-center gap-3 px-4 py-2.5">
+                <div className="h-7 w-7 rounded-full flex items-center justify-center shrink-0 bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                  <Coffee className="h-3.5 w-3.5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[14px] font-semibold text-slate-700 dark:text-slate-200 truncate">
+                    {r.kind === "lunch-start" ? "Lunch started" : "Back from lunch"}
+                    <span className="text-slate-400 font-normal"> &mdash; </span>
+                    <span className="tabular-nums">{fmtTime(r.at)}</span>
+                  </p>
+                  <p className="flex items-center gap-1 text-[12px] text-slate-500 dark:text-slate-400 truncate">
+                    {r.byMachine ? (
+                      <>
+                        <Fingerprint className="h-3 w-3 text-slate-400" />
+                        On machine or camera
+                      </>
+                    ) : (
+                      <>
+                        <ChannelIcon channel="app" className="h-3 w-3 text-slate-400" />
+                        {CHANNEL_LABEL.app}
+                      </>
+                    )}
+                  </p>
+                </div>
+              </div>
+            );
+          }
           const dist = fmtDistance(r.distance);
           // An auto punch-out was not something the employee did, and labelling
           // it identically to one they pressed is how "I never punched out"
