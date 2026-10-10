@@ -5,6 +5,7 @@ import { CenterModal } from "@/components/shared/center-modal";
 import { MissedPunchOutPrompt } from "@/components/user/missed-punch-out-prompt";
 import { OfflineBanner } from "@/components/user/offline-banner";
 import { ApkUpdatePrompt } from "@/components/shared/apk-update-prompt";
+import { NoticePopup } from "@/components/notices/notice-popup";
 import { hapticSelection } from "@/lib/haptics";
 import { useAuth } from "@/hooks/use-auth";
 import { useDeveloperOptionsGate } from "@/hooks/use-developer-options-gate";
@@ -375,6 +376,9 @@ function UserLayout() {
             {/* Native updates, which OTA cannot deliver. Checks later than the
                 bundle prompt so the quick update goes first when both wait. */}
             <ApkUpdatePrompt />
+            {/* Notices the admin marked "show as popup" that this employee
+                has not answered / marked read / seen yet. */}
+            <NoticePopup />
           </div>
         </main>
       </div>

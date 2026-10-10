@@ -3,6 +3,32 @@ import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
 import { requestErrorMessage, retryUnlessUnavailable } from "./request-error";
 
+export type QuestionKind = "none" | "yes_no" | "single" | "multiple" | "number";
+export type AudienceMode = "all" | "branches" | "departments" | "shifts" | "employees";
+
+export interface AnnouncementQuestion {
+  kind: QuestionKind;
+  prompt?: string;
+  options?: string[];
+  min?: number | null;
+  max?: number | null;
+  unit?: string;
+  allowChange?: boolean;
+}
+
+export interface AnnouncementAnswer {
+  choices?: number[];
+  number?: number;
+}
+
+/** The signed-in employee's own read marks and answer (employees only). */
+export interface MyNoticeResponse {
+  seenAt: string | null;
+  readAt: string | null;
+  answeredAt: string | null;
+  answer: AnnouncementAnswer | null;
+}
+
 export interface Announcement {
   _id: string;
   title: string;
@@ -12,10 +38,51 @@ export interface Announcement {
   author: string;
   pinned: boolean;
   createdAt: string;
+  display?: { popup?: boolean; markAsRead?: boolean };
+  question?: AnnouncementQuestion;
+  closesAt?: string | null;
+  /** `ids` is only sent to the admin panel. */
+  audience?: { mode: AudienceMode; ids?: string[] };
+  isOpen?: boolean;
+  /** Admin panel: progress over the active employees it is for. */
+  stats?: { audience: number; seen: number; read: number; answered: number };
+  /** Employees: their own response, and whether the app should pop it up. */
+  myResponse?: MyNoticeResponse | null;
+  pending?: boolean;
 }
 
 /** The only fields the page sends. The server ignores anything else. */
-export type AnnouncementInput = Pick<Announcement, "title" | "content" | "type" | "pinned">;
+export interface AnnouncementInput {
+  title: string;
+  content: string;
+  type: Announcement["type"];
+  pinned: boolean;
+  display: { popup: boolean; markAsRead: boolean };
+  question: AnnouncementQuestion;
+  closesAt: string | null;
+  audience: { mode: AudienceMode; ids: string[] };
+}
+
+export const hasQuestion = (a: Pick<Announcement, "question">) => !!a.question && a.question.kind !== "none";
+
+export interface NoticeResults {
+  announcement: Announcement;
+  totals: { audience: number; seen: number; read: number; answered: number; notAnswered: number };
+  options: { index: number; label: string; count: number; people: { employeeId: string; name: string }[] }[];
+  number: { answered: number; total: number; average: number | null; min: number | null; max: number | null; unit: string } | null;
+  people: {
+    employeeId: string;
+    name: string;
+    phone: string;
+    branch: string;
+    department: string;
+    inAudience: boolean;
+    seenAt: string | null;
+    readAt: string | null;
+    answeredAt: string | null;
+    answer: { choices: number[]; labels: string[]; number: number | null } | null;
+  }[];
+}
 
 // Same limits as announcement_controller.js.
 export const ANNOUNCEMENT_TITLE_MAX = 150;
@@ -135,5 +202,58 @@ export function useAnnouncementService() {
     isSaving: createMutation.isPending || updateMutation.isPending,
     isDeleting: deleteMutation.isPending,
     pinningId: togglePinMutation.isPending ? (togglePinMutation.variables as string | undefined) : undefined,
+  };
+}
+
+/** Admin panel: who read it, who answered what, who has not yet. */
+export function useNoticeResults(id: string | null) {
+  return useQuery<NoticeResults>({
+    queryKey: ["announcements", "results", id],
+    queryFn: async () => (await apiClient.get(`/announcements/${id}/results`)).data,
+    enabled: !!id,
+    retry: retryUnlessUnavailable,
+    refetchInterval: 60 * 1000,
+  });
+}
+
+/**
+ * Employees: mark read, answer, and mark seen. Every one refreshes the
+ * ["announcements"] queries so the board, the bell and the popup agree.
+ */
+export function useNoticeActions() {
+  const queryClient = useQueryClient();
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["announcements"] });
+
+  const read = useMutation({
+    mutationFn: async (id: string) => (await apiClient.post(`/announcements/${id}/read`)).data,
+    onSuccess: refresh,
+    onError: (e) => toastError(e, "Could not mark it as read. Please try again."),
+  });
+
+  const respond = useMutation({
+    mutationFn: async ({ id, answer }: { id: string; answer: AnnouncementAnswer }) =>
+      (await apiClient.post(`/announcements/${id}/respond`, answer)).data,
+    onSuccess: () => {
+      refresh();
+      toast.success("Answer sent");
+    },
+    onError: (e) => {
+      refresh();
+      toastError(e, "Could not send your answer. Please try again.");
+    },
+  });
+
+  // Silent: a failed "seen" only means the popup may show once more.
+  const seen = useMutation({
+    mutationFn: async (ids: string[]) => (await apiClient.post("/announcements/seen", { ids })).data,
+    onSuccess: refresh,
+  });
+
+  return {
+    markRead: read.mutateAsync,
+    respond: respond.mutateAsync,
+    markSeen: seen.mutate,
+    isMarkingRead: read.isPending,
+    isResponding: respond.isPending,
   };
 }

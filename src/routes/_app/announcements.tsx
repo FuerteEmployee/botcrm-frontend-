@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
-import { Megaphone, Pin, PinOff, Trash2, Search, Info, AlertTriangle, CalendarDays, Filter } from "lucide-react";
+import { Megaphone, Pin, PinOff, Trash2, Search, Info, AlertTriangle, CalendarDays, Filter, BarChart3, BellRing, CheckCheck, HelpCircle, Users } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/shared/page-header";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,8 +25,11 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import {
   useAnnouncementService, type Announcement, type AnnouncementInput,
-  ANNOUNCEMENT_TITLE_MAX, ANNOUNCEMENT_CONTENT_MAX,
+  ANNOUNCEMENT_TITLE_MAX, ANNOUNCEMENT_CONTENT_MAX, hasQuestion,
 } from "@/services/announcement-service";
+import { NoticeAudienceFields, NoticeDisplayFields, NoticeQuestionFields } from "@/components/notices/notice-options-fields";
+import { NoticeResultsDialog } from "@/components/notices/notice-results-dialog";
+import { audienceText, QUESTION_BADGE } from "@/components/notices/notice-utils";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { useLayoutSettings } from "@/hooks/use-layout-settings";
 import { GridCard } from "@/components/shared/grid-card";
@@ -38,13 +41,46 @@ export const Route = createFileRoute("/_app/announcements")({
 });
 
 const TYPE_CONFIG = {
-  general: { icon: Megaphone, color: "text-primary bg-primary/10", badge: "bg-primary/10 text-primary", label: "General" },
+  general: { icon: Megaphone, color: "text-primary bg-primary/10", badge: "bg-primary/10 text-primary", label: "Announcement" },
   urgent: { icon: AlertTriangle, color: "text-destructive bg-destructive/10", badge: "bg-destructive/10 text-destructive", label: "Urgent" },
   event: { icon: CalendarDays, color: "text-success bg-success/10", badge: "bg-success/10 text-success", label: "Event" },
   policy: { icon: Info, color: "text-info bg-info/10", badge: "bg-info/10 text-info", label: "Policy" },
 };
 
-const EMPTY_FORM: AnnouncementInput = { title: "", content: "", type: "general", pinned: false };
+const EMPTY_FORM: AnnouncementInput = {
+  title: "", content: "", type: "general", pinned: false,
+  display: { popup: false, markAsRead: false },
+  question: { kind: "none", prompt: "", options: [], min: null, max: null, unit: "", allowChange: true },
+  closesAt: null,
+  audience: { mode: "all", ids: [] },
+};
+
+// A notice's own settings as the form edits them.
+function formFrom(a: Announcement): AnnouncementInput {
+  const q = a.question;
+  return {
+    title: a.title,
+    content: a.content,
+    type: a.type,
+    pinned: !!a.pinned,
+    display: { popup: !!a.display?.popup, markAsRead: !!a.display?.markAsRead },
+    question: q && q.kind !== "none"
+      ? { kind: q.kind, prompt: q.prompt || "", options: q.options ? [...q.options] : [], min: q.min ?? null, max: q.max ?? null, unit: q.unit || "", allowChange: q.allowChange !== false }
+      : EMPTY_FORM.question,
+    closesAt: a.closesAt || null,
+    audience: { mode: a.audience?.mode || "all", ids: a.audience?.ids ? [...a.audience.ids] : [] },
+  };
+}
+
+/** What still needs doing before it can be posted, in words, or "". */
+function formProblem(f: AnnouncementInput): string {
+  const q = f.question;
+  if ((q.kind === "single" || q.kind === "multiple") && (q.options || []).filter((o) => o.trim()).length < 2) return "Please add at least two choices.";
+  if (q.kind === "number" && [q.min, q.max].some((n) => n !== null && n !== undefined && !Number.isInteger(n))) return "Lowest and highest must be whole numbers.";
+  if (q.kind === "number" && q.min != null && q.max != null && q.min > q.max) return "The lowest number cannot be more than the highest.";
+  if (f.audience.mode !== "all" && f.audience.ids.length === 0) return "Please pick who should see it, or choose Everyone.";
+  return "";
+}
 
 // The day it was posted, in IST and Indian order ("26 Sep 2026"). The stored
 // `date` string is US-formatted ("Sep 26, 2026") and was shown as-is.
@@ -64,6 +100,7 @@ function AnnouncementsPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Announcement | null>(null);
   const [deleting, setDeleting] = useState<Announcement | null>(null);
+  const [resultsId, setResultsId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filterType, setFilterType] = useState<"all" | Announcement["type"]>("all");
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
@@ -97,20 +134,30 @@ function AnnouncementsPage() {
   // createdAt, adminId ...) used to be sent back on every save.
   const openEdit = (a: Announcement) => {
     setEditing(a);
-    setForm({ title: a.title, content: a.content, type: a.type, pinned: !!a.pinned });
+    setForm(formFrom(a));
     setOpen(true);
   };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSaving) return;
-    const data: AnnouncementInput = { ...form, title: form.title.trim(), content: form.content.trim() };
+    const data: AnnouncementInput = {
+      ...form,
+      title: form.title.trim(),
+      content: form.content.trim(),
+      question: { ...form.question, options: (form.question.options || []).map((o) => o.trim()).filter(Boolean) },
+    };
     if (!data.title) {
       toast.error("Please enter a title for the notice.");
       return;
     }
     if (!data.content) {
       toast.error("Please write the message for the notice.");
+      return;
+    }
+    const problem = formProblem(data);
+    if (problem) {
+      toast.error(problem);
       return;
     }
 
@@ -144,6 +191,14 @@ function AnnouncementsPage() {
   // 40px buttons (the shared GridCard ones are 36px).
   const rowActions = (a: Announcement) => (
     <div className="flex items-center gap-1.5">
+      <ActionButton
+        variant="ghost"
+        icon={BarChart3}
+        tooltip="Results: who read, who answered"
+        aria-label={`Results for ${a.title}`}
+        onClick={() => setResultsId(a._id)}
+        className="h-10 w-10 border border-primary/20 text-primary bg-primary/5"
+      />
       {canEdit && (
         <ActionButton
           variant="ghost"
@@ -163,6 +218,39 @@ function AnnouncementsPage() {
       )}
     </div>
   );
+
+  // What the notice does beyond its text: popup, read button, question, audience.
+  const extras = (a: Announcement) => {
+    const s = a.stats;
+    const question = hasQuestion(a);
+    return (
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {a.display?.popup && (
+            <Badge variant="outline" className="text-[11px] font-bold px-2 py-0.5 border-transparent bg-violet-500/10 text-violet-700 gap-1"><BellRing className="h-3 w-3" /> Popup</Badge>
+          )}
+          {a.display?.markAsRead && (
+            <Badge variant="outline" className="text-[11px] font-bold px-2 py-0.5 border-transparent bg-emerald-500/10 text-emerald-700 gap-1"><CheckCheck className="h-3 w-3" /> Mark as read</Badge>
+          )}
+          {question && (
+            <Badge variant="outline" className="text-[11px] font-bold px-2 py-0.5 border-transparent bg-sky-500/10 text-sky-700 gap-1">
+              <HelpCircle className="h-3 w-3" /> {QUESTION_BADGE[a.question!.kind]}{a.isOpen === false ? " · closed" : ""}
+            </Badge>
+          )}
+          {a.audience?.mode && a.audience.mode !== "all" && (
+            <Badge variant="outline" className="text-[11px] font-bold px-2 py-0.5 border-transparent bg-muted text-muted-foreground gap-1"><Users className="h-3 w-3" /> {audienceText(a)}</Badge>
+          )}
+        </div>
+        {s && (question || a.display?.markAsRead || a.display?.popup) && (
+          <button type="button" onClick={() => setResultsId(a._id)} className="text-left text-[12px] text-muted-foreground hover:text-primary">
+            {question && <><span className="font-bold text-foreground">{s.answered}/{s.audience}</span> answered · </>}
+            {a.display?.markAsRead && <><span className="font-bold text-foreground">{s.read}/{s.audience}</span> read · </>}
+            <span className="font-bold text-foreground">{s.seen}/{s.audience}</span> seen
+          </button>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -275,6 +363,7 @@ function AnnouncementsPage() {
                             </Badge>
                           )}
                         </div>
+                        <div className="pt-2">{extras(announcement)}</div>
                       </GridCard>
                     );
                   })}
@@ -301,6 +390,7 @@ function AnnouncementsPage() {
                               <span className="text-[14px] font-semibold break-words">{a.title}</span>
                             </div>
                             <p className="text-[12px] text-muted-foreground line-clamp-1 break-all">{a.content}</p>
+                            <div className="mt-1">{extras(a)}</div>
                           </div>
                         </DataTableCell>
                         <DataTableCell className="text-[13px] font-medium">{a.author}</DataTableCell>
@@ -329,7 +419,7 @@ function AnnouncementsPage() {
                 </div>
                 <div className="text-left">
                   <DialogTitle className="text-lg font-black tracking-tight">{editing ? "Edit Notice" : "Post Notice"}</DialogTitle>
-                  <DialogDescription className="text-[12px] font-medium text-muted-foreground">Every employee in your company can read this in the app, under Announcements.</DialogDescription>
+                  <DialogDescription className="text-[12px] font-medium text-muted-foreground">Employees read it in the app under Announcements and the bell. You can also pop it up, ask a question, and choose who gets it.</DialogDescription>
                 </div>
               </div>
             </DialogHeader>
@@ -353,10 +443,15 @@ function AnnouncementsPage() {
                     <FormSelect
                       label="Category"
                       value={form.type}
-                      onValueChange={(v) => setForm({ ...form, type: v as Announcement["type"] })}
+                      onValueChange={(v) => setForm({
+                        ...form,
+                        type: v as Announcement["type"],
+                        // An urgent notification pops up unless the admin unticks it.
+                        display: v === "urgent" && !editing ? { ...form.display, popup: true } : form.display,
+                      })}
                       options={[
-                        { label: "General Notice", value: "general" },
-                        { label: "Urgent Alert", value: "urgent" },
+                        { label: "Announcement", value: "general" },
+                        { label: "Urgent notification", value: "urgent" },
                         { label: "Company Event", value: "event" },
                         { label: "Policy Update", value: "policy" },
                       ]}
@@ -377,6 +472,10 @@ function AnnouncementsPage() {
                   />
                   <p className="text-right text-[11px] text-muted-foreground">{form.content.length}/{ANNOUNCEMENT_CONTENT_MAX}</p>
                 </div>
+
+                <NoticeDisplayFields form={form} setForm={setForm} />
+                <NoticeQuestionFields form={form} setForm={setForm} answered={editing?.stats?.answered ?? 0} />
+                <NoticeAudienceFields form={form} setForm={setForm} />
 
                 <button
                   type="button"
@@ -412,6 +511,8 @@ function AnnouncementsPage() {
         </DialogContent>
       </Dialog>
 
+      <NoticeResultsDialog id={resultsId} onClose={() => setResultsId(null)} />
+
       {/* Delete Dialog */}
       <AlertDialog open={!!deleting} onOpenChange={(o) => { if (!o && !isDeleting) setDeleting(null); }}>
         <AlertDialogContent className="rounded-xl">
@@ -420,7 +521,7 @@ function AnnouncementsPage() {
               <Trash2 className="h-5 w-5" />
             </div>
             <AlertDialogTitle className="text-[16px] break-words">Delete {deleting ? `"${deleting.title}"` : "this notice"}?</AlertDialogTitle>
-            <AlertDialogDescription className="text-[13px]">Employees will no longer see it. This cannot be undone.</AlertDialogDescription>
+            <AlertDialogDescription className="text-[13px]">Employees will no longer see it{deleting && (hasQuestion(deleting) || deleting.display?.markAsRead) ? ", and its answers and read marks go with it" : ""}. This cannot be undone.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="mt-4 gap-2">
             <AlertDialogCancel disabled={isDeleting} className="rounded-xl h-11 px-6 font-bold border-border/40 hover:bg-muted/50 transition-all text-[13px]">Keep Notice</AlertDialogCancel>
