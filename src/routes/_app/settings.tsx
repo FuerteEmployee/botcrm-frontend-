@@ -851,9 +851,9 @@ function SettingsPage() {
                       <NumField label="Shortest work stretch" suffix="secs" max={3600} value={attendance.workMinGapSeconds}
                         onChange={(v) => setAttendance(p => ({ ...p, workMinGapSeconds: v }))}
                         hint="In the app, starting lunch or punching out this soon after the previous punch is refused. 0 turns it off." />
-                      <NumField label="Machine double-tap window" suffix="secs" max={3600} value={attendance.punchDebounceSeconds}
+                      <NumField label="Machine & face camera double-tap window" suffix="secs" max={3600} value={attendance.punchDebounceSeconds}
                         onChange={(v) => setAttendance(p => ({ ...p, punchDebounceSeconds: v }))}
-                        hint="Biometric machines only: a second tap by the same person within this time is ignored. 0 turns it off." />
+                        hint="Fingerprint machine and face camera: a tap or face seen this soon after the person's last punch (machine, camera or phone) is not counted. Recommended 120 (2 minutes). 0 turns it off." />
                       <NumField label="Default fence radius" suffix="m" min={50} max={100000} step={50} value={attendance.officeRadius}
                         onChange={(v) => setAttendance(p => ({ ...p, officeRadius: v }))}
                         hint="Used by any branch that has no radius of its own." />
