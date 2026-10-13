@@ -76,6 +76,9 @@ export function FaceKiosksCard({ canEdit }: { canEdit: boolean }) {
   const activeKiosks = (kiosks.data || []).filter((k) => !k.revokedAt);
   const offKiosks = (kiosks.data || []).filter((k) => k.revokedAt);
   const faceRows = faces.data || [];
+  const weakFaces = faceRows.filter((f) => f.needsRescan);
+  const [weakOnly, setWeakOnly] = useState(false);
+  const shownFaces = weakOnly ? weakFaces : faceRows;
 
   return (
     <Card className="border-none shadow-sm bg-card rounded-2xl overflow-hidden">
@@ -135,6 +138,14 @@ export function FaceKiosksCard({ canEdit }: { canEdit: boolean }) {
                         Last used {ago(k.lastSeenAt)} · set up {day(k.createdAt)}
                         {k.createdBy ? ` by ${k.createdBy}` : ""}
                       </p>
+                      {(k.punchesToday !== undefined || k.facesRegistered !== undefined) && (
+                        <p className="text-[11px] mt-0.5">
+                          <span className="font-bold">{k.punchesToday ?? 0}</span>
+                          <span className="text-muted-foreground"> face punch{(k.punchesToday ?? 0) === 1 ? "" : "es"} today · </span>
+                          <span className="font-bold">{k.facesRegistered ?? 0}</span>
+                          <span className="text-muted-foreground"> face{(k.facesRegistered ?? 0) === 1 ? "" : "s"} registered here</span>
+                        </p>
+                      )}
                     </div>
                     {canEdit && (
                       <Button variant="outline" className="h-10 rounded-xl text-destructive border-destructive/40" onClick={() => setRevoking(k)}>
@@ -160,12 +171,26 @@ export function FaceKiosksCard({ canEdit }: { canEdit: boolean }) {
                 Faces are added on a kiosk with the BOTLens email and password. Removing one here stops every kiosk
                 recognising that person.
               </p>
+              {weakFaces.length > 0 && (
+                <div className="mt-2 flex items-center gap-2 flex-wrap rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+                  <p className="text-[12px] flex-1 min-w-[200px]">
+                    <span className="font-bold">{weakFaces.length} face{weakFaces.length === 1 ? " has" : "s have"} weak data</span>{" "}
+                    <span className="text-muted-foreground">
+                      (fewer than 4 angles, e.g. an old single photo). They are recognised less often: scan them again on a
+                      kiosk (Register faces → the person → Scan again).
+                    </span>
+                  </p>
+                  <Button variant="outline" className="h-10 rounded-xl font-bold" onClick={() => setWeakOnly((v) => !v)}>
+                    {weakOnly ? "Show all" : "Show only these"}
+                  </Button>
+                </div>
+              )}
             </div>
             {faceRows.length === 0 ? (
               <p className="px-6 pb-6 text-[12px] text-muted-foreground">No faces registered yet.</p>
             ) : (
               <div className="divide-y divide-border/30">
-                {faceRows.map((f) => (
+                {shownFaces.map((f) => (
                   <div key={f.employeeId} className="flex items-center gap-3 px-6 py-2.5">
                     {f.thumbnailUrl ? (
                       <img src={f.thumbnailUrl} alt="" className="h-9 w-9 rounded-full object-cover bg-muted shrink-0" />
@@ -184,6 +209,13 @@ export function FaceKiosksCard({ canEdit }: { canEdit: boolean }) {
                         {f.kiosk ? ` on ${f.kiosk}` : ""}
                         {f.updatedAt !== f.registeredAt ? ` · rescanned ${day(f.updatedAt)}` : ""}
                       </p>
+                      {f.angles !== undefined && (
+                        <span
+                          className={`inline-block mt-0.5 text-[10.5px] font-bold px-2 py-0.5 rounded-full ${f.needsRescan ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"}`}
+                        >
+                          {f.needsRescan ? `Rescan: only ${f.angles} angle${f.angles === 1 ? "" : "s"}` : `Good (${f.angles} angles)`}
+                        </span>
+                      )}
                     </div>
                     {canEdit && (
                       <Button variant="ghost" size="icon" className="h-10 w-10 rounded-xl text-destructive" aria-label={`Remove ${f.name}'s face`} onClick={() => setRemoving(f)}>

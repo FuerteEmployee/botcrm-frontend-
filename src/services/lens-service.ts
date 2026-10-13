@@ -12,6 +12,10 @@ export interface LensKiosk {
   lastSeenAt: string | null;
   revokedAt: string | null;
   createdBy: string | null;
+  /** Face punches counted today by this kiosk (servers before 13 Oct leave it out). */
+  punchesToday?: number;
+  /** Faces registered on this kiosk. */
+  facesRegistered?: number;
 }
 
 export interface LensFace {
@@ -23,6 +27,10 @@ export interface LensFace {
   registeredAt: string;
   updatedAt: string;
   kiosk: string | null;
+  /** How many scan angles the face has: a full 360-degree scan stores 7, old imported faces 1. */
+  angles?: number;
+  /** Too few angles to match reliably: scan this person again on a kiosk. */
+  needsRescan?: boolean;
 }
 
 export async function getLensKiosks() {
