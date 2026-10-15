@@ -73,7 +73,7 @@ const toMins = (hhmm: string): number => {
  */
 function shiftSummary(f: {
   startTime: string; endTime: string; is24Hours: boolean; workDays: string[];
-  halfDayLatePunchInMin: number; halfDayEarlyPunchOutMin: number; halfDayMinHours?: number; halfDayLateAfterMin?: number;
+  halfDayLatePunchInMin: number; halfDayEarlyPunchOutMin: number; fullDayMins?: number | null; halfDayMinHours?: number; halfDayLateAfterMin?: number;
   lunch: { mode: LunchMode; startTime?: string | null; endTime?: string | null; durationMins?: number | null; minMins?: number | null; maxMins?: number | null };
 }, company: CompanyRules): { text: string; tone: string }[] {
   const start = toMins(f.startTime);
@@ -130,10 +130,12 @@ function shiftSummary(f: {
   const graceOut = ownOut || Math.max(0, Number(company.earlyGrace) || 0);
   const hasOwnGrace = ownIn > 0 || ownOut > 0;
 
-  const bar = Math.max(0, span - lunchMins - graceIn - graceOut);
+  // A stated full day replaces "shift - lunch" (requiredWorkMs does the same).
+  const ownFullDay = Number(f.fullDayMins) > 0 ? Number(f.fullDayMins) : 0;
+  const bar = Math.max(0, (ownFullDay || span - lunchMins) - graceIn - graceOut);
   const sum = [
-    `${fmtMins(span)} shift`,
-    lunchMins > 0 ? `${fmtMins(lunchMins)} lunch` : null,
+    ownFullDay ? `${fmtMins(ownFullDay)} full day` : `${fmtMins(span)} shift`,
+    !ownFullDay && lunchMins > 0 ? `${fmtMins(lunchMins)} lunch` : null,
     graceIn > 0 ? `${fmtMins(graceIn)} late grace` : null,
     graceOut > 0 ? `${fmtMins(graceOut)} early grace` : null,
   ].filter(Boolean).join(" − ");
@@ -183,7 +185,9 @@ function shiftSummary(f: {
       const floor = Number(L.minMins) || 0;
       lines.push({
         tone: "bg-warning",
-        text: floor > slack
+        text: ownFullDay
+          ? `A punched break longer than ${fmtMins(slack)} makes an otherwise full day a Half Day (time after the shift ends is not counted).`
+          : floor > slack
           ? `The Full Day bar does not allow for lunch in this mode, and any punched break counts as at least ${fmtMins(floor)}, so punching a lunch at all makes the day a Half Day. Add a late or early grace of at least that much, or pick another lunch option.`
           : `The Full Day bar does not allow for lunch in this mode: a punched break longer than ${fmtMins(slack)} makes an otherwise full day a Half Day (time after the shift ends is not counted, so it cannot be made up).`,
       });
@@ -224,7 +228,7 @@ const MAX_SHIFT_NAME = 60;
  */
 function validateShiftForm(f: {
   name: string; startTime: string; endTime: string; is24Hours: boolean; workDays: string[];
-  halfDayLatePunchInMin: number; halfDayEarlyPunchOutMin: number; halfDayMinHours?: number; halfDayLateAfterMin?: number;
+  halfDayLatePunchInMin: number; halfDayEarlyPunchOutMin: number; fullDayMins?: number | null; halfDayMinHours?: number; halfDayLateAfterMin?: number;
   lunch: { mode: LunchMode; startTime?: string | null; endTime?: string | null; durationMins?: number | null; minMins?: number | null; maxMins?: number | null };
 }): string | null {
   const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -269,6 +273,12 @@ function validateShiftForm(f: {
   }
   if (grace[0] + grace[1] + lunchMins >= span) {
     return `Late grace, early grace and lunch add up to ${fmtMins(grace[0] + grace[1] + lunchMins)}, which leaves no working time in this ${fmtMins(span)} shift. Lower them.`;
+  }
+  if (f.fullDayMins != null) {
+    const fd = Number(f.fullDayMins);
+    if (!Number.isInteger(fd) || fd < 0) return "Minutes for a full day must be a whole number.";
+    if (fd > span) return `Minutes for a full day (${fmtMins(fd)}) cannot be more than the shift (${fmtMins(span)}).`;
+    if (fd > 0 && grace[0] + grace[1] >= fd) return `Late and early grace (${fmtMins(grace[0] + grace[1])}) must be less than the time needed for a full day (${fmtMins(fd)}).`;
   }
   return null;
 }
@@ -402,7 +412,7 @@ function ShiftsPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<BackendShift | null>(null);
   const [globalWorkDays, setGlobalWorkDays] = useState<string[]>(["M", "T", "W", "Th", "F", "Sa"]);
-  const [form, setForm] = useState({ name: "", startTime: "09:00", endTime: "18:00", workDays: ["M", "T", "W", "Th", "F", "Sa"], is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, halfDayMinHours: 0, halfDayLateAfterMin: 0, lunch: { mode: "fixed_window" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
+  const [form, setForm] = useState({ name: "", startTime: "09:00", endTime: "18:00", workDays: ["M", "T", "W", "Th", "F", "Sa"], is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, fullDayMins: null as number | null, halfDayMinHours: 0, halfDayLateAfterMin: 0, lunch: { mode: "fixed_window" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
@@ -530,7 +540,7 @@ function ShiftsPage() {
   const openAdd = () => {
     setEditing(null);
     setFollowsCompanyDays(false);
-    setForm({ name: "", startTime: "09:00", endTime: "18:00", workDays: globalWorkDays, is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, halfDayMinHours: 0, halfDayLateAfterMin: 0, lunch: { mode: "fixed_window" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
+    setForm({ name: "", startTime: "09:00", endTime: "18:00", workDays: globalWorkDays, is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, fullDayMins: null as number | null, halfDayMinHours: 0, halfDayLateAfterMin: 0, lunch: { mode: "fixed_window" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
     setOpen(true);
   };
 
@@ -548,6 +558,7 @@ function ShiftsPage() {
       workDays: ownDays ? (s.workDays as string[]) : globalWorkDays, is24Hours: is24,
       halfDayLatePunchInMin: s.halfDayLatePunchInMin || 0,
       halfDayEarlyPunchOutMin: s.halfDayEarlyPunchOutMin || 0,
+      fullDayMins: s.fullDayMins && s.fullDayMins > 0 ? s.fullDayMins : null,
       halfDayMinHours: s.halfDayMinHours || 0,
       halfDayLateAfterMin: s.halfDayLateAfterMin || 0,
       lunch: {
@@ -610,6 +621,7 @@ function ShiftsPage() {
       name: form.name.trim(),
       workDays: followsCompanyDays ? null : ALL_DAYS.filter((d) => form.workDays.includes(d)),
       lunch: lunchPayload(),
+      fullDayMins: form.fullDayMins && form.fullDayMins > 0 ? form.fullDayMins : null,
     };
 
     savingRef.current = true;
@@ -1292,7 +1304,7 @@ function ShiftsPage() {
               <FormInput
                 label="Minimum hours for a Full Day (optional)"
                 type="number"
-                placeholder="e.g. 6 — leave empty to use the shift length"
+                placeholder="e.g. 6 — overrides the shift-length bar"
                 value={form.halfDayMinHours || ""}
                 onChange={(e) => setForm({ ...form, halfDayMinHours: e.target.value ? Number(e.target.value) : 0 })}
                 className="h-10"
@@ -1302,8 +1314,23 @@ function ShiftsPage() {
                 step={0.5}
               />
               <p className="text-[11px] text-muted-foreground">
-                When set, a day is a Half Day only if the person works fewer hours than this.
-                Arriving after the late grace is still marked Late, but does not cost half a day.
+                Minimum hours: a day is a Half Day only when the person works fewer hours than
+                this, and it replaces the shift-length bar below. Arriving after the late grace
+                is still marked Late, but does not cost half a day.
+              </p>
+              <FormInput
+                label="Full day needs (mins)"
+                type="number"
+                placeholder="Blank = shift minus lunch"
+                value={form.fullDayMins ?? ""}
+                onChange={(e) => setForm({ ...form, fullDayMins: e.target.value ? Number(e.target.value) : null })}
+                className="h-10"
+                containerClassName="space-y-1"
+                min={0}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Work needed for a Full Day, e.g. 480 for 8 hours. Leave it blank to use the
+                shift length minus lunch. Set it when lunch is taken from punches.
               </p>
               <p className="text-[11px] text-muted-foreground">
                 How much lateness and how early a finish this shift absorbs. Both are

@@ -33,9 +33,13 @@ export interface Shift {
   workDays?: string[] | null;
   createdAt: string;
   halfDayLatePunchInMin?: number;
-  halfDayMinHours?: number;
+  /** A punch-in later than this many minutes after the start is a Half Day; 0 = off. */
   halfDayLateAfterMin?: number;
+  /** Net hours below which the day is a Half Day, replacing the shift-length bar; 0 = off. */
+  halfDayMinHours?: number;
   halfDayEarlyPunchOutMin?: number;
+  /** Minutes of work for a Full Day before grace; null = shift minus lunch. */
+  fullDayMins?: number | null;
   lunch?: ShiftLunch;
   /** Every employee on it (primary or one of several), active or not. */
   employees?: number;
