@@ -73,7 +73,7 @@ const toMins = (hhmm: string): number => {
  */
 function shiftSummary(f: {
   startTime: string; endTime: string; is24Hours: boolean; workDays: string[];
-  halfDayLatePunchInMin: number; halfDayEarlyPunchOutMin: number;
+  halfDayLatePunchInMin: number; halfDayEarlyPunchOutMin: number; halfDayMinHours?: number; halfDayLateAfterMin?: number;
   lunch: { mode: LunchMode; startTime?: string | null; endTime?: string | null; durationMins?: number | null; minMins?: number | null; maxMins?: number | null };
 }, company: CompanyRules): { text: string; tone: string }[] {
   const start = toMins(f.startTime);
@@ -224,7 +224,7 @@ const MAX_SHIFT_NAME = 60;
  */
 function validateShiftForm(f: {
   name: string; startTime: string; endTime: string; is24Hours: boolean; workDays: string[];
-  halfDayLatePunchInMin: number; halfDayEarlyPunchOutMin: number;
+  halfDayLatePunchInMin: number; halfDayEarlyPunchOutMin: number; halfDayMinHours?: number; halfDayLateAfterMin?: number;
   lunch: { mode: LunchMode; startTime?: string | null; endTime?: string | null; durationMins?: number | null; minMins?: number | null; maxMins?: number | null };
 }): string | null {
   const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -402,7 +402,7 @@ function ShiftsPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<BackendShift | null>(null);
   const [globalWorkDays, setGlobalWorkDays] = useState<string[]>(["M", "T", "W", "Th", "F", "Sa"]);
-  const [form, setForm] = useState({ name: "", startTime: "09:00", endTime: "18:00", workDays: ["M", "T", "W", "Th", "F", "Sa"], is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, lunch: { mode: "fixed_window" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
+  const [form, setForm] = useState({ name: "", startTime: "09:00", endTime: "18:00", workDays: ["M", "T", "W", "Th", "F", "Sa"], is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, halfDayMinHours: 0, halfDayLateAfterMin: 0, lunch: { mode: "fixed_window" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
@@ -530,7 +530,7 @@ function ShiftsPage() {
   const openAdd = () => {
     setEditing(null);
     setFollowsCompanyDays(false);
-    setForm({ name: "", startTime: "09:00", endTime: "18:00", workDays: globalWorkDays, is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, lunch: { mode: "fixed_window" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
+    setForm({ name: "", startTime: "09:00", endTime: "18:00", workDays: globalWorkDays, is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, halfDayMinHours: 0, halfDayLateAfterMin: 0, lunch: { mode: "fixed_window" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
     setOpen(true);
   };
 
@@ -548,6 +548,8 @@ function ShiftsPage() {
       workDays: ownDays ? (s.workDays as string[]) : globalWorkDays, is24Hours: is24,
       halfDayLatePunchInMin: s.halfDayLatePunchInMin || 0,
       halfDayEarlyPunchOutMin: s.halfDayEarlyPunchOutMin || 0,
+      halfDayMinHours: s.halfDayMinHours || 0,
+      halfDayLateAfterMin: s.halfDayLateAfterMin || 0,
       lunch: {
         mode: initialMode,
         // Defaults for the inputs the SAVED mode does not use, so switching
@@ -1277,6 +1279,32 @@ function ShiftsPage() {
                   min={0}
                 />
               </div>
+              <FormInput
+                label="Half Day if later than (mins, optional)"
+                type="number"
+                placeholder="e.g. 60 — a punch-in over 1 hour late is a Half Day"
+                value={form.halfDayLateAfterMin || ""}
+                onChange={(e) => setForm({ ...form, halfDayLateAfterMin: e.target.value ? Number(e.target.value) : 0 })}
+                className="h-10"
+                containerClassName="space-y-1"
+                min={0}
+              />
+              <FormInput
+                label="Minimum hours for a Full Day (optional)"
+                type="number"
+                placeholder="e.g. 6 — leave empty to use the shift length"
+                value={form.halfDayMinHours || ""}
+                onChange={(e) => setForm({ ...form, halfDayMinHours: e.target.value ? Number(e.target.value) : 0 })}
+                className="h-10"
+                containerClassName="space-y-1"
+                min={0}
+                max={24}
+                step={0.5}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                When set, a day is a Half Day only if the person works fewer hours than this.
+                Arriving after the late grace is still marked Late, but does not cost half a day.
+              </p>
               <p className="text-[11px] text-muted-foreground">
                 How much lateness and how early a finish this shift absorbs. Both are
                 subtracted from the hours needed for a Full Day. Leave both at 0 to use the

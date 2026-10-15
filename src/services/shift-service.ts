@@ -33,6 +33,8 @@ export interface Shift {
   workDays?: string[] | null;
   createdAt: string;
   halfDayLatePunchInMin?: number;
+  halfDayMinHours?: number;
+  halfDayLateAfterMin?: number;
   halfDayEarlyPunchOutMin?: number;
   lunch?: ShiftLunch;
   /** Every employee on it (primary or one of several), active or not. */
