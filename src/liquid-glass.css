@@ -1,13 +1,27 @@
 /*
- * Liquid Glass buttons for the employee app (iOS 26 style).
+ * Liquid Glass for the employee app (iOS 26 style): buttons and the tab bar.
  *
  *   .lg-btn        a coloured action button (Punch In, Save, Submit ...): keeps
  *                  its own colour and gains the glass: a light sheen across the
  *                  top half, a bright rim along the upper edge, a soft inner
- *                  shade at the bottom and a floating shadow. It sinks a
+ *                  shade at the bottom and a floating shadow. Springs down a
  *                  little when pressed.
- *   .lg-btn-clear  a secondary button (Cancel, Back, outline buttons): frosted
- *                  clear glass over whatever is behind it.
+ *   .lg-btn-clear  a secondary button (Cancel, Back, outline buttons): a light
+ *                  glass pill with the same rim and sheen.
+ *   .lg-tabbar     the floating bottom tab bar, the one place with real blur.
+ *
+ * PERFORMANCE (16 Oct, "the whole app started lagging"). Blur is the expensive
+ * part of glass: anything with backdrop-filter has to re-blur what is behind it
+ * on every frame that what is behind it moves. So:
+ *   - Only the tab bar blurs. Content scrolls under it, so that blur is what
+ *     makes it glass; buttons inside the page sit on plain cards, where a blur
+ *     shows nothing and still costs a pass every scroll frame.
+ *   - The bar's blur is one cheap recipe (16px + saturate), on its own GPU
+ *     layer, and nothing under it is a filtered layer any more (the shell's
+ *     120px blurred glows are now plain gradients, see routes/user.tsx).
+ *   - Every animation and press effect moves only transform and opacity, which
+ *     the GPU composites without repainting. No transitions on box-shadow,
+ *     filter or background (each of those repaints the element every frame).
  *
  * Deliberately NOT inside a @layer: unlayered rules win over Tailwind's
  * utilities, so the glass shadow and fill replace a button's own `shadow-md` /
@@ -16,20 +30,24 @@
  *
  * The sheen and rim are ::before / ::after at z-index -1 inside an isolated
  * stacking context: above the button's own background, below its text and
- * icons, so contrast of the label is unchanged.
+ * icons, so the label's contrast is unchanged.
  */
+
+:root {
+  /* iOS-like springs: a quick press, a settle with a little overshoot */
+  --lg-press: cubic-bezier(0.3, 0.7, 0.4, 1);
+  --lg-spring: cubic-bezier(0.2, 1.35, 0.35, 1);
+}
 
 .lg-btn,
 .lg-btn-clear {
   position: relative;
   isolation: isolate;
   overflow: hidden;
+  touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
-  transition:
-    transform 0.45s cubic-bezier(0.2, 1.4, 0.4, 1),
-    box-shadow 0.25s ease,
-    filter 0.25s ease,
-    background-color 0.25s ease;
+  /* release springs back; the press itself is quicker (see :active) */
+  transition: transform 0.5s var(--lg-spring);
 }
 
 .lg-btn::before,
@@ -42,6 +60,12 @@
   z-index: -1;
   border-radius: inherit;
   pointer-events: none;
+}
+
+.lg-btn:active:not(:disabled),
+.lg-btn-clear:active:not(:disabled) {
+  transform: scale(0.96);
+  transition: transform 0.12s var(--lg-press);
 }
 
 /* ── tinted (coloured) glass ─────────────────────────────────────────────── */
@@ -58,8 +82,16 @@
 /* the sheen: light across the top half, a faint glow rising from the bottom */
 .lg-btn::before {
   background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.3) 0%, rgb(255 255 255 / 0.08) 40%, rgb(255 255 255 / 0) 54%),
-    radial-gradient(120% 80% at 50% 125%, rgb(255 255 255 / 0.22) 0%, rgb(255 255 255 / 0) 60%);
+    linear-gradient(180deg, rgb(255 255 255 / 0.36) 0%, rgb(255 255 255 / 0.1) 40%, rgb(255 255 255 / 0) 54%),
+    radial-gradient(120% 80% at 50% 125%, rgb(255 255 255 / 0.26) 0%, rgb(255 255 255 / 0) 60%);
+  opacity: 0.82;
+  transition: opacity 0.4s ease;
+}
+
+/* pressed: the glass catches more light (opacity only, no repaint) */
+.lg-btn:active:not(:disabled)::before {
+  opacity: 1;
+  transition: opacity 0.1s ease;
 }
 
 /* the rim: a thin edge, brightest at the top left, as light catches glass */
@@ -80,48 +112,31 @@
   mask-composite: exclude;
 }
 
-.lg-btn:active:not(:disabled) {
-  transform: scale(0.97);
-  filter: brightness(1.06) saturate(1.06);
-  box-shadow:
-    inset 0 1px 0 0 rgb(255 255 255 / 0.5),
-    inset 0 -1px 0 0 rgb(0 0 0 / 0.12),
-    inset 0 0 0 1px rgb(255 255 255 / 0.18),
-    0 4px 12px -8px rgb(0 0 0 / 0.45);
-}
-
 .lg-btn:disabled {
-  filter: saturate(0.7);
   box-shadow:
     inset 0 1px 0 0 rgb(255 255 255 / 0.25),
     inset 0 0 0 1px rgb(255 255 255 / 0.1);
 }
 
-/* ── clear (frosted) glass ───────────────────────────────────────────────── */
+/* ── clear glass (secondary) ─────────────────────────────────────────────── */
 
 .lg-btn-clear {
-  background-color: rgb(255 255 255 / 0.6);
+  background-color: rgb(255 255 255 / 0.85);
   border-color: rgb(15 23 42 / 0.08);
-  -webkit-backdrop-filter: blur(18px) saturate(180%);
-  backdrop-filter: blur(18px) saturate(180%);
   box-shadow:
-    inset 0 1px 0 0 rgb(255 255 255 / 0.9),
-    inset 0 0 0 1px rgb(255 255 255 / 0.55),
+    inset 0 1px 0 0 rgb(255 255 255 / 0.95),
+    inset 0 0 0 1px rgb(255 255 255 / 0.6),
     0 1px 1px rgb(15 23 42 / 0.04),
     0 8px 20px -12px rgb(15 23 42 / 0.28);
 }
 
 .lg-btn-clear::before {
-  background: linear-gradient(180deg, rgb(255 255 255 / 0.55) 0%, rgb(255 255 255 / 0) 55%);
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.6) 0%, rgb(255 255 255 / 0) 55%);
 }
 
-.lg-btn-clear:hover:not(:disabled) {
-  background-color: rgb(255 255 255 / 0.72);
-}
-
+/* pressed: a faint grey fill (set at once, not animated: one repaint per tap) */
 .lg-btn-clear:active:not(:disabled) {
-  transform: scale(0.97);
-  background-color: rgb(255 255 255 / 0.8);
+  background-color: rgb(236 236 240 / 0.9);
 }
 
 .dark .lg-btn-clear {
@@ -133,6 +148,10 @@
     0 8px 20px -12px rgb(0 0 0 / 0.6);
 }
 
+.dark .lg-btn-clear:active:not(:disabled) {
+  background-color: rgb(255 255 255 / 0.14);
+}
+
 .dark .lg-btn-clear::before {
   background: linear-gradient(180deg, rgb(255 255 255 / 0.1) 0%, rgb(255 255 255 / 0) 55%);
 }
@@ -141,53 +160,28 @@
   opacity: 0.45;
 }
 
-.dark .lg-btn-clear:hover:not(:disabled) {
-  background-color: rgb(255 255 255 / 0.12);
-}
-
-.dark .lg-btn-clear:active:not(:disabled) {
-  background-color: rgb(255 255 255 / 0.16);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .lg-btn,
-  .lg-btn-clear {
-    transition: none;
-  }
-  .lg-btn:active:not(:disabled),
-  .lg-btn-clear:active:not(:disabled) {
-    transform: none;
-  }
-}
-
-/* Phones that cannot blur get a plain light fill instead of a see-through one. */
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
-  .lg-btn-clear {
-    background-color: rgb(255 255 255 / 0.92);
-  }
-  .dark .lg-btn-clear {
-    background-color: rgb(30 41 59 / 0.92);
-  }
-}
-
 /* ── the bottom tab bar (iOS 26 floating glass capsule) ──────────────────────
  *
  * A capsule floating above the content, clear of the screen edges and the
- * gesture bar. What scrolls under it is blurred, brightened and saturated, as
- * iOS glass is; a bright rim catches the light along the top edge and a soft
- * shadow lifts it off the page. The selected tab sits in a glass "lens" of its
- * own that slides between tabs (framer-motion layoutId) and swells slightly
- * while pressed. Unselected items are in the label colour, the selected one
- * in the app's tint, as on iOS.
+ * gesture bar. What scrolls under it is blurred and saturated, as iOS glass
+ * is; a bright rim catches the light along the top edge and a soft shadow
+ * lifts it off the page. The selected tab sits in a glass "lens" of its own
+ * that slides between tabs (framer-motion layoutId, transform only) and
+ * swells slightly while pressed; the newly selected icon gives a small pop.
+ * Unselected items are in the label colour, the selected one in the app's
+ * tint, as on iOS.
  */
 
 .lg-tabbar {
   bottom: max(14px, calc(env(safe-area-inset-bottom) + 8px));
   border-radius: 9999px;
   isolation: isolate;
-  background-color: rgb(255 255 255 / 0.38);
-  -webkit-backdrop-filter: blur(20px) saturate(210%) brightness(1.04);
-  backdrop-filter: blur(20px) saturate(210%) brightness(1.04);
+  /* its own GPU layer: scrolling under it re-blurs, nothing else repaints */
+  transform: translateZ(0);
+  will-change: transform;
+  background-color: rgb(255 255 255 / 0.42);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  backdrop-filter: blur(16px) saturate(180%);
   box-shadow:
     inset 0 1px 0 0 rgb(255 255 255 / 0.85),
     inset 0 -1px 0 0 rgb(255 255 255 / 0.25),
@@ -233,6 +227,7 @@
 .lg-tab {
   border-radius: 9999px;
   color: rgb(28 25 30 / 0.82);
+  touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
 
@@ -241,11 +236,23 @@
 }
 
 .lg-tab-icon {
-  transition: transform 0.35s cubic-bezier(0.2, 1.4, 0.4, 1);
+  transition: transform 0.5s var(--lg-spring);
 }
 
 .lg-tab:active .lg-tab-icon {
-  transform: scale(0.88);
+  transform: scale(0.86);
+  transition: transform 0.12s var(--lg-press);
+}
+
+/* the tab just selected: a small iOS-style pop of its icon */
+.lg-tab[data-active="true"] .lg-tab-icon {
+  animation: lg-tab-pop 0.45s var(--lg-spring);
+}
+
+@keyframes lg-tab-pop {
+  0% { transform: scale(0.82); }
+  55% { transform: scale(1.12); }
+  100% { transform: scale(1); }
 }
 
 /* the selected tab's lens: a lighter piece of glass inside the bar */
@@ -263,18 +270,18 @@
     inset 0 1px 0 0 rgb(255 255 255 / 0.7),
     inset 0 0 0 0.5px rgb(255 255 255 / 0.45),
     0 2px 8px -4px rgb(0 0 0 / 0.18);
-  transition: transform 0.4s cubic-bezier(0.2, 1.4, 0.4, 1), background-color 0.25s ease;
+  transition: transform 0.5s var(--lg-spring);
 }
 
 .lg-tab:active .lg-tab-lens > span {
-  transform: scale(1.06);
-  background-color: rgb(120 120 128 / 0.2);
+  transform: scale(1.07);
+  transition: transform 0.15s var(--lg-press);
 }
 
 .dark .lg-tabbar {
-  background-color: rgb(30 22 28 / 0.42);
-  -webkit-backdrop-filter: blur(20px) saturate(190%) brightness(0.9);
-  backdrop-filter: blur(20px) saturate(190%) brightness(0.9);
+  background-color: rgb(30 22 28 / 0.46);
+  -webkit-backdrop-filter: blur(16px) saturate(170%);
+  backdrop-filter: blur(16px) saturate(170%);
   box-shadow:
     inset 0 1px 0 0 rgb(255 255 255 / 0.16),
     inset 0 0 0 0.5px rgb(255 255 255 / 0.1),
@@ -304,21 +311,25 @@
     inset 0 0 0 0.5px rgb(255 255 255 / 0.08);
 }
 
-.dark .lg-tab:active .lg-tab-lens > span {
-  background-color: rgb(255 255 255 / 0.18);
-}
-
 @media (prefers-reduced-motion: reduce) {
+  .lg-btn,
+  .lg-btn-clear,
   .lg-tab-icon,
   .lg-tab-lens > span {
     transition: none;
   }
+  .lg-btn:active:not(:disabled),
+  .lg-btn-clear:active:not(:disabled),
   .lg-tab:active .lg-tab-icon,
   .lg-tab:active .lg-tab-lens > span {
     transform: none;
   }
+  .lg-tab[data-active="true"] .lg-tab-icon {
+    animation: none;
+  }
 }
 
+/* Phones that cannot blur get a plain light bar instead of a see-through one. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .lg-tabbar {
     background-color: rgb(255 255 255 / 0.94);

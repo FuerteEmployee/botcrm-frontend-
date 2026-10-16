@@ -37,13 +37,35 @@ export const Route = createFileRoute("/user")({
   component: UserLayout,
 });
 
+/**
+ * The ticking time pill in the desktop header. Its 1-second timer lives here,
+ * in this tiny component: in the shell it re-rendered the whole employee app,
+ * every page included, once a second.
+ */
+function HeaderClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <>
+      <span className="text-[10px] font-bold text-[#501537] dark:text-slate-300 font-mono tracking-wider">
+        {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+      </span>
+      <span className="text-[9px] text-slate-450 font-semibold uppercase tracking-wider border-l border-slate-200 dark:border-slate-800 pl-2">
+        {now.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+      </span>
+    </>
+  );
+}
+
 function UserLayout() {
   const { isAuthenticated, session } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [dark, setDark] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
-  const [headerTime, setHeaderTime] = useState(new Date());
 
   useEffect(() => {
     setIsMounted(true);
@@ -53,10 +75,6 @@ function UserLayout() {
     document.documentElement.classList.toggle("dark", isDark);
   }, []);
 
-  useEffect(() => {
-    const timer = setInterval(() => setHeaderTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   // Android's Back button.
   //
@@ -130,7 +148,7 @@ function UserLayout() {
   };
 
   const getGreeting = () => {
-    const hr = headerTime.getHours();
+    const hr = new Date().getHours();
     if (hr < 12) return "Good morning";
     if (hr < 17) return "Good afternoon";
     return "Good evening";
@@ -193,8 +211,12 @@ function UserLayout() {
     <div className="h-screen w-full flex bg-[#FAF7F9] dark:bg-[#0D070B] transition-colors duration-500 overflow-clip relative font-sans">
       
       {/* ─── DYNAMIC AMBIENT BACKDROP GLOWS ─────────────────────────────────── */}
-      <div className="absolute top-[-10%] left-[-10%] w-[45%] aspect-square rounded-full bg-gradient-to-br from-[#501537]/15 via-purple-500/5 to-transparent blur-[120px] pointer-events-none z-0" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[45%] aspect-square rounded-full bg-gradient-to-tr from-[#7B2453]/15 via-[#501537]/5 to-transparent blur-[120px] pointer-events-none z-0" />
+      {/* Soft glows drawn as radial gradients, not `blur-[120px]`: a 120px
+          filter on two large layers had to be re-composited under the glass
+          tab bar on every scroll frame, which made the whole app lag on
+          ordinary phones. The gradients look the same and cost nothing. */}
+      <div className="absolute top-[-15%] left-[-15%] w-[60%] aspect-square rounded-full bg-[radial-gradient(closest-side,rgba(80,21,55,0.12),rgba(168,85,247,0.04)_55%,transparent)] pointer-events-none z-0" />
+      <div className="absolute bottom-[-15%] right-[-15%] w-[60%] aspect-square rounded-full bg-[radial-gradient(closest-side,rgba(123,36,83,0.12),rgba(80,21,55,0.04)_55%,transparent)] pointer-events-none z-0" />
 
       {/* ─── DESKTOP SIDEBAR ────────────────────────────────────────────────── */}
       <aside className="hidden md:flex w-[260px] flex-col border-r border-[#501537]/10 dark:border-white/5 bg-white/70 dark:bg-slate-900/60 backdrop-blur-xl shrink-0 shadow-[4px_0_30px_rgba(80,21,55,0.02)] z-10 relative">
@@ -345,12 +367,7 @@ function UserLayout() {
             {/* Live Ticking Time pill */}
             <div className="px-3.5 py-1.5 rounded-full bg-white/60 dark:bg-slate-900/60 border border-[#501537]/10 dark:border-white/5 backdrop-blur-md flex items-center gap-2 shadow-sm">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-              <span className="text-[10px] font-bold text-[#501537] dark:text-slate-300 font-mono tracking-wider">
-                {headerTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
-              </span>
-              <span className="text-[9px] text-slate-450 font-semibold uppercase tracking-wider border-l border-slate-200 dark:border-slate-800 pl-2">
-                {headerTime.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-              </span>
+              <HeaderClock />
             </div>
           </div>
         </header>

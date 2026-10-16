@@ -132,7 +132,7 @@ function UserAnnouncements() {
                   transition={{ duration: 0.3, delay: i * 0.04 }}
                 >
                   <Card className={cn(
-                    "p-4 border border-slate-100/50 dark:border-white/5 bg-white/70 dark:bg-slate-900/40 backdrop-blur-md rounded-2xl shadow-xs",
+                    "p-4 border border-slate-100/50 dark:border-white/5 bg-white/95 dark:bg-slate-900/60 rounded-2xl shadow-xs",
                     a.pinned && "border-primary/30 ring-1 ring-primary/10"
                   )}>
                     <div className="flex items-start gap-3">

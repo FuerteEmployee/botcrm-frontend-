@@ -198,6 +198,104 @@ function workedTodayMs(
 }
 
 /**
+ * The hero clock (hh:mm and the date). It owns its own timer, and ticks on the
+ * minute boundary because it shows no seconds.
+ *
+ * Home used to keep this time in its own state and update it every second,
+ * which re-rendered the whole (very large) Home screen every second; together
+ * with the worked-today ticker that was two full renders a second, felt as a
+ * stutter every second on ordinary phones.
+ */
+function HeroClock({ part }: { part: "time" | "date" }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval> | undefined;
+    const tick = () => setNow(new Date());
+    // first tick at the next whole minute, then every minute
+    const first = setTimeout(() => {
+      tick();
+      interval = setInterval(tick, 60_000);
+    }, 60_000 - (Date.now() % 60_000) + 50);
+    // timers pause in the background: catch up at once on return
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearTimeout(first);
+      if (interval) clearInterval(interval);
+      document.removeEventListener("visibilitychange", tick);
+    };
+  }, []);
+  return (
+    <>
+      {part === "time"
+        ? now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })
+        : now.toLocaleDateString("en-US", { day: "numeric", month: "short", weekday: "short" })}
+    </>
+  );
+}
+
+/**
+ * "Shift progress" and "Worked today" while punched in. Ticks every second on
+ * its own, so only this card re-renders each second, not all of Home. The bar
+ * moves by transform (scaleX), which the GPU does without a layout pass.
+ */
+function ShiftProgressLive({
+  log,
+  lunchIn,
+  lunchOut,
+  live,
+  shiftSecs,
+}: {
+  log: AttendanceLog | null | undefined;
+  lunchIn: string | undefined;
+  lunchOut: string | undefined;
+  live: boolean;
+  shiftSecs: number;
+}) {
+  const read = () => (live ? Math.floor(workedTodayMs(log, lunchIn, lunchOut, Date.now()) / 1000) : 0);
+  const [secs, setSecs] = useState(read);
+  useEffect(() => {
+    setSecs(read());
+    if (!live) return;
+    const id = setInterval(() => setSecs(read()), 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [log, lunchIn, lunchOut, live]);
+
+  const pct = Math.min(100, (secs / (shiftSecs > 0 ? shiftSecs : 9 * 3600)) * 100);
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  const pad = (n: number) => n.toString().padStart(2, "0");
+
+  return (
+    <>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1.5">
+          <Clock className="h-3.5 w-3.5 text-emerald-500" />
+          <span className="text-[12px] font-semibold text-slate-500 dark:text-slate-400">Shift progress</span>
+        </div>
+        <Badge variant="outline" className="text-[12px] font-bold bg-emerald-500/10 text-emerald-500 border-none px-2 py-0.5 rounded-full">
+          {Math.round(pct)}%
+        </Badge>
+      </div>
+
+      {/* Progress track */}
+      <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+        <div
+          className="h-full w-full origin-left bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-transform duration-700 ease-out"
+          style={{ transform: `scaleX(${pct / 100})` }}
+        />
+      </div>
+
+      <div className="flex items-center justify-between text-[13px] font-medium">
+        <span className="text-slate-500 dark:text-slate-400">Worked today</span>
+        <span className="text-slate-700 dark:text-slate-200 font-mono font-semibold tabular-nums">{`${pad(h)}h ${pad(m)}m ${pad(s)}s`}</span>
+      </div>
+    </>
+  );
+}
+
+/**
  * What to tell the employee when their location cannot be read, in words
  * that need no technical background. The raw messages ("Timed out while
  * getting your location.", "Geolocation is not supported by this browser.")
@@ -378,7 +476,6 @@ function UserDashboard() {
     };
   }, []);
   const queryClient = useQueryClient();
-  const [time, setTime] = useState(new Date());
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [address, setAddress] = useState<string>("Locating...");
   const [locationLoading, setLocationLoading] = useState(false);
@@ -862,29 +959,9 @@ function UserDashboard() {
     };
   }, [profile?._id, isPunchedIn, isPunchedOut, profile?.trackingEnabled, profile?.trackingMode, alwaysSupported]);
 
-  // Real-time Shift Progress
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-
-  useEffect(() => {
-    if (todayLog?.punchIn && !displayPunchOut) {
-      const calculateDiff = () => {
-        const ms = workedTodayMs(todayLog, lunchStartedAt, lunchEndedAt, Date.now());
-        setElapsedSeconds(Math.floor(ms / 1000));
-      };
-      calculateDiff();
-      const interval = setInterval(calculateDiff, 1000);
-      return () => clearInterval(interval);
-    } else {
-      setElapsedSeconds(0);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [todayLog]);
-
-  // Ticking clock
-  useEffect(() => {
-    const timer = setInterval(() => setTime(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+  // The live "Worked today" seconds and the hero clock tick inside their own
+  // small components (ShiftProgressLive, HeroClock), not here: a 1-second
+  // state on this screen re-rendered all of Home every second.
 
   // Reverse-geocode coordinates into a readable address (best-effort; falls back to raw coords).
   const resolveAddress = async (lat: number, lng: number): Promise<string> => {
@@ -1600,13 +1677,6 @@ function UserDashboard() {
     );
   }
 
-  const formatElapsed = (totalSecs: number) => {
-    const h = Math.floor(totalSecs / 3600);
-    const m = Math.floor((totalSecs % 3600) / 60);
-    const s = totalSecs % 60;
-    return `${h.toString().padStart(2, '0')}h ${m.toString().padStart(2, '0')}m ${s.toString().padStart(2, '0')}s`;
-  };
-
   // Duration for a calendar/list day record.
   //
   // The server's graded total first: it is what the day is paid on, with lunch
@@ -1618,8 +1688,8 @@ function UserDashboard() {
     if (record.totalWorkMs) return formatMs(record.totalWorkMs);
     if (!record.punchIn) return "00h 00m";
     if (record.punchOut) return formatMs(+new Date(record.punchOut) - +new Date(record.punchIn));
-    if (new Date(record.date).toDateString() !== time.toDateString()) return "--";
-    return formatMs(workedTodayMs(record, record.lunchInTime, record.lunchOutTime, time.getTime()));
+    if (new Date(record.date).toDateString() !== new Date(nowTick).toDateString()) return "--";
+    return formatMs(workedTodayMs(record, record.lunchInTime, record.lunchOutTime, nowTick));
   };
 
   // Days-of-month grid helper for the Interactive Calendar Map
@@ -1645,7 +1715,8 @@ function UserDashboard() {
     return historyData.history.find(log => new Date(log.date).toDateString() === dateString);
   };
 
-  const getShiftPercent = () => {
+  // Shift length in seconds, for the live progress bar (ShiftProgressLive).
+  const shiftLengthSecs = (() => {
     let totalShiftSecs = 9 * 3600; // Fallback 9 hours
     if (profile?.shiftId?.startTime && profile?.shiftId?.endTime) {
       const [startH, startM] = profile.shiftId.startTime.split(':').map(Number);
@@ -1655,9 +1726,8 @@ function UserDashboard() {
       if (diffHours < 0) diffHours += 24;
       totalShiftSecs = (diffHours * 3600) + (diffMins * 60);
     }
-    if (totalShiftSecs <= 0) totalShiftSecs = 9 * 3600;
-    return Math.min(100, (elapsedSeconds / totalShiftSecs) * 100);
-  };
+    return totalShiftSecs > 0 ? totalShiftSecs : 9 * 3600;
+  })();
 
   // Time formatter.
   //
@@ -1750,7 +1820,7 @@ function UserDashboard() {
               <div className="flex items-start justify-between">
                 <div className="text-left">
                   <h3 className="text-4xl font-semibold tracking-tight text-white drop-shadow-sm">
-                    {time.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}
+                    <HeroClock part="time" />
                   </h3>
                   <div className="flex items-center gap-2 mt-1.5">
                     <Badge className={`border-none px-3 py-1 text-[11px] font-bold uppercase tracking-wide rounded-full shadow-xs ${isPunchedIn && !isPunchedOut && !machineOut
@@ -1769,7 +1839,7 @@ function UserDashboard() {
                   <div className="text-right">
                     <span className="text-[13px] font-bold text-white/90 tracking-wide uppercase block">TODAY</span>
                     <span className="text-[12px] text-white/70 font-semibold block mt-0.5">
-                      {time.toLocaleDateString("en-US", { day: "numeric", month: "short", weekday: "short" })}
+                      <HeroClock part="date" />
                     </span>
                   </div>
                   {/* Decorative. It was a <button> with no action, so a tap did nothing. */}
@@ -1780,7 +1850,7 @@ function UserDashboard() {
               </div>
 
               {/* Inner status grid card */}
-              <div className="p-4 rounded-[18px] bg-black/15 border border-white/10 backdrop-blur-md flex items-center gap-4">
+              <div className="p-4 rounded-[18px] bg-black/20 border border-white/10 flex items-center gap-4">
                 {/* User avatar */}
                 <Avatar className="h-14 w-14 ring-2 ring-white/10 shrink-0 shadow-md">
                   <AvatarImage
@@ -2122,30 +2192,15 @@ function UserDashboard() {
                 <motion.div
                   initial={{ opacity: 0, y: 8 }}
                   animate={{ opacity: 1, y: 0 }}
-                  className="p-4 bg-white dark:bg-slate-900/50 backdrop-blur-md rounded-[18px] border border-slate-100 dark:border-white/5 shadow-xs space-y-2.5"
+                  className="p-4 bg-white dark:bg-slate-900/60 rounded-[18px] border border-slate-100 dark:border-white/5 shadow-xs space-y-2.5"
                 >
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Clock className="h-3.5 w-3.5 text-emerald-500" />
-                      <span className="text-[12px] font-semibold text-slate-500 dark:text-slate-400">Shift progress</span>
-                    </div>
-                    <Badge variant="outline" className="text-[12px] font-bold bg-emerald-500/10 text-emerald-500 border-none px-2 py-0.5 rounded-full">
-                      {Math.round(getShiftPercent())}%
-                    </Badge>
-                  </div>
-
-                  {/* Progress track */}
-                  <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-300"
-                      style={{ width: `${getShiftPercent()}%` }}
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between text-[13px] font-medium">
-                    <span className="text-slate-500 dark:text-slate-400">Worked today</span>
-                    <span className="text-slate-700 dark:text-slate-200 font-mono font-semibold">{formatElapsed(elapsedSeconds)}</span>
-                  </div>
+                  <ShiftProgressLive
+                    log={todayLog}
+                    lunchIn={lunchStartedAt}
+                    lunchOut={lunchEndedAt}
+                    live={!!todayLog?.punchIn && !displayPunchOut}
+                    shiftSecs={shiftLengthSecs}
+                  />
                 </motion.div>
               </div>
             ) : (
@@ -2157,7 +2212,7 @@ function UserDashboard() {
                 </div>
 
                 {/* Final worked hours — computed from stored punch times, so it stays correct on refresh */}
-                <div className="p-4 bg-white dark:bg-slate-900/50 backdrop-blur-md rounded-[18px] border border-slate-100 dark:border-white/5 shadow-xs flex items-center justify-between">
+                <div className="p-4 bg-white dark:bg-slate-900/60 rounded-[18px] border border-slate-100 dark:border-white/5 shadow-xs flex items-center justify-between">
                   <div className="flex items-center gap-1.5">
                     <Clock className="h-3.5 w-3.5 text-emerald-500" />
                     <span className="text-[12px] font-semibold text-slate-500 dark:text-slate-400">Worked today</span>
@@ -2260,7 +2315,7 @@ function UserDashboard() {
           <div className="grid grid-cols-2 gap-4">
 
             {/* PRESENT CARD */}
-            <div className="bg-white dark:bg-slate-900/40 backdrop-blur-md border border-slate-100 dark:border-white/5 rounded-[24px] p-5 shadow-xs hover:shadow-md transition-all duration-300 flex flex-col justify-between h-[135px] relative text-left group overflow-hidden">
+            <div className="bg-white dark:bg-slate-900/60 border border-slate-100 dark:border-white/5 rounded-[24px] p-5 shadow-xs hover:shadow-md transition-all duration-300 flex flex-col justify-between h-[135px] relative text-left group overflow-hidden">
               <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 to-transparent pointer-events-none" />
               <div className="flex items-start justify-between relative z-10">
                 <div>
@@ -2289,7 +2344,7 @@ function UserDashboard() {
             </div>
 
             {/* ABSENT CARD */}
-            <div className="bg-white dark:bg-slate-900/40 backdrop-blur-md border border-slate-100 dark:border-white/5 rounded-[24px] p-5 shadow-xs hover:shadow-md transition-all duration-300 flex flex-col justify-between h-[135px] relative text-left group overflow-hidden">
+            <div className="bg-white dark:bg-slate-900/60 border border-slate-100 dark:border-white/5 rounded-[24px] p-5 shadow-xs hover:shadow-md transition-all duration-300 flex flex-col justify-between h-[135px] relative text-left group overflow-hidden">
               <div className="absolute inset-0 bg-gradient-to-tr from-rose-500/5 to-transparent pointer-events-none" />
               <div className="flex items-start justify-between relative z-10">
                 <div>
@@ -2319,7 +2374,7 @@ function UserDashboard() {
             </div>
 
             {/* WFHs CARD */}
-            <div className="bg-white dark:bg-slate-900/40 backdrop-blur-md border border-slate-100 dark:border-white/5 rounded-[24px] p-5 shadow-xs hover:shadow-md transition-all duration-300 flex flex-col justify-between h-[135px] relative text-left group overflow-hidden">
+            <div className="bg-white dark:bg-slate-900/60 border border-slate-100 dark:border-white/5 rounded-[24px] p-5 shadow-xs hover:shadow-md transition-all duration-300 flex flex-col justify-between h-[135px] relative text-left group overflow-hidden">
               <div className="absolute inset-0 bg-gradient-to-tr from-emerald-500/5 to-transparent pointer-events-none" />
               <div className="flex items-start justify-between relative z-10">
                 <div>
@@ -2349,7 +2404,7 @@ function UserDashboard() {
             </div>
 
             {/* HALF DAYS CARD */}
-            <div className="bg-white dark:bg-slate-900/40 backdrop-blur-md border border-slate-100 dark:border-white/5 rounded-[24px] p-5 shadow-xs hover:shadow-md transition-all duration-300 flex flex-col justify-between h-[135px] relative text-left group overflow-hidden">
+            <div className="bg-white dark:bg-slate-900/60 border border-slate-100 dark:border-white/5 rounded-[24px] p-5 shadow-xs hover:shadow-md transition-all duration-300 flex flex-col justify-between h-[135px] relative text-left group overflow-hidden">
               <div className="absolute inset-0 bg-gradient-to-tr from-blue-500/5 to-transparent pointer-events-none" />
               <div className="flex items-start justify-between relative z-10">
                 <div>
@@ -2523,7 +2578,7 @@ function UserDashboard() {
           </div>
 
           {/* Tab switch buttons */}
-          <div className="p-1 rounded-xl bg-slate-100/80 dark:bg-slate-900/60 border border-slate-200/50 dark:border-white/5 backdrop-blur-md flex items-center self-start shrink-0">
+          <div className="p-1 rounded-xl bg-slate-100 dark:bg-slate-900/80 border border-slate-200/50 dark:border-white/5 flex items-center self-start shrink-0">
             <button
               onClick={() => setActiveTab("calendar")}
               className={`px-4 py-3 rounded-lg text-[13px] font-bold transition-all cursor-pointer flex items-center gap-1.5 ${activeTab === "calendar"
@@ -2970,7 +3025,7 @@ function UserDashboard() {
       <AnimatePresence>
         {showLocationVerification && (
           <BodyPortal key="showLocationVerification">
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.93, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -3136,7 +3191,7 @@ function UserDashboard() {
       <AnimatePresence>
         {confirmLunch && (
           <BodyPortal key="confirmLunch">
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.93, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -3183,7 +3238,7 @@ function UserDashboard() {
       <AnimatePresence>
         {confirmNewSession && (
           <BodyPortal key="confirmNewSession">
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.93, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -3236,7 +3291,7 @@ function UserDashboard() {
       <AnimatePresence>
         {showLocationHelp && (
           <BodyPortal key="showLocationHelp">
-          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.93, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -3334,7 +3389,7 @@ function UserDashboard() {
       <AnimatePresence>
         {scanType && (
           <BodyPortal key="scanType">
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.93, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
