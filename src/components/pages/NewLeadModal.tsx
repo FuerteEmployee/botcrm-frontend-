@@ -227,14 +227,14 @@ export function NewLeadModal({ open, onOpenChange, onSubmit, isLoading = false }
             variant="outline"
             onClick={() => onOpenChange(false)}
             disabled={isLoading}
-            className="flex-1 h-11 rounded-lg font-semibold"
+            className="lg-btn-clear flex-1 h-11 rounded-lg font-semibold"
           >
             Cancel
           </Button>
           <Button
             onClick={handleSubmit}
             disabled={!isFormValid || isLoading}
-            className="flex-1 h-11 rounded-lg font-semibold bg-primary hover:bg-primary/90 text-white"
+            className="lg-btn flex-1 h-11 rounded-lg font-semibold bg-primary hover:bg-primary/90 text-white"
           >
             {isLoading ? (
               <>

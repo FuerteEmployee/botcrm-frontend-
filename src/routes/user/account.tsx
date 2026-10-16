@@ -300,7 +300,7 @@ function UserAccountSummaryPage() {
             <Button
               variant="ghost"
               onClick={() => setIsEditing(false)}
-              className="rounded-xl h-11 px-4 text-sm font-bold bg-slate-50 hover:bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border-none cursor-pointer"
+              className="lg-btn-clear rounded-xl h-11 px-4 text-sm font-bold bg-slate-50 hover:bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border-none cursor-pointer"
             >
               Cancel
             </Button>
@@ -308,7 +308,7 @@ function UserAccountSummaryPage() {
           <Button
             onClick={() => isEditing ? updateMutation.mutate() : startEditing()}
             disabled={updateMutation.isPending || (isEditing && !canSave)}
-            className="rounded-xl h-11 px-4 text-sm font-bold bg-gradient-primary text-white border-none shadow-md shadow-primary/20 cursor-pointer"
+            className="lg-btn rounded-xl h-11 px-4 text-sm font-bold bg-gradient-primary text-white border-none shadow-md shadow-primary/20 cursor-pointer"
           >
             {updateMutation.isPending ? (
               <RefreshCw className="h-3.5 w-3.5 animate-spin mr-1.5" />

@@ -264,7 +264,7 @@ function UserLayout() {
             {/* Icon-Only Log Out Button */}
             <button
               onClick={handleLogout}
-              className="h-9 w-9 rounded-xl border border-rose-500/10 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 active:scale-95 transition-all flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
+              className="lg-btn-clear h-9 w-9 rounded-xl border border-rose-500/10 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 active:scale-95 transition-all flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
               aria-label="Log Out"
               title="Log Out"
             >
@@ -321,7 +321,7 @@ function UserLayout() {
             </Link>
             <button
               onClick={handleLogout}
-              className="h-10 w-10 flex items-center justify-center rounded-lg text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all cursor-pointer"
+              className="lg-btn-clear h-10 w-10 flex items-center justify-center rounded-lg text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all cursor-pointer"
               aria-label="Logout"
             >
               <LogOut className="h-5 w-5" />
@@ -432,14 +432,14 @@ function UserLayout() {
                 <button
                   type="button"
                   onClick={doLogout}
-                  className="w-full h-12 rounded-xl bg-rose-600 text-white text-[15px] font-bold active:scale-[0.98] transition-transform"
+                  className="lg-btn w-full h-12 rounded-xl bg-rose-600 text-white text-[15px] font-bold active:scale-[0.98] transition-transform"
                 >
                   Yes, log out
                 </button>
                 <button
                   type="button"
                   onClick={() => setConfirmLogout(false)}
-                  className="w-full h-12 rounded-xl border border-slate-200 dark:border-white/10 text-[15px] font-semibold text-slate-600 dark:text-slate-300"
+                  className="lg-btn-clear w-full h-12 rounded-xl border border-slate-200 dark:border-white/10 text-[15px] font-semibold text-slate-600 dark:text-slate-300"
                 >
                   No, stay here
                 </button>

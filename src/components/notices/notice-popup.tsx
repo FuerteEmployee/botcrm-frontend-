@@ -140,7 +140,7 @@ export function NoticePopup() {
               "h-11 rounded-xl text-[14px] font-bold transition-colors",
               needsAnswer || needsRead
                 ? "px-4 text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5"
-                : "flex-1 bg-primary text-primary-foreground",
+                : "lg-btn flex-1 bg-primary text-primary-foreground",
             )}
           >
             {needsAnswer || needsRead ? "Later" : "OK"}

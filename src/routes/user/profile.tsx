@@ -153,7 +153,7 @@ function UserProfilePage() {
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
         <button
           onClick={() => setNewExpenseOpen(true)}
-          className="text-left p-4 rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+          className="lg-btn text-left p-4 rounded-2xl bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer"
         >
           <div className="h-9 w-9 rounded-xl bg-white/20 flex items-center justify-center mb-3">
             <IndianRupee className="h-4.5 w-4.5" />
@@ -164,7 +164,7 @@ function UserProfilePage() {
 
         <button
           onClick={() => navigate({ to: "/user/expenses" })}
-          className="text-left p-4 rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer relative"
+          className="lg-btn text-left p-4 rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer relative"
         >
           {/* On the tile that shows the claims, not on "New Expense", where
               "2 Pending" read as two expenses still waiting to be added. */}
@@ -182,7 +182,7 @@ function UserProfilePage() {
 
         <button
           onClick={() => setNewLeadOpen(true)}
-          className="text-left p-4 rounded-2xl bg-gradient-to-br from-pink-500 to-rose-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+          className="lg-btn text-left p-4 rounded-2xl bg-gradient-to-br from-pink-500 to-rose-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer"
         >
           <div className="h-9 w-9 rounded-xl bg-white/20 flex items-center justify-center mb-3">
             <Contact2 className="h-4.5 w-4.5" />
@@ -193,7 +193,7 @@ function UserProfilePage() {
 
         <button
           onClick={() => navigate({ to: "/user/announcements" })}
-          className="text-left p-4 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+          className="lg-btn text-left p-4 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer"
         >
           <div className="h-9 w-9 rounded-xl bg-white/20 flex items-center justify-center mb-3">
             <Megaphone className="h-4.5 w-4.5" />
@@ -207,7 +207,7 @@ function UserProfilePage() {
             everyday destinations room for their full labels. */}
         <button
           onClick={() => navigate({ to: "/user/holidays" })}
-          className="text-left p-4 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+          className="lg-btn text-left p-4 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer"
         >
           <div className="h-9 w-9 rounded-xl bg-white/20 flex items-center justify-center mb-3">
             <Gift className="h-4.5 w-4.5" />
@@ -218,7 +218,7 @@ function UserProfilePage() {
 
         <button
           onClick={() => navigate({ to: "/user/tickets" })}
-          className="text-left p-4 rounded-2xl bg-gradient-to-br from-slate-600 to-slate-800 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer"
+          className="lg-btn text-left p-4 rounded-2xl bg-gradient-to-br from-slate-600 to-slate-800 text-white shadow-md hover:shadow-lg transition-shadow cursor-pointer"
         >
           <div className="h-9 w-9 rounded-xl bg-white/20 flex items-center justify-center mb-3">
             <Ticket className="h-4.5 w-4.5" />
