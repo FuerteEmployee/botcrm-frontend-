@@ -24,7 +24,10 @@ import { Switch } from "@/components/ui/switch";
 
 import { z } from "zod";
 import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+// No `import "leaflet/dist/leaflet.css"` here: a side-effect import in a route
+// file stays in the router's start-up bundle, which made every app start
+// (login and the employee app included) fetch the map library. The stylesheet
+// comes with geofence-map-preview, imported below by this page only.
 import { useBranchService, type Branch as BackendBranch } from "@/services/branch-service";
 import { exitBufferM } from "@/components/branches/geofence-map-preview";
 

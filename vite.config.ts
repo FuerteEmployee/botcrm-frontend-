@@ -174,17 +174,39 @@ export default defineConfig(({ command }) => ({
       output: {
         manualChunks(id) {
           if (id.includes("node_modules")) {
+            // Maps and charts first, before the broad "react" match below.
+            // `react-leaflet` matched "react" and landed in vendor-react, which
+            // then imported vendor-maps, so every app start (login and the
+            // employee Home included) downloaded and parsed the whole map
+            // library. Charts (recharts + its d3 helpers) rode in vendor-ui
+            // with framer-motion and the icons, so they loaded at start too,
+            // though only some admin pages draw a chart. Kept in their own
+            // chunks, they load only on the screens that use them.
+            if (id.includes("leaflet")) {
+              return "vendor-maps";
+            }
+            // Tiny helpers every screen uses. clsx is also a recharts
+            // dependency, and left unassigned it was placed in the charts chunk,
+            // so the start-up code imported all of charts just for it.
+            if (/[\\/]node_modules[\\/](clsx|tailwind-merge|class-variance-authority)[\\/]/.test(id)) {
+              return "vendor-react";
+            }
+            if (
+              id.includes("recharts") ||
+              id.includes("react-smooth") ||
+              id.includes("victory-vendor") ||
+              /[\\/]node_modules[\\/]d3-/.test(id)
+            ) {
+              return "vendor-charts";
+            }
             if (id.includes("react") || id.includes("react-dom")) {
               return "vendor-react";
             }
             if (id.includes("@tanstack")) {
               return "vendor-tanstack";
             }
-            if (id.includes("recharts") || id.includes("framer-motion") || id.includes("lucide-react")) {
+            if (id.includes("framer-motion") || id.includes("lucide-react")) {
               return "vendor-ui";
-            }
-            if (id.includes("leaflet")) {
-              return "vendor-maps";
             }
             if (id.includes("xlsx")) {
               return "vendor-xlsx";
