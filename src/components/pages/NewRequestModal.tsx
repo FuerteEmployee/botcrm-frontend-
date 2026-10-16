@@ -385,7 +385,7 @@ export function NewRequestModal({
             disabled={isLoading}
             // The amount is on the button so the last thing tapped is the
             // number being asked for.
-            className="lg-btn h-auto min-h-12 w-full whitespace-normal rounded-xl [overflow-wrap:anywhere] bg-gradient-primary py-3 text-base font-bold text-white hover:opacity-95"
+            className="h-auto min-h-12 w-full whitespace-normal rounded-xl [overflow-wrap:anywhere] bg-gradient-primary py-3 text-base font-bold text-white hover:opacity-95"
           >
             {isLoading ? (
               <>
@@ -402,7 +402,7 @@ export function NewRequestModal({
             variant="outline"
             onClick={() => handleOpenChange(false)}
             disabled={isLoading}
-            className="lg-btn-clear h-11 w-full rounded-xl text-base font-semibold"
+            className="h-11 w-full rounded-xl text-base font-semibold"
           >
             Cancel
           </Button>

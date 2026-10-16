@@ -152,7 +152,7 @@ export function MissedPunchOutPrompt() {
               type="button"
               onClick={close}
               disabled={isSubmitting}
-              className="lg-btn-clear flex-1 h-12 rounded-xl px-4 text-[15px] font-semibold text-slate-600 border border-slate-200 dark:border-white/10 hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-white/10"
+              className="flex-1 h-12 rounded-xl px-4 text-[15px] font-semibold text-slate-600 border border-slate-200 dark:border-white/10 hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-white/10"
             >
               Not now
             </button>
@@ -160,7 +160,7 @@ export function MissedPunchOutPrompt() {
               type="button"
               onClick={submit}
               disabled={isSubmitting || !leftAt}
-              className="lg-btn relative flex-[1.6] h-12 rounded-xl bg-primary px-4 text-[15px] font-bold text-white shadow-lg shadow-primary/25 disabled:opacity-50"
+              className="relative flex-[1.6] h-12 rounded-xl bg-primary px-4 text-[15px] font-bold text-white shadow-lg shadow-primary/25 disabled:opacity-50"
             >
               <HapticOverlay radius="12px" />
               {isSubmitting ? "Sending…" : "Send to admin"}

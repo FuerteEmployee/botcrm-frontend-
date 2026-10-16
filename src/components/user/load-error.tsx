@@ -61,7 +61,7 @@ export function LoadError({
         type="button"
         onClick={onRetry}
         disabled={retrying}
-        className="lg-btn mt-4 h-11 px-6 rounded-xl bg-rose-600 text-white text-sm font-bold inline-flex items-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-60 cursor-pointer"
+        className="mt-4 h-11 px-6 rounded-xl bg-rose-600 text-white text-sm font-bold inline-flex items-center gap-2 active:scale-[0.98] transition-transform disabled:opacity-60 cursor-pointer"
       >
         <RefreshCw className={`h-4 w-4 ${retrying ? "animate-spin" : ""}`} />
         {retrying ? "Loading..." : "Try again"}

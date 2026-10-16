@@ -212,9 +212,9 @@ function UserLayout() {
       
       {/* ─── DYNAMIC AMBIENT BACKDROP GLOWS ─────────────────────────────────── */}
       {/* Soft glows drawn as radial gradients, not `blur-[120px]`: a 120px
-          filter on two large layers had to be re-composited under the glass
-          tab bar on every scroll frame, which made the whole app lag on
-          ordinary phones. The gradients look the same and cost nothing. */}
+          filter on two large layers had to be re-composited under the
+          blurred bottom bar on every scroll frame, which costs ordinary
+          phones a lot. The gradients look the same and cost nothing. */}
       <div className="absolute top-[-15%] left-[-15%] w-[60%] aspect-square rounded-full bg-[radial-gradient(closest-side,rgba(80,21,55,0.12),rgba(168,85,247,0.04)_55%,transparent)] pointer-events-none z-0" />
       <div className="absolute bottom-[-15%] right-[-15%] w-[60%] aspect-square rounded-full bg-[radial-gradient(closest-side,rgba(123,36,83,0.12),rgba(80,21,55,0.04)_55%,transparent)] pointer-events-none z-0" />
 
@@ -286,7 +286,7 @@ function UserLayout() {
             {/* Icon-Only Log Out Button */}
             <button
               onClick={handleLogout}
-              className="lg-btn-clear h-9 w-9 rounded-xl border border-rose-500/10 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 active:scale-95 transition-all flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
+              className="h-9 w-9 rounded-xl border border-rose-500/10 text-rose-500 hover:text-rose-600 hover:bg-rose-500/10 active:scale-95 transition-all flex items-center justify-center shrink-0 cursor-pointer shadow-xs"
               aria-label="Log Out"
               title="Log Out"
             >
@@ -343,7 +343,7 @@ function UserLayout() {
             </Link>
             <button
               onClick={handleLogout}
-              className="lg-btn-clear h-10 w-10 flex items-center justify-center rounded-lg text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all cursor-pointer"
+              className="h-10 w-10 flex items-center justify-center rounded-lg text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all cursor-pointer"
               aria-label="Logout"
             >
               <LogOut className="h-5 w-5" />
@@ -400,10 +400,8 @@ function UserLayout() {
         </main>
       </div>
 
-      {/* ─── FLOATING GLASS MOBILE BOTTOM BAR NAVIGATION ──────────────────────
-          The iOS 26 Liquid Glass tab bar; its look is in liquid-glass.css
-          (.lg-tabbar / .lg-tab / .lg-tab-lens). */}
-      <nav className="lg-tabbar md:hidden fixed left-3 right-3 z-40 p-1.5 flex items-center justify-between gap-0.5 shrink-0">
+      {/* ─── FLOATING GLASS MOBILE BOTTOM BAR NAVIGATION ────────────────────── */}
+      <nav className="md:hidden fixed bottom-4 left-3 right-3 z-40 bg-white/70 dark:bg-slate-900/70 backdrop-blur-lg border border-white/20 dark:border-white/5 px-1.5 py-1.5 rounded-[24px] flex items-center justify-between gap-0.5 shadow-[0_12px_40px_rgba(80,21,55,0.08)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.5)] shrink-0">
         {bottomNavItems.map((item) => {
           const isActive = location.pathname === item.to || (item.to === "/user" && location.pathname === "/user/");
           const IconComponent = item.icon;
@@ -419,25 +417,23 @@ function UserLayout() {
               // between an app and a page. Selection-weight, not impact —
               // navigation is not a commitment and should not feel like one.
               onClick={() => { void hapticSelection(); }}
-              data-active={isActive ? "true" : "false"}
-              aria-current={isActive ? "page" : undefined}
-              className={`lg-tab flex flex-1 min-w-0 flex-col items-center justify-center gap-[3px] px-0.5 py-2 transition-colors duration-300 relative ${
-                isActive ? "font-bold" : "font-semibold"
+              className={`flex flex-1 min-w-0 flex-col items-center gap-0.5 px-0.5 py-1.5 rounded-xl transition-all duration-300 relative ${
+                isActive
+                  ? "text-[#501537] dark:text-white font-bold"
+                  : "text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300"
               }`}
             >
               {isActive && (
                 <motion.div
                   layoutId="mobileNavIndicator"
-                  className="lg-tab-lens absolute inset-0"
-                  transition={{ type: "spring", stiffness: 420, damping: 32, mass: 0.9 }}
-                >
-                  <span />
-                </motion.div>
+                  className="absolute inset-0 bg-[#501537]/10 dark:bg-white/10 rounded-xl"
+                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                />
               )}
               {/* 22px icon, 10.5px sentence-case label: the old 8px uppercase
                   labels were close to unreadable on a budget phone. */}
-              <IconComponent className="lg-tab-icon h-[22px] w-[22px] shrink-0 relative z-10" strokeWidth={isActive ? 2.5 : 2} />
-              <span className="w-full text-center text-[10.5px] tracking-tight leading-none relative z-10 truncate px-0.5">{item.label}</span>
+              <IconComponent className={`h-[22px] w-[22px] shrink-0 relative z-10 ${isActive ? "stroke-[2.5px] text-[#501537] dark:text-white" : "stroke-[2px]"}`} />
+              <span className="w-full text-center text-[10.5px] tracking-tight font-semibold leading-none mt-0.5 relative z-10 truncate px-0.5">{item.label}</span>
             </Link>
           );
         })}
@@ -453,14 +449,14 @@ function UserLayout() {
                 <button
                   type="button"
                   onClick={doLogout}
-                  className="lg-btn w-full h-12 rounded-xl bg-rose-600 text-white text-[15px] font-bold active:scale-[0.98] transition-transform"
+                  className="w-full h-12 rounded-xl bg-rose-600 text-white text-[15px] font-bold active:scale-[0.98] transition-transform"
                 >
                   Yes, log out
                 </button>
                 <button
                   type="button"
                   onClick={() => setConfirmLogout(false)}
-                  className="lg-btn-clear w-full h-12 rounded-xl border border-slate-200 dark:border-white/10 text-[15px] font-semibold text-slate-600 dark:text-slate-300"
+                  className="w-full h-12 rounded-xl border border-slate-200 dark:border-white/10 text-[15px] font-semibold text-slate-600 dark:text-slate-300"
                 >
                   No, stay here
                 </button>

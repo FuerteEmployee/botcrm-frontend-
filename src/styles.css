@@ -3,7 +3,6 @@
 @import "tailwindcss" source(none);
 @source "../src";
 @import "tw-animate-css";
-@import "./liquid-glass.css";
 
 @custom-variant dark (&:is(.dark *));
 

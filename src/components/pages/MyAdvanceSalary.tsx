@@ -375,7 +375,7 @@ export function MyAdvanceSalary() {
         </p>
         <Button
           onClick={() => setNewRequestOpen(true)}
-          className="lg-btn mt-4 h-12 w-full rounded-xl bg-gradient-primary text-base font-bold text-white shadow-md hover:opacity-95 sm:w-auto sm:px-6"
+          className="mt-4 h-12 w-full rounded-xl bg-gradient-primary text-base font-bold text-white shadow-md hover:opacity-95 sm:w-auto sm:px-6"
         >
           <Plus className="!size-5" />
           New Request
@@ -395,7 +395,7 @@ export function MyAdvanceSalary() {
             onClick={() => void refetch()}
             disabled={isFetching}
             variant="outline"
-            className="lg-btn-clear mt-4 h-11 w-full rounded-xl bg-white text-base font-semibold dark:bg-slate-900"
+            className="mt-4 h-11 w-full rounded-xl bg-white text-base font-semibold dark:bg-slate-900"
           >
             {isFetching ? <Loader2 className="animate-spin" /> : <RefreshCw />}
             Try again
@@ -517,7 +517,7 @@ export function MyAdvanceSalary() {
               <Button
                 onClick={() => setNewRequestOpen(true)}
                 variant="outline"
-                className="lg-btn-clear mt-4 h-11 w-full rounded-xl text-base font-semibold"
+                className="mt-4 h-11 w-full rounded-xl text-base font-semibold"
               >
                 <Plus className="!size-5" />
                 New Request
@@ -531,7 +531,7 @@ export function MyAdvanceSalary() {
               <Button
                 onClick={showAll}
                 variant="outline"
-                className="lg-btn-clear mt-4 h-11 w-full rounded-xl text-base font-semibold"
+                className="mt-4 h-11 w-full rounded-xl text-base font-semibold"
               >
                 Show all requests
               </Button>

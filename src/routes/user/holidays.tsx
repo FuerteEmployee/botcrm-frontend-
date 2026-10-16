@@ -66,7 +66,7 @@ function HolidayCard({ festival, index }: { festival: Festival; index: number })
       transition={{ duration: 0.3, delay: Math.min(index, 10) * 0.04 }}
     >
       <Card className={cn(
-        "p-4 border border-slate-100/50 dark:border-white/5 bg-white/95 dark:bg-slate-900/60 rounded-2xl shadow-xs flex items-center gap-4",
+        "p-4 border border-slate-100/50 dark:border-white/5 bg-white/70 dark:bg-slate-900/40 rounded-2xl shadow-xs flex items-center gap-4",
         isPast && "opacity-60",
         isToday && "border-emerald-300 ring-1 ring-emerald-200 dark:border-emerald-500/40"
       )}>
@@ -140,16 +140,16 @@ function UserHolidays() {
       {/* QUICK METRICS GRID ROW */}
       {!(isError && list.length === 0) && (
         <div className="grid grid-cols-3 gap-2 sm:gap-4 max-w-4xl mx-auto">
-          <Card className="border border-slate-100/50 dark:border-white/5 shadow-xs bg-white/95 dark:bg-slate-900/60 rounded-2xl p-3 sm:p-4 text-center">
+          <Card className="border border-slate-100/50 dark:border-white/5 shadow-xs bg-white/70 dark:bg-slate-900/40 rounded-2xl p-3 sm:p-4 text-center">
             <span className="text-[11px] font-bold text-slate-500 block uppercase tracking-wide">Total</span>
             <span className="text-lg font-bold text-slate-850 dark:text-white mt-1 block">{list.length}</span>
           </Card>
-          <Card className="border border-slate-100/50 dark:border-white/5 shadow-xs bg-white/95 dark:bg-slate-900/60 rounded-2xl p-3 sm:p-4 text-center relative overflow-hidden">
+          <Card className="border border-slate-100/50 dark:border-white/5 shadow-xs bg-white/70 dark:bg-slate-900/40 rounded-2xl p-3 sm:p-4 text-center relative overflow-hidden">
             <div className="absolute top-0 left-0 w-1 h-full bg-primary" />
             <span className="text-[11px] font-bold text-slate-500 block uppercase tracking-wide pl-1">For all</span>
             <span className="text-lg font-bold text-slate-850 dark:text-white mt-1 block pl-1">{mandatoryCount}</span>
           </Card>
-          <Card className="border border-slate-100/50 dark:border-white/5 shadow-xs bg-white/95 dark:bg-slate-900/60 rounded-2xl p-3 sm:p-4 text-center relative overflow-hidden">
+          <Card className="border border-slate-100/50 dark:border-white/5 shadow-xs bg-white/70 dark:bg-slate-900/40 rounded-2xl p-3 sm:p-4 text-center relative overflow-hidden">
             <div className="absolute top-0 left-0 w-1 h-full bg-emerald-500" />
             <span className="text-[11px] font-bold text-slate-500 block uppercase tracking-wide pl-1">Coming up</span>
             <span className="text-lg font-bold text-slate-850 dark:text-white mt-1 block pl-1">{upcomingCount}</span>

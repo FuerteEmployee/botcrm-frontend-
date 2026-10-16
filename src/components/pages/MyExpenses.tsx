@@ -100,7 +100,7 @@ export function MyExpenses() {
           </div>
           <Button
             onClick={() => setNewExpenseOpen(true)}
-            className="lg-btn h-11 shrink-0 bg-primary hover:bg-primary/90 text-white font-bold rounded-lg"
+            className="h-11 shrink-0 bg-primary hover:bg-primary/90 text-white font-bold rounded-lg"
           >
             <Plus className="w-4 h-4" /> Add Expense
           </Button>
@@ -172,7 +172,7 @@ export function MyExpenses() {
                 {expenses.length === 0 ? 'You have not claimed any expenses yet.' : 'No expenses match your search.'}
               </p>
               {expenses.length === 0 && (
-                <Button onClick={() => setNewExpenseOpen(true)} variant="outline" className="lg-btn-clear h-11 rounded-lg">
+                <Button onClick={() => setNewExpenseOpen(true)} variant="outline" className="h-11 rounded-lg">
                   <Plus className="w-4 h-4 mr-2" />
                   Add your first expense
                 </Button>

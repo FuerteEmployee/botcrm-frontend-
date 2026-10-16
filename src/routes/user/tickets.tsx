@@ -290,7 +290,7 @@ function UserTickets() {
 
         <Button
           onClick={openNew}
-          className="lg-btn w-full sm:w-auto bg-gradient-primary hover:opacity-95 text-white font-bold rounded-2xl h-12 px-5 border-none shadow-md shadow-primary/20 text-sm gap-2 flex items-center justify-center cursor-pointer shrink-0"
+          className="w-full sm:w-auto bg-gradient-primary hover:opacity-95 text-white font-bold rounded-2xl h-12 px-5 border-none shadow-md shadow-primary/20 text-sm gap-2 flex items-center justify-center cursor-pointer shrink-0"
         >
           <Plus className="h-4 w-4" />
           <span>Raise Ticket</span>
@@ -542,14 +542,14 @@ function UserTickets() {
               variant="ghost"
               onClick={() => setOpen(false)}
               disabled={createTicketMutation.isPending}
-              className="lg-btn-clear flex-1 rounded-xl h-12 text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-800"
+              className="flex-1 rounded-xl h-12 text-sm font-bold hover:bg-slate-50 dark:hover:bg-slate-800"
             >
               Cancel
             </Button>
             <Button
               onClick={submit}
               disabled={createTicketMutation.isPending || !canSend}
-              className="lg-btn flex-1 bg-gradient-primary text-white font-bold rounded-xl h-12 border-none shadow-md shadow-primary/20 text-sm"
+              className="flex-1 bg-gradient-primary text-white font-bold rounded-xl h-12 border-none shadow-md shadow-primary/20 text-sm"
             >
               {createTicketMutation.isPending ? (
                 <RefreshCw className="h-4 w-4 animate-spin" />

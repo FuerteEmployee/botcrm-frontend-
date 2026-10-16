@@ -265,7 +265,7 @@ function NoticeQuestion({ notice, onDone }: { notice: Announcement; onDone?: () 
               <button
                 type="button"
                 onClick={() => setEditing(false)}
-                className="lg-btn-clear h-11 px-4 rounded-xl text-[13px] font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5"
+                className="h-11 px-4 rounded-xl text-[13px] font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-white/5"
               >
                 Cancel
               </button>
@@ -274,7 +274,7 @@ function NoticeQuestion({ notice, onDone }: { notice: Announcement; onDone?: () 
               type="button"
               disabled={!ready || isResponding}
               onClick={send}
-              className="lg-btn h-11 flex-1 rounded-xl bg-primary text-primary-foreground text-[14px] font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+              className="h-11 flex-1 rounded-xl bg-primary text-primary-foreground text-[14px] font-bold flex items-center justify-center gap-2 disabled:opacity-50"
             >
               {isResponding ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

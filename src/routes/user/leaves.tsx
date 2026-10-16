@@ -262,7 +262,7 @@ function UserLeaves() {
         <Button
           onClick={() => setOpen(true)}
           disabled={!typesLoaded || noLeaveTypes}
-          className="lg-btn w-full sm:w-auto bg-gradient-primary hover:opacity-95 text-white font-bold rounded-2xl h-12 px-5 border-none shadow-md shadow-primary/20 text-base gap-2 flex items-center justify-center cursor-pointer shrink-0"
+          className="w-full sm:w-auto bg-gradient-primary hover:opacity-95 text-white font-bold rounded-2xl h-12 px-5 border-none shadow-md shadow-primary/20 text-base gap-2 flex items-center justify-center cursor-pointer shrink-0"
         >
           <Plus className="h-5 w-5" />
           <span>Apply for Leave</span>
@@ -414,7 +414,7 @@ function UserLeaves() {
                       <Button
                         variant="outline"
                         onClick={() => setCancelTarget(leave)}
-                        className="lg-btn-clear h-10 rounded-xl px-3.5 text-sm font-semibold gap-1.5 text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 dark:text-rose-400 dark:border-rose-500/30 dark:hover:bg-rose-500/10"
+                        className="h-10 rounded-xl px-3.5 text-sm font-semibold gap-1.5 text-rose-600 border-rose-200 hover:bg-rose-50 hover:text-rose-700 dark:text-rose-400 dark:border-rose-500/30 dark:hover:bg-rose-500/10"
                       >
                         <X className="h-4 w-4" />
                         Cancel request
@@ -599,14 +599,14 @@ function UserLeaves() {
             <Button
               variant="outline"
               onClick={() => setOpen(false)}
-              className="lg-btn-clear flex-1 rounded-xl h-12 text-base font-semibold"
+              className="flex-1 rounded-xl h-12 text-base font-semibold"
             >
               Close
             </Button>
             <Button
               onClick={submit}
               disabled={isCreating}
-              className="lg-btn flex-[1.4] bg-gradient-primary text-white font-bold rounded-xl h-12 border-none shadow-md shadow-primary/20 text-base gap-2"
+              className="flex-[1.4] bg-gradient-primary text-white font-bold rounded-xl h-12 border-none shadow-md shadow-primary/20 text-base gap-2"
             >
               {isCreating ? (<><RefreshCw className="h-4 w-4 animate-spin" /> Sending…</>) : "Send request"}
             </Button>
@@ -625,7 +625,7 @@ function UserLeaves() {
                 type="button"
                 onClick={() => setCancelTarget(null)}
                 disabled={isDeleting}
-                className="lg-btn-clear flex-1 h-12 rounded-xl px-4 text-[15px] font-semibold text-slate-700 border border-slate-200 dark:text-slate-200 dark:border-white/10 hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-white/10"
+                className="flex-1 h-12 rounded-xl px-4 text-[15px] font-semibold text-slate-700 border border-slate-200 dark:text-slate-200 dark:border-white/10 hover:bg-slate-100 disabled:opacity-50 dark:hover:bg-white/10"
               >
                 No, keep it
               </button>
@@ -633,7 +633,7 @@ function UserLeaves() {
                 type="button"
                 onClick={confirmCancel}
                 disabled={isDeleting}
-                className="lg-btn flex-1 h-12 rounded-xl px-4 text-[15px] font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-lg shadow-rose-600/20 disabled:opacity-60"
+                className="flex-1 h-12 rounded-xl px-4 text-[15px] font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-lg shadow-rose-600/20 disabled:opacity-60"
               >
                 {isDeleting ? "Cancelling…" : "Yes, cancel it"}
               </button>
