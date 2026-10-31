@@ -1439,13 +1439,15 @@ const FEATURE_TOGGLE_DEFINITIONS: {
   {
     key: "tracking",
     label: "Live Tracking",
-    description: "Real-time GPS tracking of employees",
-    defaultOn: true,
+    // Paid add-on, off for every company until switched on here (backend
+    // utils/feature_toggles.js). Off also stops the phones sending location.
+    description: "Real-time GPS tracking of employees (paid add-on; phones send no location while off)",
+    defaultOn: false,
   },
   {
     key: "geofenceAutoPunchOut",
     label: "Geofence Auto Punch-Out",
-    description: "Allows turning on automatic punch-out when staff leave the branch",
+    description: "Allows turning on automatic punch-out when staff leave the branch (needs Live Tracking)",
     defaultOn: true,
   },
   {

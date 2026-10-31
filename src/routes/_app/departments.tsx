@@ -26,6 +26,7 @@ import { useDepartmentService, type Department as BackendDept } from "@/services
 
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { usePermission } from "@/hooks/use-permission";
+import { useFeatureToggles } from "@/hooks/use-feature-toggles";
 
 export const Route = createFileRoute("/_app/departments")({
   component: DepartmentsPage,
@@ -62,6 +63,9 @@ const safeColor = (c?: string) => (c && HEX_COLOR.test(c.trim()) ? c.trim() : DE
 function DepartmentsPage() {
   const navigate = useNavigate();
   const [hasMounted, setHasMounted] = useState(false);
+  // Live GPS tracking is a paid add-on the super admin switches on per company.
+  const { isFeatureEnabled } = useFeatureToggles();
+  const trackingOn = isFeatureEnabled("tracking");
   const {
     departments: list, isLoading, error: loadError, refetch, isRefetching,
     createDepartment, updateDepartment, deleteDepartment, isCreating, isUpdating, isDeleting,
@@ -153,12 +157,13 @@ function DepartmentsPage() {
   /** Location-policy chips; these switches were invisible outside the dialog. */
   const policyBadges = (d: BackendDept) => (
     <div className="flex flex-wrap gap-1.5">
-      {d.trackingEnabled ? (
+      {/* Without the company's live tracking these say nothing true. */}
+      {trackingOn && (d.trackingEnabled ? (
         <Badge variant="outline" className="text-[10px] font-bold border-primary/20 bg-primary/5 text-primary">Tracked on duty</Badge>
       ) : (
         <Badge variant="outline" className="text-[10px] font-medium text-muted-foreground">Not tracked</Badge>
-      )}
-      {d.trackingEnabled && d.autoPunchOutEnabled && (
+      ))}
+      {trackingOn && d.trackingEnabled && d.autoPunchOutEnabled && (
         <Badge variant="outline" className="text-[10px] font-bold border-amber-500/25 bg-amber-500/10 text-amber-700">Auto punch-out</Badge>
       )}
       {d.fieldRole && (
@@ -439,7 +444,17 @@ function DepartmentsPage() {
                   decisions: the first says "we know where these people are",
                   the second says "we may end their working day on the strength
                   of it". Every sensible rollout does the first for a while
-                  before the second, and a single toggle would not allow that. */}
+                  before the second, and a single toggle would not allow that.
+                  Shown only when the company has live GPS tracking (a paid
+                  add-on the super admin switches on); otherwise a note. */}
+              {!trackingOn ? (
+                <div className="rounded-xl border border-border/50 bg-muted/20 p-3.5 space-y-0.5">
+                  <p className="text-[12px] font-bold">Live location tracking</p>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    Not switched on for your company, so phones do not send their location. Contact support to add it.
+                  </p>
+                </div>
+              ) : (
               <div className="rounded-xl border border-border/50 bg-muted/20 divide-y divide-border/40">
                 <div className="flex items-start justify-between gap-4 p-3.5">
                   <div className="space-y-0.5">
@@ -475,6 +490,7 @@ function DepartmentsPage() {
                   />
                 </div>
               </div>
+              )}
 
               {/* Field staff: an explicit switch. The engine used to decide this
                   purely from the NAME ("sales", "field", "delivery"...), so a

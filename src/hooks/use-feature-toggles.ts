@@ -3,10 +3,12 @@ import { apiClient } from "@/lib/api-client";
 import { useAuth } from "./use-auth";
 
 // Mirror of FEATURE_TOGGLE_DEFAULTS in backend/src/utils/feature_toggles.js —
-// change both. Every feature that already shipped defaults ON: a tenant with
-// nothing stored must keep what it had.
+// change both. Every feature that already shipped defaults ON (a tenant with
+// nothing stored keeps what it had), except live tracking below.
 const DEFAULTS: Record<string, boolean> = {
-  tracking: true,
+  // Live GPS tracking is a paid add-on: off until the super admin turns it on
+  // for the company (backend utils/feature_toggles.js, the source of truth).
+  tracking: false,
   geofenceAutoPunchOut: true,
   leads: true,
   expenses: true,

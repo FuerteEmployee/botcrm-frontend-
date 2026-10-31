@@ -622,7 +622,18 @@ function SettingsPage() {
                         {/* When the phone records location, for employees whose tracking is on.
                             "Always" includes after work, so the choice is spelled out, and
                             employees are told on their own screen. Needs APK 17 or later:
-                            older phones keep tracking only while punched in. */}
+                            older phones keep tracking only while punched in.
+                            Without the company's live GPS tracking (a paid add-on the
+                            super admin switches on) the choice does nothing, so a note
+                            replaces it. The saved value is left as it is. */}
+                        {!isFeatureEnabled("tracking") ? (
+                        <div className="p-3.5 rounded-xl bg-muted/20 border border-border/40 space-y-0.5">
+                          <div className="text-[13px] font-bold">Location tracking</div>
+                          <div className="text-[11px] text-muted-foreground">
+                            Live location tracking is not switched on for your company, so phones do not send their location. Contact support to add it.
+                          </div>
+                        </div>
+                        ) : (
                         <div className="p-3.5 rounded-xl bg-muted/20 border border-border/40 space-y-3">
                           <div>
                             <div className="text-[13px] font-bold">Location tracking</div>
@@ -656,6 +667,7 @@ function SettingsPage() {
                             </p>
                           )}
                         </div>
+                        )}
                       </div>
                     </div>
                   </div>
