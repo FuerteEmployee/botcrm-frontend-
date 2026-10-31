@@ -29,6 +29,8 @@ export interface CorrectionContext {
     overnight: boolean;
     start: string;
     end: string;
+    /** Flexible hours: the times are the usual hours, not limits on the pick. */
+    flexibleHours?: boolean;
   } | null;
   pendingPunchIn: boolean;
   pendingPunchOut: boolean;
@@ -123,10 +125,12 @@ export function correctionProblem(
     return "That time has not come yet. Please pick a time that has already passed.";
 
   const recIn = +new Date(ctx.punchIn);
+  // Same as the server: a flexible shift's times do not bound the pick.
+  const bounds = ctx.shift && !ctx.shift.flexibleHours ? ctx.shift : null;
   if (field === "punchIn") {
     if (requested >= recIn) return `Please pick a time before your punch-in (${fmt12(recIn)}).`;
-    if (ctx.shift && requested < +new Date(ctx.shift.start)) {
-      return `Your shift starts at ${fmt12(ctx.shift.start)}. You cannot ask for a punch-in before that.`;
+    if (bounds && requested < +new Date(bounds.start)) {
+      return `Your shift starts at ${fmt12(bounds.start)}. You cannot ask for a punch-in before that.`;
     }
     return null;
   }
@@ -138,8 +142,8 @@ export function correctionProblem(
     if (back > after && requested <= back)
       return `Please pick a time after your lunch break ended (${fmt12(back)}).`;
   }
-  if (ctx.shift && requested > +new Date(ctx.shift.end)) {
-    return `Your shift ends at ${fmt12(ctx.shift.end)}. You cannot ask for a punch-out after that.`;
+  if (bounds && requested > +new Date(bounds.end)) {
+    return `Your shift ends at ${fmt12(bounds.end)}. You cannot ask for a punch-out after that.`;
   }
   if (ctx.punchOut && Math.abs(+new Date(ctx.punchOut) - requested) < 60 * 1000) {
     return `Your punch-out is already ${fmt12(ctx.punchOut)}.`;

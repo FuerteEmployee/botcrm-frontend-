@@ -73,7 +73,7 @@ const toMins = (hhmm: string): number => {
  */
 function shiftSummary(f: {
   startTime: string; endTime: string; is24Hours: boolean; workDays: string[];
-  halfDayLatePunchInMin: number; halfDayEarlyPunchOutMin: number; fullDayMins?: number | null; halfDayMinHours?: number; halfDayLateAfterMin?: number;
+  halfDayLatePunchInMin: number; halfDayEarlyPunchOutMin: number; fullDayMins?: number | null; halfDayMinHours?: number; halfDayLateAfterMin?: number; flexibleHours?: boolean; countOvertime?: boolean;
   lunch: { mode: LunchMode; startTime?: string | null; endTime?: string | null; durationMins?: number | null; minMins?: number | null; maxMins?: number | null };
 }, company: CompanyRules): { text: string; tone: string }[] {
   const start = toMins(f.startTime);
@@ -89,6 +89,28 @@ function shiftSummary(f: {
         + `${f.workDays.length} day${f.workDays.length === 1 ? "" : "s"} a week`
         + `${end <= start ? ", crossing midnight" : ""}.`,
   });
+
+  // Flexible hours: the times above are only the usual hours (shift_status
+  // computeSessionWorkMs / isLatePunchIn / isAfterShiftEnd on the server).
+  const flex = !!f.flexibleHours;
+  if (flex) {
+    lines.push({
+      tone: "bg-success",
+      text: `Flexible hours: every minute between punch-in and punch-out counts, also before ${to12hLabel(f.startTime)} and after ${to12hLabel(f.endTime)}. Nobody on this shift is marked Late, and punch-in stays open after the end time. A punch-out after midnight still counts for the day it started, until 4:00 AM.`,
+    });
+    lines.push({
+      tone: "bg-muted-foreground/50",
+      text: `A forgotten punch-out is closed at ${to12hLabel(f.endTime)} and only ${to12hLabel(f.startTime)} to ${to12hLabel(f.endTime)} is counted for that day, since nobody knows when the person left.`,
+    });
+    if (Number(f.halfDayLateAfterMin) > 0) {
+      lines.push({ tone: "bg-muted-foreground/50", text: `"Half Day if later than" (${f.halfDayLateAfterMin} min) is not used while Flexible hours is on. It applies again if you turn Flexible hours off.` });
+    }
+  }
+  if (f.countOvertime === false) {
+    lines.push({ tone: "bg-muted-foreground/50", text: "No overtime is paid to people on this shift, however long they work." });
+  } else if (flex) {
+    lines.push({ tone: "bg-warning", text: `Overtime is paid on this shift under the company rule, and on a flexible shift time after ${to12hLabel(f.endTime)} counts towards it. Switch off "Pay overtime" below if long days only make up the hours.` });
+  }
 
   const L = f.lunch;
   let lunchMins = 0;
@@ -149,7 +171,9 @@ function shiftSummary(f: {
   const cutoff = company.hdCutoff;
   let need = bar;
   let fullDay = `A Full Day needs ${fmtMins(bar)} of credited work (${sum}). Anything less is a Half Day.`;
-  if (!hasOwnGrace) {
+  // A flexible shift is always graded on hours alone: the company cut-off is a
+  // clock time, and on it the clock decides nothing (determineHalfDayStatus).
+  if (!hasOwnGrace && !flex) {
     const rulesAt = "Settings > Attendance > Half-Day Rules";
     const needHours = company.hdMethod === "durationBased" || (company.hdMethod === "both" && company.hdBothLogic !== "and");
     if (needHours) need = Math.max(bar, minHrs);
@@ -173,8 +197,16 @@ function shiftSummary(f: {
   lines.push({ tone: "bg-primary", text: fullDay });
 
   // How much lateness, early leaving and extra break the day can absorb.
+  // Not bounded on a flexible shift: staying longer makes up for any of it.
   const maxCredit = span - lunchMins;
   const slack = maxCredit - need;
+  if (flex) {
+    lines.push({ tone: "bg-success", text: "Arriving late, leaving early or a longer break costs nothing on its own: staying longer makes up for it. Only the hours decide." });
+    if (!hasOwnGrace && (graceIn > 0 || graceOut > 0)) {
+      lines.push({ tone: "bg-muted-foreground/50", text: `The company grace values (${fmtMins(graceIn)} late, ${fmtMins(graceOut)} early) are taken off the hours needed. Set this shift's own grace to change that.` });
+    }
+    return lines;
+  }
   if (slack < 0) {
     lines.push({ tone: "bg-destructive", text: `This shift can credit at most ${fmtMins(maxCredit)}, so nobody on it can reach a Full Day.` });
   } else if (slack === 0) {
@@ -228,7 +260,7 @@ const MAX_SHIFT_NAME = 60;
  */
 function validateShiftForm(f: {
   name: string; startTime: string; endTime: string; is24Hours: boolean; workDays: string[];
-  halfDayLatePunchInMin: number; halfDayEarlyPunchOutMin: number; fullDayMins?: number | null; halfDayMinHours?: number; halfDayLateAfterMin?: number;
+  halfDayLatePunchInMin: number; halfDayEarlyPunchOutMin: number; fullDayMins?: number | null; halfDayMinHours?: number; halfDayLateAfterMin?: number; flexibleHours?: boolean;
   lunch: { mode: LunchMode; startTime?: string | null; endTime?: string | null; durationMins?: number | null; minMins?: number | null; maxMins?: number | null };
 }): string | null {
   const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -277,7 +309,13 @@ function validateShiftForm(f: {
   if (f.fullDayMins != null) {
     const fd = Number(f.fullDayMins);
     if (!Number.isInteger(fd) || fd < 0) return "Minutes for a full day must be a whole number.";
-    if (fd > span) return `Minutes for a full day (${fmtMins(fd)}) cannot be more than the shift (${fmtMins(span)}).`;
+    // Flexible: time outside the shift counts, so the full day may be longer
+    // than the shift itself (server cap: 16 hours).
+    if (f.flexibleHours) {
+      if (fd > 960) return "Minutes for a full day cannot be more than 16 hours (960).";
+    } else if (fd > span) {
+      return `Minutes for a full day (${fmtMins(fd)}) cannot be more than the shift (${fmtMins(span)}). Lower "Full day needs" to ${fmtMins(span)} or less (or leave it blank), then save again.`;
+    }
     if (fd > 0 && grace[0] + grace[1] >= fd) return `Late and early grace (${fmtMins(grace[0] + grace[1])}) must be less than the time needed for a full day (${fmtMins(fd)}).`;
   }
   return null;
@@ -412,7 +450,7 @@ function ShiftsPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<BackendShift | null>(null);
   const [globalWorkDays, setGlobalWorkDays] = useState<string[]>(["M", "T", "W", "Th", "F", "Sa"]);
-  const [form, setForm] = useState({ name: "", startTime: "09:00", endTime: "18:00", workDays: ["M", "T", "W", "Th", "F", "Sa"], is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, fullDayMins: null as number | null, halfDayMinHours: 0, halfDayLateAfterMin: 0, lunch: { mode: "fixed_window" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
+  const [form, setForm] = useState({ name: "", startTime: "09:00", endTime: "18:00", workDays: ["M", "T", "W", "Th", "F", "Sa"], is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, fullDayMins: null as number | null, halfDayMinHours: 0, halfDayLateAfterMin: 0, flexibleHours: false, countOvertime: true, lunch: { mode: "fixed_window" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
@@ -540,7 +578,7 @@ function ShiftsPage() {
   const openAdd = () => {
     setEditing(null);
     setFollowsCompanyDays(false);
-    setForm({ name: "", startTime: "09:00", endTime: "18:00", workDays: globalWorkDays, is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, fullDayMins: null as number | null, halfDayMinHours: 0, halfDayLateAfterMin: 0, lunch: { mode: "fixed_window" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
+    setForm({ name: "", startTime: "09:00", endTime: "18:00", workDays: globalWorkDays, is24Hours: false, halfDayLatePunchInMin: 0, halfDayEarlyPunchOutMin: 0, fullDayMins: null as number | null, halfDayMinHours: 0, halfDayLateAfterMin: 0, flexibleHours: false, countOvertime: true, lunch: { mode: "fixed_window" as LunchMode, startTime: "13:00", endTime: "14:00", durationMins: 60, minMins: 30 as number | null, maxMins: 90 as number | null } });
     setOpen(true);
   };
 
@@ -561,6 +599,8 @@ function ShiftsPage() {
       fullDayMins: s.fullDayMins && s.fullDayMins > 0 ? s.fullDayMins : null,
       halfDayMinHours: s.halfDayMinHours || 0,
       halfDayLateAfterMin: s.halfDayLateAfterMin || 0,
+      flexibleHours: s.flexibleHours === true,
+      countOvertime: s.countOvertime !== false,
       lunch: {
         mode: initialMode,
         // Defaults for the inputs the SAVED mode does not use, so switching
@@ -857,6 +897,16 @@ function ShiftsPage() {
                             <Moon className="h-3 w-3" /> Overnight
                           </Badge>
                         )}
+                        {s.flexibleHours && (
+                          <Badge variant="secondary" className="text-[11px] font-medium px-2 py-0.5 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-none" title="All time worked counts; nobody is marked Late">
+                            Flexible hours
+                          </Badge>
+                        )}
+                        {s.countOvertime === false && (
+                          <Badge variant="secondary" className="text-[11px] font-medium px-2 py-0.5 bg-slate-500/10 text-slate-700 dark:text-slate-300 border-none" title="No overtime is paid on this shift">
+                            No overtime
+                          </Badge>
+                        )}
                         {s.halfDayLatePunchInMin ? (
                           <Badge variant="secondary" className="text-[11px] font-medium px-2 py-0.5 bg-amber-500/10 text-amber-700 border-none">
                             Late grace: {s.halfDayLatePunchInMin}m
@@ -895,6 +945,16 @@ function ShiftsPage() {
                     {defaultShiftId === s._id && (
                       <Badge variant="outline" className="ml-2 text-[11px] font-bold px-1.5 py-0 border-primary/30 bg-primary/5 text-primary gap-1" title="New employees start on this shift (Settings > Attendance > Default Shift)">
                         <Star className="h-3 w-3" /> Default
+                      </Badge>
+                    )}
+                    {s.flexibleHours && (
+                      <Badge variant="secondary" className="ml-2 text-[11px] font-medium px-1.5 py-0 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-none" title="All time worked counts; nobody is marked Late">
+                        Flexible hours
+                      </Badge>
+                    )}
+                    {s.countOvertime === false && (
+                      <Badge variant="secondary" className="ml-2 text-[11px] font-medium px-1.5 py-0 bg-slate-500/10 text-slate-700 dark:text-slate-300 border-none" title="No overtime is paid on this shift">
+                        No overtime
                       </Badge>
                     )}
                   </DataTableCell>
@@ -1121,6 +1181,60 @@ function ShiftsPage() {
               </div>
             )}
 
+            {/* Flexible hours: same one-line switch as 24 Hours. Off keeps the
+                shift exactly as it was; on, the times above stop limiting
+                which minutes count (shift_status.computeSessionWorkMs). */}
+            <div className={cn(
+              "px-3 py-2 rounded-xl border transition-all space-y-1",
+              form.flexibleHours ? "bg-primary/5 border-primary/40" : "bg-muted/20 border-border/40"
+            )}>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-[12px] font-bold text-foreground">
+                  Flexible hours
+                  <span className="ml-1.5 font-normal text-muted-foreground">count all time worked</span>
+                </p>
+                <Switch
+                  checked={form.flexibleHours}
+                  onCheckedChange={(v) => setForm(prev => ({ ...prev, flexibleHours: v }))}
+                  aria-label="Flexible hours"
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {form.flexibleHours
+                  ? "On: time before the start and after the end also counts, nobody is marked Late, and a day is Full when the hours below are reached. Set “Full day needs” to the hours required."
+                  : "Off: only time between the start and end counts. Turn on for people who may come late and stay late to complete their hours."}
+              </p>
+              {/* Switching it off with a full day longer than the shift is
+                  refused on save (shift_controller.crossCheck); say so here. */}
+              {!form.flexibleHours && !form.is24Hours && Number(form.fullDayMins) > 0 && (() => {
+                const s = toMins(form.startTime), e = toMins(form.endTime);
+                const span = e <= s ? e + 1440 - s : e - s;
+                return Number(form.fullDayMins) > span ? (
+                  <p className="text-[11px] font-semibold text-destructive">
+                    &ldquo;Full day needs&rdquo; ({fmtMins(Number(form.fullDayMins))}) is longer than this shift ({fmtMins(span)}). Lower it below before saving.
+                  </p>
+                ) : null;
+              })()}
+            </div>
+
+            {/* Overtime per shift: on = the company rule, exactly as before. */}
+            <div className={cn(
+              "flex items-center justify-between gap-3 px-3 py-2 rounded-xl border transition-all",
+              form.countOvertime ? "bg-muted/20 border-border/40" : "bg-warning/10 border-warning/40"
+            )}>
+              <p className="text-[12px] font-bold text-foreground">
+                Pay overtime
+                <span className="ml-1.5 font-normal text-muted-foreground">
+                  {form.countOvertime ? "company rule (Settings › Attendance)" : "off for this shift"}
+                </span>
+              </p>
+              <Switch
+                checked={form.countOvertime}
+                onCheckedChange={(v) => setForm(prev => ({ ...prev, countOvertime: v }))}
+                aria-label="Pay overtime"
+              />
+            </div>
+
             {/* Working Days */}
             <div className="space-y-1.5">
               <label className={SECTION_LABEL}>Working Days</label>
@@ -1291,8 +1405,11 @@ function ShiftsPage() {
                   min={0}
                 />
               </div>
+              {/* Arrival time decides nothing on a flexible shift, so the server
+                  ignores this there (isHalfDayLateArrival). Shown, not hidden,
+                  so a value kept for later is never a surprise. */}
               <FormInput
-                label="Half Day if later than (mins, optional)"
+                label={form.flexibleHours ? "Half Day if later than (not used with flexible hours)" : "Half Day if later than (mins, optional)"}
                 type="number"
                 placeholder="e.g. 60 — a punch-in over 1 hour late is a Half Day"
                 value={form.halfDayLateAfterMin || ""}
@@ -1300,6 +1417,7 @@ function ShiftsPage() {
                 className="h-10"
                 containerClassName="space-y-1"
                 min={0}
+                disabled={form.flexibleHours}
               />
               <FormInput
                 label="Minimum hours for a Full Day (optional)"
@@ -1337,7 +1455,7 @@ function ShiftsPage() {
                 subtracted from the hours needed for a Full Day. Leave both at 0 to use the
                 company grace values instead.
               </p>
-              {(form.halfDayLatePunchInMin > 0 || form.halfDayEarlyPunchOutMin > 0) && (
+              {!form.flexibleHours && (form.halfDayLatePunchInMin > 0 || form.halfDayEarlyPunchOutMin > 0) && (
                 <div className="rounded-lg border border-warning/40 bg-warning/10 px-2.5 py-2 space-y-1">
                   <p className="text-[11px] font-black uppercase tracking-wide text-warning-foreground">
                     This switches the company half-day rules off

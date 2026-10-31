@@ -40,6 +40,10 @@ export interface Shift {
   halfDayEarlyPunchOutMin?: number;
   /** Minutes of work for a Full Day before grace; null = shift minus lunch. */
   fullDayMins?: number | null;
+  /** Count every worked minute, not just those between start and end; nobody is Late. */
+  flexibleHours?: boolean;
+  /** Pay the company overtime rule to people on this shift; absent = true. */
+  countOvertime?: boolean;
   lunch?: ShiftLunch;
   /** Every employee on it (primary or one of several), active or not. */
   employees?: number;

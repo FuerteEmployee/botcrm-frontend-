@@ -172,9 +172,11 @@ export function PunchCorrectionFields({
             {ctx.shift && (
               <p className="text-[12px] text-slate-500">
                 Your shift: {fmt12(ctx.shift.start)} – {fmt12(ctx.shift.end)}
-                {ctx.shift.overnight
-                  ? " (night shift: times after midnight count as the next morning)"
-                  : ""}
+                {ctx.shift.flexibleHours
+                  ? " (flexible hours: any time on this day counts)"
+                  : ctx.shift.overnight
+                    ? " (night shift: times after midnight count as the next morning)"
+                    : ""}
               </p>
             )}
           </div>
@@ -243,8 +245,8 @@ export function PunchCorrectionFields({
         {ctx?.punchIn && ctx.hasAttendance && !rule && (
           <p className="text-[12px] text-slate-500">
             {field === "punchIn"
-              ? `Pick a time before ${fmt12(ctx.punchIn)}${ctx.shift ? `, not before ${fmt12(ctx.shift.start)}` : ""}.`
-              : `Pick a time after ${fmt12(ctx.lastSessionPunchIn || ctx.punchIn)}${ctx.shift ? `, not after ${fmt12(ctx.shift.end)}` : ""}.`}
+              ? `Pick a time before ${fmt12(ctx.punchIn)}${ctx.shift && !ctx.shift.flexibleHours ? `, not before ${fmt12(ctx.shift.start)}` : ""}.`
+              : `Pick a time after ${fmt12(ctx.lastSessionPunchIn || ctx.punchIn)}${ctx.shift && !ctx.shift.flexibleHours ? `, not after ${fmt12(ctx.shift.end)}` : ""}.`}
           </p>
         )}
       </div>
