@@ -66,6 +66,8 @@ function DepartmentsPage() {
   // Live GPS tracking is a paid add-on the super admin switches on per company.
   const { isFeatureEnabled } = useFeatureToggles();
   const trackingOn = isFeatureEnabled("tracking");
+  // Auto punch-out is a separate paid add-on, also switched on per company.
+  const autoPunchOutOn = isFeatureEnabled("geofenceAutoPunchOut");
   const {
     departments: list, isLoading, error: loadError, refetch, isRefetching,
     createDepartment, updateDepartment, deleteDepartment, isCreating, isUpdating, isDeleting,
@@ -163,7 +165,7 @@ function DepartmentsPage() {
       ) : (
         <Badge variant="outline" className="text-[10px] font-medium text-muted-foreground">Not tracked</Badge>
       ))}
-      {trackingOn && d.trackingEnabled && d.autoPunchOutEnabled && (
+      {trackingOn && autoPunchOutOn && d.trackingEnabled && d.autoPunchOutEnabled && (
         <Badge variant="outline" className="text-[10px] font-bold border-amber-500/25 bg-amber-500/10 text-amber-700">Auto punch-out</Badge>
       )}
       {d.fieldRole && (
@@ -471,6 +473,14 @@ function DepartmentsPage() {
                   />
                 </div>
 
+                {!autoPunchOutOn ? (
+                <div className="p-3.5 space-y-0.5">
+                  <p className="text-[12px] font-bold text-muted-foreground">Auto punch-out when they leave</p>
+                  <p className="text-[11px] leading-relaxed text-muted-foreground">
+                    Not switched on for your company. Contact support to add it.
+                  </p>
+                </div>
+                ) : (
                 <div className="flex items-start justify-between gap-4 p-3.5">
                   <div className="space-y-0.5">
                     <label htmlFor="dept-autopunchout" className={cn("text-[12px] font-bold", form.trackingEnabled ? "cursor-pointer" : "text-muted-foreground")}>
@@ -489,6 +499,7 @@ function DepartmentsPage() {
                     onCheckedChange={(v) => setForm({ ...form, autoPunchOutEnabled: v })}
                   />
                 </div>
+                )}
               </div>
               )}
 

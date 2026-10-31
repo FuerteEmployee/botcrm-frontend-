@@ -1447,8 +1447,9 @@ const FEATURE_TOGGLE_DEFINITIONS: {
   {
     key: "geofenceAutoPunchOut",
     label: "Geofence Auto Punch-Out",
-    description: "Allows turning on automatic punch-out when staff leave the branch (needs Live Tracking)",
-    defaultOn: true,
+    // Paid add-on, off by default like Live Tracking (backend feature_toggles.js).
+    description: "Allows turning on automatic punch-out when staff leave the branch (paid add-on; needs Live Tracking)",
+    defaultOn: false,
   },
   {
     key: "leads",

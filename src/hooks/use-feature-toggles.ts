@@ -4,12 +4,13 @@ import { useAuth } from "./use-auth";
 
 // Mirror of FEATURE_TOGGLE_DEFAULTS in backend/src/utils/feature_toggles.js —
 // change both. Every feature that already shipped defaults ON (a tenant with
-// nothing stored keeps what it had), except live tracking below.
+// nothing stored keeps what it had), except the two paid add-ons below.
 const DEFAULTS: Record<string, boolean> = {
   // Live GPS tracking is a paid add-on: off until the super admin turns it on
   // for the company (backend utils/feature_toggles.js, the source of truth).
   tracking: false,
-  geofenceAutoPunchOut: true,
+  // Auto punch-out on leaving the branch: also a paid add-on, off by default.
+  geofenceAutoPunchOut: false,
   leads: true,
   expenses: true,
   advanceSalary: true,

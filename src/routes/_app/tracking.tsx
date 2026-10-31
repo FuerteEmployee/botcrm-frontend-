@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { MapPin, Wifi, WifiOff, Search, List, Radio, Route as RouteIcon, Users, ChevronLeft, ChevronRight, RefreshCw, Satellite, Map as MapIcon, Navigation, Ruler, X, AlertTriangle } from "lucide-react";
 import { usePermission } from "@/hooks/use-permission";
+import { useFeatureToggles } from "@/hooks/use-feature-toggles";
 import { requestErrorMessage } from "@/services/request-error";
 import { AutoPunchOutPanel } from "@/components/tracking/auto-punch-out-panel";
 import { PageHeader } from "@/components/shared/page-header";
@@ -562,6 +563,7 @@ function TrackingPage() {
   const { employees, isLoading: loadingEmployees, updateEmployee } = useEmployeeService({ limit: 1000, status: "active" });
   const { locations: restLocations, isLoading: loadingLocations, error: locationsError, refresh: refreshLocations } = useTrackingService();
   const { can } = usePermission();
+  const { isFeatureEnabled } = useFeatureToggles();
   // The switch saves through the Employees edit route, and Ping needs the
   // Tracking edit permission; a sub-admin without them sees why, not a 403.
   const canToggleTracking = can("employees", "edit");
@@ -1343,12 +1345,14 @@ function TrackingPage() {
         )}
       </AnimatePresence>
 
-      <AutoPunchOutPanel
+      {/* Auto punch-out is a paid add-on switched on per company by the super
+          admin; without it the panel has nothing to show or switch. */}
+      {isFeatureEnabled("geofenceAutoPunchOut") && <AutoPunchOutPanel
         employeeId={selectedId || undefined}
         employeeName={selected?.name}
         date={selectedDate}
         dateLabel={isToday ? "today" : `on ${dayLabel(selectedDate)}`}
-      />
+      />}
     </div>
   );
 }
