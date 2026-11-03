@@ -6,11 +6,13 @@ import { useAuth } from "@/hooks/use-auth";
 import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { getSession, patchSession } from "@/lib/auth";
+import type { Session } from "@/lib/auth";
+import { panelHomeFor } from "@/lib/panel-home";
 import { apiClient } from "@/lib/api-client";
 
-function dashboardForRole(role: string) {
+function dashboardForRole(role: string, permissions?: Session["permissions"]) {
   if (role === "superadmin") return "/super/overview";
-  if (role === "admin" || role === "subadmin") return "/dashboard";
+  if (role === "admin" || role === "subadmin") return panelHomeFor({ role: role as Session["role"], permissions });
   return "/user";
 }
 
@@ -22,6 +24,19 @@ const queryClient = new QueryClient({
       retry: 1,
       refetchOnWindowFocus: false,
       enabled: typeof window !== "undefined",
+      // Without a staleTime this defaults to 0, so every query refetched on
+      // every mount: navigating away and back re-hit the API for data that had
+      // not changed, and a phone on a weak connection paid for all of it. A
+      // minute is short enough that nothing on screen is meaningfully old, and
+      // long enough to remove almost all of that traffic.
+      //
+      // Anything that must be fresher says so at the call site — live tracking
+      // and today's attendance already pass their own staleTime.
+      staleTime: 60 * 1000,
+      // Keep a query's data around after its last observer unmounts, so going
+      // back to a screen paints instantly from cache and then revalidates,
+      // rather than showing a skeleton again.
+      gcTime: 10 * 60 * 1000,
     },
   },
 });
@@ -103,9 +118,15 @@ function RootComponent() {
 
   useEffect(() => {
     const handleUpgradeRequired = (e: Event) => {
+      // Employees cannot change the plan, so an "upgrade" prompt is only noise
+      // to them; their pages show "Not available for your company" in place.
+      if (getSession()?.role === "employee") return;
       const customEvent = e as CustomEvent<{ message: string }>;
-      toast.error(customEvent.detail?.message || "Plan Upgrade Required", {
-        description: "Your current subscription plan does not cover this feature module. Please upgrade.",
+      // One toast however many requests were refused at once: opening a page
+      // on a plan without the module used to stack four or five identical ones.
+      toast.error(customEvent.detail?.message || "Plan upgrade required", {
+        id: "plan-upgrade-required",
+        description: "Your current plan does not include this feature.",
         duration: 5000,
       });
     };
@@ -126,10 +147,16 @@ function RootComponent() {
       .get("/users/profile")
       .then(({ data }) => {
         const serverRole = data?.role as string | undefined;
+        // Permissions too, not just the role: after an admin edits a
+        // sub-admin's pages, the sidebar and page guard kept the old map
+        // until the next sign-in.
+        if (data?.permissions && JSON.stringify(data.permissions) !== JSON.stringify(stored.permissions ?? null)) {
+          patchSession({ permissions: data.permissions });
+        }
         if (serverRole && serverRole !== stored.role) {
           patchSession({ role: serverRole as typeof stored.role });
           // Send them to the panel that actually matches their real role
-          window.location.replace(dashboardForRole(serverRole));
+          window.location.replace(dashboardForRole(serverRole, data?.permissions));
         }
       })
       .catch(() => {

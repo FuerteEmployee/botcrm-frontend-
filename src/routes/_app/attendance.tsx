@@ -3,14 +3,16 @@ import { useMemo, useState, useEffect } from "react";
 import { z } from "zod";
 import { useQuery } from "@tanstack/react-query";
 import { GridCard } from "@/components/shared/grid-card";
-import { Check, X, Clock as ClockIcon, MessageSquare, Pencil, CalendarDays, Search, MapPin, MoreVertical, Download, Plus, ChevronLeft, ChevronRight, Users, UserCheck, UserX, Phone, ClipboardList, ShieldAlert, Layers, ScanFace, Fingerprint, Smartphone, ListChecks, ChevronDown } from "lucide-react";
+import { Check, X, Clock as ClockIcon, MessageSquare, Pencil, CalendarDays, Search, MapPin, MoreVertical, Download, Plus, ChevronLeft, ChevronRight, Users, UserCheck, UserX, Phone, ClipboardList, ShieldAlert, Layers, ScanFace, Fingerprint, Smartphone, ListChecks, ChevronDown, AlertCircle, Home } from "lucide-react";
 import { ActionButton } from "@/components/shared/action-button";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/shared/page-header";
 import { ViewToggle } from "@/components/shared/view-toggle";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { FormInput } from "@/components/shared/form-input";
 import { FormSelect } from "@/components/shared/form-select";
@@ -27,7 +29,10 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { useAttendanceService, useAttendanceStats, useAbsentToday, usePunchLog, type AttendanceRecord, type AttendanceSession, type PunchLogTap } from "@/services/attendance-service";
+import { statusLabel, statusClass } from "@/lib/attendance-status";
+import { useAttendanceService, useAttendanceStats, useAbsentToday, usePunchLog, type AttendanceRecord, type AttendanceEdit, type AttendanceSession, type PunchLogTap } from "@/services/attendance-service";
+import { CorrectionReviewDialog } from "@/components/attendance/attendance-corrections-panel";
+import type { Regularization } from "@/services/regularization-service";
 import { useGeofenceMode } from "@/services/geofence-service";
 import {
   SessionTimeline,
@@ -37,17 +42,14 @@ import {
   WhyHalfDay,
   GeofenceExitBanner,
   InsideFenceNote,
-  getWorkedEstimate,
 } from "@/components/attendance/day-detail-blocks";
 import { useRegularizationService } from "@/services/regularization-service";
 import { useShiftService } from "@/services/shift-service";
 import { useBranchService } from "@/services/branch-service";
 import { useEmployeeService } from "@/services/employee-service";
-import { useTicketService } from "@/services/ticket-service";
-import { parseTicketReason } from "@/lib/leave-ticket-parser";
 import { apiClient } from "@/lib/api-client";
 import { toast } from "sonner";
-import { cn, toISTDateKey, toDatetimeLocalValue, formatTime12h } from "@/lib/utils";
+import { cn, toISTDateKey, formatTime12h } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { StatCard } from "@/components/shared/stat-card";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
@@ -73,6 +75,90 @@ const TAP_LABELS: Record<string, string> = {
   "lunch-out": "Back from lunch",
   "punch-out": "Punch out",
 };
+
+// ─── IST display helpers ─────────────────────────────────────────────────────
+//
+// Every attendance day is an IST day (the server keys `date` to IST midnight),
+// so its times are read in IST too -- not in the admin's browser timezone.
+//
+// These replace two different mistakes. `formatTime12h` expects "HH:mm", and
+// was being handed ISO timestamps for the raw tap list and the Excel export:
+// "2026-09-25T04:01:00.000Z".split(":") reads the hour as NaN, which falls back
+// to 12, so every tap and every exported punch came out as "12:0x AM" (09:31
+// read "12:01 AM"). And `toLocaleTimeString([])` / `toLocaleDateString()` use
+// the browser's zone, so an admin outside IST saw every time shifted and every
+// date one day early.
+const IST_TZ = "Asia/Kolkata";
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/** "09:31 AM" for a real instant, in IST. "" when there is none. */
+function fmtClock(value?: string | null): string {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("en-US", { timeZone: IST_TZ, hour: "2-digit", minute: "2-digit", hour12: true });
+}
+
+/** "25 Sep 2026" for a real instant (or a YYYY-MM-DD key), in IST. */
+function fmtDay(value?: string | null): string {
+  if (!value) return "";
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(value) ? new Date(`${value}T12:00:00+05:30`) : new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString("en-GB", { timeZone: IST_TZ, day: "numeric", month: "short", year: "numeric" });
+}
+
+/** A datetime-local value ("YYYY-MM-DDTHH:mm") as IST wall clock -- how the server parses it. */
+function toISTInput(value?: string | null): string {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  return new Date(d.getTime() + IST_OFFSET_MS).toISOString().slice(0, 16);
+}
+
+/** The instant an IST wall-clock "YYYY-MM-DDTHH:mm" names. */
+function istInputToMs(value: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value);
+  if (!m) return NaN;
+  return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]) - IST_OFFSET_MS;
+}
+
+/** YYYY-MM-DD `n` days from `key`, by calendar (no timezone involved). */
+function addDaysKey(key: string, n: number): string {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + n, 12)).toISOString().slice(0, 10);
+}
+
+const isOvernight = (shift?: { startTime?: string; endTime?: string } | null) =>
+  !!shift?.startTime && !!shift?.endTime && shift.endTime <= shift.startTime;
+
+type EditTimes = { punchIn: string; punchOut: string; lunchInTime: string; lunchOutTime: string };
+
+/**
+ * The edit dialog's rules, mirrored from the server (updateAttendance) so the
+ * admin is told before a round trip. The server enforces the same ones: the
+ * day and "not in the future" apply to the times being CHANGED, the ordering
+ * rules to the day as it would be saved.
+ */
+function editProblem(f: EditTimes, orig: EditTimes, dayKey: string, overnight: boolean): string | null {
+  const labels: Record<string, string> = { punchIn: "Punch in", punchOut: "Punch out", lunchInTime: "Lunch in", lunchOutTime: "Lunch out" };
+  const nextDay = addDaysKey(dayKey, 1);
+  for (const k of ["punchIn", "punchOut", "lunchInTime", "lunchOutTime"] as const) {
+    const v = f[k];
+    if (!v || v === orig[k]) continue;
+    const day = v.slice(0, 10);
+    const endField = k === "punchOut" || k === "lunchOutTime";
+    if (day !== dayKey && !(endField && overnight && day === nextDay)) {
+      return `${labels[k]} must be on ${fmtDay(dayKey)} — the day you are editing.`;
+    }
+    if (istInputToMs(v) > Date.now() + 60_000) return `${labels[k]} cannot be in the future.`;
+  }
+  if (f.punchOut && !f.punchIn) return "A punch out needs a punch in.";
+  if (f.punchIn && f.punchOut && f.punchOut <= f.punchIn) return "Punch out must be after punch in.";
+  if (f.lunchOutTime && !f.lunchInTime) return "A lunch end needs a lunch start.";
+  if (f.lunchInTime && f.lunchOutTime && f.lunchOutTime <= f.lunchInTime) return "Lunch end must be after lunch start.";
+  if ((f.lunchInTime || f.lunchOutTime) && !f.punchIn) return "Lunch needs a punch in on the same day.";
+  return null;
+}
 
 function RawTapList({ taps, isLoading }: { taps: PunchLogTap[]; isLoading: boolean }) {
   const counted = taps.filter((t) => !t.discarded);
@@ -104,7 +190,7 @@ function RawTapList({ taps, isLoading }: { taps: PunchLogTap[]; isLoading: boole
               )}
             >
               <span className={cn("font-mono font-bold", t.discarded && "line-through")}>
-                {formatTime12h(t.deviceTime)}
+                {fmtClock(t.deviceTime)}
               </span>
               <span className="flex-1 text-right font-sans text-[10px] font-bold uppercase tracking-wider">
                 {t.discarded ? (
@@ -161,7 +247,7 @@ function Pagination({
   }
 
   return (
-    <div className="flex items-center justify-between gap-4 mt-4 px-1">
+    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 mt-4 px-1">
       <p className="text-[12px] text-muted-foreground">
         Showing <span className="font-semibold text-foreground">{start}–{end}</span> of{" "}
         <span className="font-semibold text-foreground">{totalItems}</span> records
@@ -170,7 +256,8 @@ function Pagination({
         <Button
           variant="outline"
           size="icon"
-          className="h-8 w-8 rounded-lg border-border/50"
+          className="h-10 w-10 sm:h-8 sm:w-8 rounded-lg border-border/50"
+          aria-label="Previous page"
           disabled={currentPage === 1}
           onClick={() => onPageChange(currentPage - 1)}
         >
@@ -185,7 +272,7 @@ function Pagination({
               variant={p === currentPage ? "default" : "outline"}
               size="icon"
               className={cn(
-                "h-8 w-8 rounded-lg text-[12px] font-semibold",
+                "h-10 w-10 sm:h-8 sm:w-8 rounded-lg text-[12px] font-semibold",
                 p === currentPage
                   ? "bg-primary text-primary-foreground border-primary shadow-sm"
                   : "border-border/50 hover:bg-muted/60"
@@ -199,7 +286,8 @@ function Pagination({
         <Button
           variant="outline"
           size="icon"
-          className="h-8 w-8 rounded-lg border-border/50"
+          className="h-10 w-10 sm:h-8 sm:w-8 rounded-lg border-border/50"
+          aria-label="Next page"
           disabled={currentPage === totalPages}
           onClick={() => onPageChange(currentPage + 1)}
         >
@@ -211,111 +299,51 @@ function Pagination({
 }
 
 // ─── Today's Record Mini-Card ────────────────────────────────────────────────
-function TodayRecordCard({ t, getDisplayStatus, canEdit, setModifyForm, setModifyOpen, setRemarkOpenId, setRemarkText }: {
-  t: AttendanceRecord;
-  getDisplayStatus: (t: AttendanceRecord) => string;
-  canEdit: boolean;
-  setModifyForm: any;
-  setModifyOpen: any;
-  setRemarkOpenId: any;
-  setRemarkText: any;
-}) {
-  const status = getDisplayStatus(t);
-  const statusStyle = status === "on-duty"
-    ? "bg-blue-500/10 text-blue-600 border-blue-200"
-    : t.status === "present"
-    ? "bg-emerald-500/10 text-emerald-600 border-emerald-200"
-    : t.status === "late"
-    ? "bg-amber-500/10 text-amber-600 border-amber-200"
-    : "bg-rose-500/10 text-rose-600 border-rose-200";
-
-  const dotStyle = status === "on-duty"
-    ? "bg-blue-500"
-    : t.status === "present"
-    ? "bg-emerald-500"
-    : t.status === "late"
-    ? "bg-amber-500"
-    : "bg-rose-500";
-
+/**
+ * "Worked remotely" marker for one day.
+ *
+ * Driven by `isWFH` — the record's own flag — and NOT by `status`, because the
+ * status badge loses the signal in both directions:
+ *
+ *   · While the day is open, getDisplayStatus() reports "On Duty", so a remote
+ *     employee currently working is indistinguishable from one at their desk.
+ *   · A remote day that falls short of the hours bar grades `half-day`, since
+ *     determineHalfDayStatus tests hours before it ever considers WFH. The
+ *     `wfh` status only survives on a remote day that made full hours.
+ *
+ * So the only reliable answer to "was this person in the office" is the flag,
+ * and it matters: a WFH day is exempt from the branch fence and from auto
+ * punch-out, and an admin reviewing a day with no distance on it needs to know
+ * that was intended rather than a tracking failure.
+ */
+function WfhMark({ record, size = "sm" }: { record: { isWFH?: boolean }; size?: "sm" | "md" }) {
+  if (!record?.isWFH) return null;
   return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.97 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="relative bg-card border border-border/50 rounded-2xl p-4 shadow-sm hover:shadow-md hover:border-primary/20 transition-all group overflow-hidden"
-    >
-      <div className="absolute top-0 left-0 right-0 h-[2px] bg-gradient-to-r from-primary/40 via-primary to-primary/40 opacity-0 group-hover:opacity-100 transition-opacity" />
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex items-center gap-2.5">
-          <Avatar className="h-10 w-10 ring-2 ring-primary/10">
-            {t.punchInPhoto ? (
-              <img src={t.punchInPhoto} alt={t.employeeId?.name} className="h-full w-full object-cover" />
-            ) : (
-              <AvatarFallback className="bg-primary/10 text-primary text-[11px] font-bold">
-                {t.employeeId?.name?.split(" ").map((n: string) => n[0]).join("")}
-              </AvatarFallback>
-            )}
-          </Avatar>
-          <div>
-            <p className="text-[13px] font-bold text-foreground leading-tight">{t.employeeId?.name || "Unknown"}</p>
-            <p className="text-[11px] text-muted-foreground">{t.employeeId?.phone}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Badge variant="outline" className={cn("text-[10px] font-semibold px-2 py-0.5 border capitalize rounded-full", statusStyle)}>
-            <span className={cn("h-1.5 w-1.5 rounded-full mr-1 inline-block", dotStyle)} />
-            {status === "on-duty" ? "On Duty" : t.status}
-          </Badge>
-          {canEdit && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <MoreVertical className="h-3.5 w-3.5" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="text-[13px]">
-                <DropdownMenuItem onClick={() => {
-                  setModifyForm({
-                    id: t._id,
-                    punchIn: t.punchIn ? toDatetimeLocalValue(t.punchIn) : "",
-                    punchOut: t.punchOut ? toDatetimeLocalValue(t.punchOut) : "",
-                    lunchInTime: t.lunchInTime ? toDatetimeLocalValue(t.lunchInTime) : "",
-                    lunchOutTime: t.lunchOutTime ? toDatetimeLocalValue(t.lunchOutTime) : "",
-                    status: t.status
-                  });
-                  setModifyOpen(true);
-                }}>Edit Punch</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => { setRemarkOpenId(t._id); setRemarkText(t.remarks || ""); }}>Add Remark</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        {[
-          { label: "Punch In", value: t.punchIn },
-          { label: "Punch Out", value: t.punchOut },
-          { label: "Lunch In", value: t.lunchInTime },
-          { label: "Lunch Out", value: t.lunchOutTime },
-        ].map(({ label, value }) => (
-          <div key={label} className="bg-muted/40 rounded-lg px-2.5 py-2 border border-border/30">
-            <p className="text-[9px] text-muted-foreground font-bold uppercase tracking-widest mb-0.5">{label}</p>
-            <p className="text-[12px] font-mono font-bold text-foreground">
-              {value ? new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true }) : "—"}
-            </p>
-          </div>
-        ))}
-      </div>
-      {t.punchInLocation && (
-        <div className="mt-2.5 flex items-center gap-1 text-[10px] text-muted-foreground/70">
-          <MapPin className="h-2.5 w-2.5 text-primary/40" />
-          <span className="truncate">
-            {typeof t.punchInLocation === "object"
-              ? `${(t.punchInLocation as any).lat?.toFixed(4)}, ${(t.punchInLocation as any).lng?.toFixed(4)}`
-              : t.punchInLocation}
-          </span>
-        </div>
+    <Badge
+      variant="outline"
+      title="Worked from home — branch distance not checked, and exempt from auto punch-out for this day."
+      className={cn(
+        "border-transparent bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 font-bold rounded-full inline-flex items-center gap-1",
+        size === "md" ? "text-[10px] px-2.5 py-1" : "text-[9px] px-1.5 py-0"
       )}
-    </motion.div>
+    >
+      <Home className={size === "md" ? "h-3 w-3" : "h-2.5 w-2.5"} />
+      WFH
+    </Badge>
+  );
+}
+
+// Next to a punch-out a machine or the face kiosk recorded today: shown, but
+// not yet final, because a device cannot tell a lunch exit from going home.
+function ProvisionalOutTag() {
+  return (
+    <Badge
+      variant="outline"
+      title="Recorded by a machine or the face kiosk, which cannot tell a lunch break from leaving for the day. It becomes final when the day ends, or is replaced if they punch in again."
+      className="ml-1.5 align-middle border-transparent bg-warning/15 text-warning-foreground font-bold rounded-full text-[9px] px-1.5 py-0 font-sans"
+    >
+      may be lunch
+    </Badge>
   );
 }
 
@@ -323,8 +351,22 @@ function TodayRecordCard({ t, getDisplayStatus, canEdit, setModifyForm, setModif
 const PAGE_SIZE = 10;
 const CARD_PAGE_SIZE = 12;
 
+// With no day picked, the list covers this many days back from today. The page
+// used to fetch every attendance row the tenant has ever had (342 rows / 785 KB
+// on the test tenant, and growing every day) and filter by date in the browser.
+const RECENT_DAYS = 31;
+
 function AttendancePage() {
-  const { records: list, isLoading, updateAttendance, markAbsent } = useAttendanceService();
+  // Default date filter = today (IST — matches how the backend keys each
+  // attendance record's `date`, regardless of the browser's own timezone)
+  const todayStr = toISTDateKey(new Date());
+  const [dateFilter, setDateFilter] = useState<string>(todayStr);
+  const rangeStart = dateFilter || addDaysKey(todayStr, -(RECENT_DAYS - 1));
+  const rangeEnd = dateFilter || todayStr;
+  const {
+    records: list, isLoading, isError: listFailed, isFetching, refetch: refetchList,
+    updateAttendance, isUpdating, markAbsent,
+  } = useAttendanceService(rangeStart, rangeEnd, undefined, { keepPrevious: true });
   const { status } = Route.useSearch();
   const [tab, setTab] = useState<string>(status || "all");
   const [shiftFilter, setShiftFilter] = useState<string>("all");
@@ -334,16 +376,40 @@ function AttendancePage() {
   const [remarkText, setRemarkText] = useState("");
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
   const [view, setView] = useState<"grid" | "list">(defaultLayout);
+
+
+  /**
+   * Narrow screens drop COLUMNS, they do not change view.
+   *
+   * Cards were the obvious answer and the wrong one: this screen is read once a
+   * day against every employee, so at 50 staff a card list is several thousand
+   * pixels of scrolling to answer "who is missing". The table is the right
+   * shape -- one scannable line each -- it just cannot carry eleven columns at
+   * 360px.
+   *
+   * So below md the table keeps the five that get read at a glance (staff, in,
+   * out, hours, status) and drops date, both lunch times, the selfies and the
+   * location. None of those are lost: the date is the one already chosen in the
+   * filter bar, and the rest are all in View Details, one tap away.
+   */
+  const isMobile = useIsMobile();
+
   const { can } = usePermission();
   const canEdit = can("attendance", "edit");
   const canCreate = can("attendance", "create");
 
-  const { stats } = useAttendanceStats();
-  const { absentees } = useAbsentToday();
+  // The cards, the absent rows and the Absent sheet describe ONE day: the day
+  // picked in the filter bar, or today while the last 31 days are listed. They
+  // used to be today's whatever day the list showed, so picking 29 Sep showed
+  // 29 Sep's rows under today's numbers.
+  const statsDate = dateFilter && dateFilter !== todayStr ? dateFilter : undefined;
+  const { stats } = useAttendanceStats(statsDate);
+  const { absentees } = useAbsentToday(statsDate);
+  const dayWord = statsDate ? `on ${fmtDay(statsDate)}` : "Today";
   const { regularizations, submitRegularization, approveRegularization, rejectRegularization, isSubmitting } = useRegularizationService();
   const { shifts } = useShiftService();
-  const { employees } = useEmployeeService({ limit: 200, status: "active" });
-  const { tickets } = useTicketService();
+  // Every active employee: the correction picker used to stop at the first 200.
+  const { employees } = useEmployeeService({ status: "active" });
 
   const { data: appSettings } = useQuery({
     queryKey: ["settings"],
@@ -368,22 +434,58 @@ function AttendancePage() {
   const [modifyOpen, setModifyOpen] = useState(false);
   const [modifyForm, setModifyForm] = useState({
     id: "",
+    name: "",
+    dayKey: "",
+    overnight: false,
     punchIn: "",
     punchOut: "",
     lunchInTime: "",
     lunchOutTime: "",
-    status: "present" as any
+    // "auto" = grade the day from the times, exactly as a real punch-out would.
+    // The select used to be prefilled with the CURRENT status and always sent,
+    // so correcting a late arrival kept the day graded late.
+    status: "auto" as string,
+    // Tracked separately from `status` because they are separate facts: a
+    // remote day short of the hours bar grades 'half-day' and is still remote.
+    isWFH: false,
+    orig: { punchIn: "", punchOut: "", lunchInTime: "", lunchOutTime: "" } as EditTimes,
   });
+  const [modifyError, setModifyError] = useState<string | null>(null);
 
-  // Default date filter = today (IST — matches how the backend keys each
-  // attendance record's `date`, regardless of the browser's own timezone)
-  const todayStr = toISTDateKey(new Date());
-  const [dateFilter, setDateFilter] = useState<string>(todayStr);
-
-  // Punched in but not yet punched out — shown as "On Duty"
-  const getDisplayStatus = (t: AttendanceRecord) => (t.punchIn && !t.punchOut ? "on-duty" : t.status);
+  // One place that opens the editor, for the table, the cards and the sheet.
+  const openEdit = (t: AttendanceRecord) => {
+    const orig: EditTimes = {
+      punchIn: toISTInput(t.punchIn),
+      punchOut: toISTInput(t.punchOut),
+      lunchInTime: toISTInput(t.lunchInTime),
+      lunchOutTime: toISTInput(t.lunchOutTime),
+    };
+    setModifyForm({
+      id: t._id,
+      name: t.employeeId?.name || "Employee",
+      dayKey: toISTDateKey(t.date),
+      overnight: isOvernight(t.employeeId?.shiftId),
+      // IST wall clock, which is how the server reads a bare datetime-local.
+      punchIn: toISTInput(t.punchIn),
+      punchOut: toISTInput(t.punchOut),
+      lunchInTime: toISTInput(t.lunchInTime),
+      lunchOutTime: toISTInput(t.lunchOutTime),
+      status: "auto",
+      isWFH: !!t.isWFH,
+      orig,
+    });
+    setModifyError(null);
+    setModifyOpen(true);
+  };
 
   const isToday = (dateStr?: string) => !!dateStr && toISTDateKey(dateStr) === todayStr;
+
+  // Punched in but not yet punched out — shown as "On Duty". A device punch-out
+  // today is provisional (it may be a lunch exit), and the list already hides
+  // its time for that reason; the status has to agree, or the row read
+  // "Half Day" with no punch-out beside it while the person was still at work.
+  const getDisplayStatus = (t: AttendanceRecord) =>
+    t.punchIn && (!t.punchOut || (t.punchOutIsProvisional && isToday(t.date))) ? "on-duty" : t.status;
 
   // Shift name + hours, shown alongside Punch In/Out so admins can visually
   // check a punch against the shift it's being judged late/half-day against —
@@ -398,15 +500,27 @@ function AttendancePage() {
   // Lens/biometric devices only send a generic punch-in/punch-out toggle —
   // they can't tell a lunch break from the real end of day, so today's
   // `punchOut` may just be the most recent lunch-out. Only trust it once the
-  // day is over. Use "Lens Info" (below) to see every raw event for today
+  // day is over. Use "Session details" (below) to see every raw event for today
   // regardless.
 
 
-  // Once the employee explicitly punches out via the app, punchOutIsProvisional
-  // is cleared server-side even on a Lens-started day — so this shows their
-  // real exit immediately instead of waiting for the day to pass.
-  const getDisplayPunchOut = (t: AttendanceRecord) =>
-    t.punchOutIsProvisional && isToday(t.date) ? null : t.punchOut;
+  // The punch-out time is always shown. It used to be hidden for the rest of
+  // the day when a device set it, so an admin saw "--:--" after someone had
+  // clearly left, and only the Edit dialog (whose save clears the flag) showed
+  // it. It is still marked provisional -- see isProvisionalOut -- and the
+  // status stays "On Duty" until the day is final, so nobody reads as Half Day
+  // over a lunch break.
+  const getDisplayPunchOut = (t: AttendanceRecord) => t.punchOut;
+
+  // No punch photo on an absent day, and no punch-out photo without a
+  // punch-out. The server now clears both; these also hide the leftovers
+  // already stored, which showed an old punch-out selfie beside a new punch-in.
+  const inPhoto = (t: AttendanceRecord) => (t.status === "absent" || !t.punchIn ? undefined : t.punchInPhoto);
+  const outPhoto = (t: AttendanceRecord) => (t.status === "absent" || !t.punchOut ? undefined : t.punchOutPhoto);
+
+  // A device punch-out today that may only be a lunch exit: the next tap or
+  // the end of the day settles it. An explicit app punch-out clears the flag.
+  const isProvisionalOut = (t: AttendanceRecord) => !!t.punchOut && !!t.punchOutIsProvisional && isToday(t.date);
 
   // lunchInTime/lunchOutTime are only ever written by the lunchIn/lunchOut
   // handlers, and a device reaches those two ways — an explicit `action:
@@ -419,6 +533,38 @@ function AttendancePage() {
   const getDisplayLunchIn = (t: AttendanceRecord) => t.lunchInTime;
 
   const getDisplayLunchOut = (t: AttendanceRecord) => t.lunchOutTime;
+
+  // Who ended the day: the employee, or us on their behalf?
+  //
+  // A punch-out the 04:00 job invented at shift end renders as an ordinary time
+  // and reads exactly like one somebody actually tapped — which is how a day
+  // nobody measured gets paid as a full day without anyone noticing. The detail
+  // drawer has always labelled it; the list, where an admin actually scans for
+  // problems, did not. Timestamp order, never array position: shifts[] is not
+  // stored chronologically.
+  const CLOSE_META: Record<string, { label: string; className: string }> = {
+    shift_end: {
+      label: "Auto · unverified",
+      className: "border-warning/30 bg-warning/10 text-warning-foreground",
+    },
+    auto_geofence: {
+      label: "Auto exit",
+      className: "border-info/30 bg-info/10 text-info",
+    },
+    regularized: {
+      label: "Corrected",
+      className: "border-success/30 bg-success/10 text-success",
+    },
+  };
+
+  const getCloseMeta = (t: AttendanceRecord) => {
+    const closed = (t.shifts || []).filter((s) => s?.punchOut);
+    if (!closed.length) return null;
+    const final = [...closed].sort(
+      (a, b) => +new Date(b.punchOut!) - +new Date(a.punchOut!),
+    )[0];
+    return final?.closeReason ? CLOSE_META[final.closeReason] ?? null : null;
+  };
 
   const SOURCE_META: Record<string, { icon: typeof ScanFace; label: string }> = {
     lens: { icon: ScanFace, label: "Lens (camera)" },
@@ -433,19 +579,13 @@ function AttendancePage() {
     present: todayList.filter((t) => ["present", "late", "wfh"].includes(t.status)).length,
     late: todayList.filter((t) => t.status === "late").length,
     halfDay: todayList.filter((t) => t.status === "half-day").length,
-    absent: todayList.filter((t) => t.status === "absent").length,
+    absent: todayList.filter((t) => t.status === "absent").length + absentees.length,
   };
 
-  // On Leave — approved Leave tickets (the real leave-request source of truth;
-  // see leaves.tsx) whose date range covers today.
-  const onLeaveCount = useMemo(() => {
-    return tickets.filter((t) => {
-      if (t.type !== "Leave" || t.status !== "approved") return false;
-      const parsed = parseTicketReason(t.reason);
-      if (!parsed.startDate || !parsed.endDate) return false;
-      return parsed.startDate <= todayStr && todayStr <= parsed.endDate;
-    }).length;
-  }, [tickets, todayStr]);
+  // On Leave comes from the server's day classification (approved Leave
+  // records covering today). It used to count approved "Leave" TICKETS, which
+  // leaves stopped being -- so it read 0 whoever was on leave.
+  const onLeaveCount = stats?.onLeaveToday ?? 0;
 
   const pendingRegularizations = useMemo(
     () => regularizations.filter((r) => r.status === "pending"),
@@ -467,14 +607,75 @@ function AttendancePage() {
     return `${h}:${String(m).padStart(2, "0")}`;
   };
 
+  // A row made from today's absentee list, not a stored attendance record. It
+  // has no id the server knows, so it gets no edit/remark/detail actions.
+  const isVirtualAbsent = (t: AttendanceRecord) => (t as { virtualAbsent?: boolean }).virtualAbsent === true;
+
+  // Ticks once a minute so "hours so far" moves while the page is open.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  // Hours worked so far for someone still on duty today: every session, the
+  // open one up to now, less any punched lunch inside them. The stored
+  // totalWorkMs only counts closed sessions, so an open day showed "—". A
+  // shift's fixed lunch deduction is applied by the server when the day closes,
+  // so the final figure can be lower than this.
+  const liveWorkedHours = (t: AttendanceRecord) => {
+    const sessions = (t.shifts?.length ? t.shifts : [{ punchIn: t.punchIn, punchOut: undefined }] as unknown as AttendanceSession[])
+      .filter((s) => s?.punchIn);
+    const lunchStart = t.lunchInTime ? +new Date(t.lunchInTime) : null;
+    const lunchEnd = t.lunchOutTime ? +new Date(t.lunchOutTime) : nowMs;
+    const lunchWithin = (from: number, to: number) =>
+      lunchStart === null ? 0 : Math.max(0, Math.min(to, lunchEnd) - Math.max(from, lunchStart));
+    const ms = sessions.reduce((total, s) => {
+      const from = +new Date(s.punchIn!);
+      const to = s.punchOut ? +new Date(s.punchOut) : nowMs;
+      return total + Math.max(0, to - from - lunchWithin(from, to));
+    }, 0);
+    if (ms <= 0) return null;
+    return `${Math.floor(ms / 3600000)}:${String(Math.floor((ms % 3600000) / 60000)).padStart(2, "0")}`;
+  };
+
+  // What the Hours cell shows: a running figure while on duty today, otherwise
+  // the stored total.
+  const hoursFor = (t: AttendanceRecord): { text: string; live: boolean } | null => {
+    if (isVirtualAbsent(t)) return null;
+    if (getDisplayStatus(t) === "on-duty" && isToday(t.date)) {
+      const live = liveWorkedHours(t);
+      return live ? { text: live, live: true } : null;
+    }
+    const total = workedHours(t);
+    return total ? { text: total, live: false } : null;
+  };
+
+  // How late the day started, against the shift's start time (IST). Shown on
+  // the row itself: "Late" used to exist only as a chip count, so every late
+  // arrival's row read plain "On Duty".
+  const lateMinutes = (t: AttendanceRecord): number | null => {
+    if (!t.punchIn || !(t.status === "late" || t.wasLate)) return null;
+    const start = t.employeeId?.shiftId?.startTime;
+    const [h, m] = String(start || "").split(":").map(Number);
+    if (!Number.isFinite(h)) return null;
+    const ist = new Date(+new Date(t.punchIn) + 5.5 * 3600_000);
+    let diff = ist.getUTCHours() * 60 + ist.getUTCMinutes() - (h * 60 + (Number.isFinite(m) ? m : 0));
+    if (diff < -720) diff += 1440; // a night shift's punch after midnight
+    return diff > 0 ? diff : null;
+  };
+  const lateLabel = (t: AttendanceRecord) => {
+    const n = lateMinutes(t);
+    if (n === null) return null;
+    return n < 60 ? `Late ${n} min` : `Late ${Math.floor(n / 60)}h ${n % 60}m`;
+  };
+
   // Steps the selected day by n days. Clamped at today -- attendance cannot be
   // recorded in the future, so letting the arrow run forward only produces
   // empty pages that look like a fault.
   const shiftDay = (n: number) => {
     const base = dateFilter || todayStr;
-    const d = new Date(`${base}T12:00:00`);
-    d.setDate(d.getDate() + n);
-    const next = toISTDateKey(d);
+    const next = addDaysKey(base, n);
     if (next > todayStr) return;
     setDateFilter(next);
     setTablePage(1);
@@ -500,30 +701,56 @@ function AttendancePage() {
         Branch: t.employeeId?.branchId?.branchName || "",
         Shift: t.employeeId?.shiftId?.name || "",
         Date: toISTDateKey(t.date),
-        "Punch In": t.punchIn ? formatTime12h(t.punchIn) : "",
-        "Lunch In": getDisplayLunchIn(t) ? formatTime12h(getDisplayLunchIn(t)!) : "",
-        "Lunch Out": getDisplayLunchOut(t) ? formatTime12h(getDisplayLunchOut(t)!) : "",
-        "Punch Out": getDisplayPunchOut(t) ? formatTime12h(getDisplayPunchOut(t)!) : "",
+        "Punch In": fmtClock(t.punchIn),
+        "Lunch In": fmtClock(getDisplayLunchIn(t)),
+        "Lunch Out": fmtClock(getDisplayLunchOut(t)),
+        "Punch Out": fmtClock(getDisplayPunchOut(t)),
         "Total Hrs": workedHours(t) || "",
         Status: getDisplayStatus(t) === "on-duty" ? "On Duty" : t.status,
+        // Its own column rather than folded into Status, which cannot carry it:
+        // a remote day reads "On Duty" while open and "half-day" if short.
+        WFH: t.isWFH ? "Yes" : "",
         Source: t.source || "app",
         Remarks: t.remarks || "",
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Attendance");
-      XLSX.writeFile(wb, `attendance-${dateFilter || todayStr}.xlsx`);
+      XLSX.writeFile(wb, dateFilter ? `attendance-${dateFilter}.xlsx` : `attendance-${rangeStart}-to-${rangeEnd}.xlsx`);
       toast.success(`Exported ${rows.length} record${rows.length === 1 ? "" : "s"}`);
     } catch {
       toast.error("Could not generate the Excel file.");
     }
   };
 
+  // Today's absentees as rows. Someone who never punched has no attendance
+  // record, so the list (and its Absent chip) only ever held people who came in:
+  // the card said "Absent Today 22" while the chip below it said "Absent 0" and
+  // the absent people could not be found on the page at all. The names come from
+  // the server's day classification -- the same one behind the card -- so the
+  // chip and the card agree, and leave, weekly offs and holidays are already
+  // excluded. For the one day picked (or today); not in the 31-day range view.
+  const listWithAbsent = useMemo(() => {
+    if (!dateFilter || absentees.length === 0) return list;
+    const inList = new Set(list.filter((t) => !!t.date && toISTDateKey(t.date) === dateFilter).map((t) => t.employeeId?._id));
+    const rows = absentees
+      .filter((e) => !inList.has(e._id))
+      .map((e) => ({
+        _id: `absent-${e._id}`,
+        employeeId: { _id: e._id, name: e.name, phone: e.phone, shiftId: e.shiftId, branchId: e.branchId },
+        date: `${dateFilter}T00:00:00+05:30`,
+        status: "absent",
+        virtualAbsent: true,
+      }) as unknown as AttendanceRecord);
+    return [...list, ...rows];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list, absentees, dateFilter, todayStr]);
+
   // Everything EXCEPT the status filter. Split out so the status chips can show
   // counts for the day and filters actually in view -- counting the whole list
   // would show numbers that do not match the rows below them.
   const scopeList = useMemo(() => {
-    return list.filter((t) => {
+    return listWithAbsent.filter((t) => {
       const name = t.employeeId?.name || "";
       const matchesSearch = !search || name.toLowerCase().includes(search.toLowerCase());
       const matchesDate = !dateFilter || (!!t.date && toISTDateKey(t.date) === dateFilter);
@@ -531,10 +758,25 @@ function AttendancePage() {
       const matchesBranch = branchFilter === "all" || t.employeeId?.branchId?._id === branchFilter;
       return matchesSearch && matchesDate && matchesShift && matchesBranch;
     });
-  }, [list, search, dateFilter, shiftFilter, branchFilter]);
+  }, [listWithAbsent, search, dateFilter, shiftFilter, branchFilter]);
 
-  const matchesStatus = (t: AttendanceRecord, status: string) =>
-    status === "all" || getDisplayStatus(t) === status || t.status === status;
+  const matchesStatus = (t: AttendanceRecord, status: string) => {
+    if (status === "all") return true;
+    // WFH is a flag on the record, not a grade, and the two disagree often
+    // enough to matter: an open remote day displays as "on-duty", and a remote
+    // day short of the hours bar is stored as 'half-day'. Matching on status
+    // alone hid both from this chip -- which is the one an admin clicks to ask
+    // "who worked remotely today".
+    if (status === "wfh") return !!t.isWFH;
+    // Late is an observation about the ARRIVAL. Punch-out re-grades a late day
+    // to present/half-day and keeps the fact in `wasLate`, so matching the
+    // status alone dropped every late arrival from this chip once they went home.
+    if (status === "late") return t.status === "late" || !!t.wasLate;
+    // Full Day / Half Day / Absent are verdicts on a finished day. Matching the
+    // stored status too counted everyone still at work (stored 'present' at
+    // punch-in) as a Full Day.
+    return getDisplayStatus(t) === status;
+  };
 
   const filtered = useMemo(
     () => scopeList.filter((t) => matchesStatus(t, tab)),
@@ -549,6 +791,8 @@ function AttendancePage() {
     { id: "late", label: "Late" },
     { id: "absent", label: "Absent" },
     { id: "wfh", label: "WFH" },
+    // Only rendered when there is one: a day nobody could grade needs a person.
+    { id: "needs_review", label: "Needs review" },
   ] as const;
 
   const chipCount = (status: string) =>
@@ -569,16 +813,50 @@ function AttendancePage() {
       await updateAttendance({ id: remarkOpenId, data: { remarks: remarkText } });
       setRemarkOpenId(null);
       setRemarkText("");
-    } catch (err) { }
+    } catch {
+      // The service toasts the reason; keep the dialog and the text.
+    }
   };
 
-  const isShowingToday = dateFilter === todayStr;
+  const submitEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const problem = editProblem(modifyForm, modifyForm.orig, modifyForm.dayKey, modifyForm.overnight);
+    if (problem) {
+      setModifyError(problem);
+      return;
+    }
+    setModifyError(null);
+    try {
+      await updateAttendance({
+        id: modifyForm.id,
+        data: {
+          // "" clears a time; the server re-grades from whatever is left.
+          punchIn: modifyForm.punchIn,
+          punchOut: modifyForm.punchOut,
+          lunchInTime: modifyForm.lunchInTime,
+          lunchOutTime: modifyForm.lunchOutTime,
+          status: modifyForm.status as AttendanceEdit["status"],
+          isWFH: modifyForm.isWFH,
+        },
+      });
+      setModifyOpen(false);
+    } catch (err) {
+      // The server's own reason, kept beside the fields as well as in the toast.
+      const res = (err as { response?: { status?: number; data?: { message?: unknown } } })?.response;
+      if (typeof res?.data?.message === "string" && (res.status ?? 500) < 500) setModifyError(res.data.message);
+    }
+  };
 
   // Absent Today / Pending Regularizations / Attendance Detail / Request Correction
   const [absentSheetOpen, setAbsentSheetOpen] = useState(false);
   const [regSheetOpen, setRegSheetOpen] = useState(false);
-  const [detailRecord, setDetailRecord] = useState<AttendanceRecord | null>(null);
+  const [detailSnap, setDetailRecord] = useState<AttendanceRecord | null>(null);
+  // Read through to the list, so the open sheet shows the saved values after
+  // an edit instead of the snapshot taken when it was opened.
+  const detailRecord = detailSnap ? (list.find((r) => r._id === detailSnap._id) ?? detailSnap) : null;
   const [showAllSessions, setShowAllSessions] = useState(false);
+  const [absentTarget, setAbsentTarget] = useState<{ employeeId: string; name: string; date: string } | null>(null);
+  const [reviewTarget, setReviewTarget] = useState<Regularization | null>(null);
 
   // Raw device taps for whichever detail sheet is open. Fetched at this level,
   // not inside the panel, so the button can key off taps actually existing.
@@ -594,6 +872,10 @@ function AttendancePage() {
   // Everything the detail sheet derives from the open record. Declared here,
   // beside detailRecord, so the blocks below can never reference it earlier
   // than it exists.
+  // Which session's auto punch-out is expanded in the detail sheet. Null means
+  // none picked yet; a single-exit day ignores it and stays open.
+  const [focusedExit, setFocusedExit] = useState<number | null>(null);
+
   const detail = useMemo(() => {
     if (!detailRecord) return null;
 
@@ -611,23 +893,12 @@ function AttendancePage() {
       ? shifts.find((sh) => sh._id === (typeof shiftRef === "string" ? shiftRef : shiftRef._id)) || shiftRef
       : null;
 
-    const lunchMins = Number(appSettings?.attendance?.minLunch ?? 30);
-
     return {
       sessions,
       shift,
       // Same two settings the server grades with (Settings.attendance).
-      lunchMins,
+      lunchMins: Number(appSettings?.attendance?.minLunch ?? 30),
       graceMins: Number(appSettings?.attendance?.lateGrace ?? 0),
-      // Display-only fallback for the known 11-20 Sep totalWorkMs=0 bug and
-      // for a missing punch-out — see day-detail-blocks.tsx header comment.
-      worked: getWorkedEstimate(
-        detailRecord,
-        shift,
-        lunchMins,
-        getDisplayPunchOut(detailRecord),
-        isToday(detailRecord.date),
-      ),
     };
   }, [detailRecord, shifts, appSettings]);
 
@@ -637,7 +908,10 @@ function AttendancePage() {
   const { revert } = useGeofenceMode();
 
   const [correctionOpen, setCorrectionOpen] = useState(false);
-  const [correctionForm, setCorrectionForm] = useState({
+  // Times are "HH:mm" on the chosen date. They were four datetime-local inputs
+  // beside a separate Date field, so a time could be picked on a different day
+  // from the one being corrected -- which approval then refused.
+  const emptyCorrection = {
     employeeId: "",
     date: todayStr,
     requestedPunchIn: "",
@@ -645,39 +919,68 @@ function AttendancePage() {
     requestedLunchInTime: "",
     requestedLunchOutTime: "",
     reason: "",
-  });
+  };
+  const [correctionForm, setCorrectionForm] = useState(emptyCorrection);
+  const [correctionError, setCorrectionError] = useState<string | null>(null);
 
   const handleMarkAbsent = async (employeeId: string, date: string) => {
     try {
-      await markAbsent({ employeeId, date: date.slice(0, 10) });
-    } catch { }
+      // toISTDateKey, NOT date.slice(0, 10).
+      //
+      // An attendance `date` is an IST-midnight instant, so the IST day of
+      // 17 Sep is stored as "2026-09-16T18:30:00.000Z" — every row's UTC date
+      // is one day behind the day it represents. Slicing the ISO string sent
+      // the previous day, the server resolved that to a different row, and
+      // "Mark Absent" therefore marked the WRONG DAY absent while creating a
+      // fresh row for it and leaving the day the admin clicked untouched.
+      await markAbsent({ employeeId, date: toISTDateKey(date) });
+    } catch {
+      // The service toasts the reason.
+    }
   };
 
   const handleSubmitCorrection = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!correctionForm.employeeId || !correctionForm.date || !correctionForm.reason) {
-      toast.error("Please select an employee, date, and reason.");
+    const f = correctionForm;
+    if (!f.employeeId || !f.date || !f.reason.trim()) {
+      setCorrectionError("Please select an employee, date, and reason.");
       return;
     }
+    if (!f.requestedPunchIn && !f.requestedPunchOut && !f.requestedLunchInTime && !f.requestedLunchOutTime) {
+      setCorrectionError("Enter at least one corrected time.");
+      return;
+    }
+    if (f.requestedPunchIn && f.requestedPunchOut && f.requestedPunchOut <= f.requestedPunchIn) {
+      setCorrectionError("Punch out must be after punch in.");
+      return;
+    }
+    if (f.requestedLunchInTime && f.requestedLunchOutTime && f.requestedLunchOutTime <= f.requestedLunchInTime) {
+      setCorrectionError("Lunch out must be after lunch in.");
+      return;
+    }
+    const at = (hhmm: string) => (hhmm ? `${f.date}T${hhmm}` : undefined);
+    if ([f.requestedPunchIn, f.requestedPunchOut, f.requestedLunchInTime, f.requestedLunchOutTime]
+      .some((v) => v && istInputToMs(`${f.date}T${v}`) > Date.now() + 60_000)) {
+      setCorrectionError("A corrected time cannot be in the future.");
+      return;
+    }
+    setCorrectionError(null);
     try {
       await submitRegularization({
-        employeeId: correctionForm.employeeId,
-        date: correctionForm.date,
-        requestedPunchIn: correctionForm.requestedPunchIn || undefined,
-        requestedPunchOut: correctionForm.requestedPunchOut || undefined,
-        requestedLunchInTime: correctionForm.requestedLunchInTime || undefined,
-        requestedLunchOutTime: correctionForm.requestedLunchOutTime || undefined,
-        reason: correctionForm.reason,
+        employeeId: f.employeeId,
+        date: f.date,
+        requestedPunchIn: at(f.requestedPunchIn),
+        requestedPunchOut: at(f.requestedPunchOut),
+        requestedLunchInTime: at(f.requestedLunchInTime),
+        requestedLunchOutTime: at(f.requestedLunchOutTime),
+        reason: f.reason.trim(),
       });
       setCorrectionOpen(false);
-      setCorrectionForm({
-        employeeId: "", date: todayStr, requestedPunchIn: "", requestedPunchOut: "",
-        requestedLunchInTime: "", requestedLunchOutTime: "", reason: "",
-      });
-    } catch { }
+      setCorrectionForm(emptyCorrection);
+    } catch { /* the service toasts the reason; keep what was typed */ }
   };
 
-  if (isLoading) {
+  if (isLoading && list.length === 0) {
     return (
       <div className="space-y-6">
         <PageHeader title="Attendance Dashboard" description="Daily presence tracking and regularizations" />
@@ -709,14 +1012,10 @@ function AttendancePage() {
                 onClick={() => setCorrectionOpen(true)}
               />
             )}
-            {canEdit && (
-              <ActionButton
-                variant="edit"
-                showLabel
-                label="Modify Punch"
-                onClick={() => setModifyOpen(true)}
-              />
-            )}
+            {/* No row-less "Modify Punch" here: the dialog edits ONE day, and
+                opened from the header it had no row -- it PUT to /attendance/
+                (a 404, silently) or re-opened whichever row was edited last.
+                Edit is on each row and in the day's detail sheet. */}
           </div>
         }
       />
@@ -724,14 +1023,35 @@ function AttendancePage() {
       {/* One row, not two. Six tall cards stacked 2x3 pushed the table itself
           below the fold -- the numbers are context, the rows are the point. */}
       <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-        <StatCard label="Present Today" value={stats?.presentToday ?? counts.present} icon={Check} accent="success" delay={0} />
+        <StatCard label={`Present ${dayWord}`} value={stats?.presentToday ?? counts.present} icon={Check} accent="success" delay={0} />
         <StatCard label="Late Arrivals" value={stats?.lateArrivals ?? counts.late} icon={ClockIcon} accent="warning" delay={0.04} />
-        <StatCard label="Half Day Today" value={stats?.halfDayToday ?? counts.halfDay} icon={ClockIcon} accent="warning" delay={0.08} />
-        <StatCard label="On Leave" value={onLeaveCount} icon={CalendarDays} accent="info" delay={0.12} />
-        <div onClick={() => setAbsentSheetOpen(true)} className="cursor-pointer">
-          <StatCard label="Absent Today" value={stats?.absentToday ?? counts.absent} icon={UserX} accent="destructive" delay={0.16} />
+        <StatCard label={`Half Day ${dayWord}`} value={stats?.halfDayToday ?? counts.halfDay} icon={ClockIcon} accent="warning" delay={0.08} />
+        {/* Only takes a slot when there is something to act on. A day that
+            could not be graded needs a human, and it used to appear in no card
+            at all -- counted as Absent on the dashboard and nowhere here. */}
+        {(stats?.needsReviewToday ?? 0) > 0 ? (
+          <StatCard label="Needs Review" value={stats?.needsReviewToday ?? 0} icon={AlertCircle} accent="warning" delay={0.12} />
+        ) : (
+          <StatCard label="On Leave" value={onLeaveCount} icon={CalendarDays} accent="info" delay={0.12} />
+        )}
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="Show who is absent today"
+          onClick={() => setAbsentSheetOpen(true)}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setAbsentSheetOpen(true); } }}
+          className="cursor-pointer rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
+          <StatCard label={`Absent ${dayWord}`} value={stats?.absentToday ?? counts.absent} icon={UserX} accent="destructive" delay={0.16} />
         </div>
-        <div onClick={() => setRegSheetOpen(true)} className="cursor-pointer">
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label="Show pending correction requests"
+          onClick={() => setRegSheetOpen(true)}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setRegSheetOpen(true); } }}
+          className="cursor-pointer rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+        >
           <StatCard label="Pending Regularizations" value={pendingRegularizations.length} icon={ClipboardList} accent="warning" delay={0.2} />
         </div>
       </div>
@@ -744,13 +1064,14 @@ function AttendancePage() {
           {STATUS_CHIPS.map((c) => {
             const n = chipCount(c.id);
             const active = tab === c.id;
+            if (c.id === "needs_review" && n === 0 && !active) return null;
             return (
               <button
                 key={c.id}
                 type="button"
                 onClick={() => { setTab(c.id); setTablePage(1); setCardPage(1); }}
                 className={cn(
-                  "h-9 px-3.5 rounded-xl border text-[12.5px] font-semibold transition-all inline-flex items-center gap-1.5",
+                  "h-10 sm:h-9 px-3.5 rounded-xl border text-[12.5px] font-semibold transition-all inline-flex items-center gap-1.5",
                   active
                     ? "bg-primary text-primary-foreground border-primary shadow-sm"
                     : "bg-transparent text-muted-foreground border-border/60 hover:border-primary/40 hover:text-foreground",
@@ -766,7 +1087,11 @@ function AttendancePage() {
       </div>
 
       {/* ── Filters Bar ──────────────────────────────────────────────────────── */}
-      <div className="flex flex-wrap items-center gap-2.5 py-1">
+      {/* Grid below md, flex from md up. Every control here is `w-full` on
+          mobile, and in a flex-wrap row that means each one claims its own
+          line -- five filters became five full-width rows above the data. Two
+          per row keeps them reachable without scrolling past the whole bar. */}
+      <div className="grid grid-cols-2 gap-2.5 py-1 md:flex md:flex-wrap md:items-center">
         <ViewToggle view={view} onViewChange={updateDefaultLayout} />
 
         <Select value={shiftFilter} onValueChange={(v) => { setShiftFilter(v); setTablePage(1); setCardPage(1); }}>
@@ -795,7 +1120,10 @@ function AttendancePage() {
           </SelectContent>
         </Select>
 
-        <div className="flex items-center gap-2">
+        {/* A full row below md. In one half of the two-column grid the date
+            input, the arrows and the Today / 31-days buttons did not fit, and
+            the next-day arrow and the range button were pushed off-screen. */}
+        <div className="col-span-2 md:col-span-1 flex items-center gap-2 min-w-0">
           <Button
           type="button"
           variant="outline"
@@ -810,6 +1138,8 @@ function AttendancePage() {
           type="date"
           icon={CalendarDays}
           max={todayStr}
+          aria-label="Day"
+          containerClassName="flex-1 min-w-0 md:flex-none"
           className="h-10 w-full md:w-[170px] shadow-none"
           value={dateFilter}
           onChange={(e) => { setDateFilter(e.target.value); setTablePage(1); setCardPage(1); }}
@@ -836,28 +1166,38 @@ function AttendancePage() {
             Today
           </Button>
           )}
-          {dateFilter && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={() => { setDateFilter(""); setTablePage(1); setCardPage(1); }}
-            className="h-10 px-3 rounded-xl text-[12px] text-muted-foreground hover:text-foreground whitespace-nowrap"
-          >
-            Clear
-          </Button>
-        )}
         </div>
 
         <FormInput
         placeholder="Search employee..."
         icon={Search}
+        aria-label="Search employee"
+        // The grid item is FormInput's container, so the span goes there. On
+        // the input itself it did nothing and the search box was half width.
+        containerClassName="col-span-2 md:col-span-1"
         className="h-10 w-full md:w-[260px] shadow-none"
         value={search}
         onChange={(e) => { setSearch(e.target.value); setTablePage(1); setCardPage(1); }}
         />
       </div>
 
+      {!dateFilter && (
+        <p className="text-[12px] text-muted-foreground -mt-2">
+          Showing the last {RECENT_DAYS} days ({fmtDay(rangeStart)} – {fmtDay(rangeEnd)}). Pick a date to see one day.
+        </p>
+      )}
+
+      {listFailed && list.length === 0 ? (
+        // A failed load used to fall through to "No logs found", which tells
+        // the admin nobody came in -- the opposite of what is known.
+        <div className="flex flex-col items-center justify-center gap-3 py-14 rounded-2xl border border-dashed border-destructive/30 bg-destructive/5 text-center">
+          <AlertCircle className="h-7 w-7 text-destructive/70" />
+          <p className="text-[13px] text-foreground">Could not load attendance.</p>
+          <Button type="button" variant="outline" className="h-10 rounded-xl" onClick={() => refetchList()} disabled={isFetching}>
+            {isFetching ? "Loading…" : "Try again"}
+          </Button>
+        </div>
+      ) : (
       <AnimatePresence mode="wait">
         {view === "grid" ? (
           <motion.div
@@ -881,13 +1221,13 @@ function AttendancePage() {
                 title={t.employeeId?.name || "Unknown"}
                 subtitle={(() => {
                   const shift = getShiftLabel(t);
-                  const dateStr = new Date(t.date).toLocaleDateString();
+                  const dateStr = fmtDay(t.date);
                   return shift ? `${dateStr} · ${shift.name}${shift.hours ? ` (${shift.hours})` : ""}` : `${dateStr} · No Shift`;
                 })()}
                 icon={
-                  t.punchInPhoto ? (
+                  inPhoto(t) ? (
                     <img
-                      src={t.punchInPhoto}
+                      src={inPhoto(t)}
                       alt={t.employeeId?.name}
                       className="h-full w-full object-cover"
                     />
@@ -897,6 +1237,13 @@ function AttendancePage() {
                     </div>
                   )
                 }
+                // Worked hours are a column in the table view but had no place
+                // in the card. That was survivable while the card was opt-in;
+                // it is not now that phones always get the card, because "how
+                // long did they work" is the question this screen exists to
+                // answer. Same helper as the table cell and the CSV export, so
+                // the three cannot disagree.
+                metaRight={{ icon: ClockIcon, label: (() => { const h = hoursFor(t); return h ? (h.live ? `${h.text} so far` : h.text) : "--:--"; })() }}
                 statusNode={
                   <div className="flex items-center gap-1.5">
                     <Badge
@@ -904,14 +1251,16 @@ function AttendancePage() {
                       className={cn(
                         "capitalize text-[10px] font-bold px-2 py-0 border-transparent rounded-full",
                         getDisplayStatus(t) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
-                          t.status === "present" ? "bg-success/10 text-success" :
-                            t.status === "late" ? "bg-warning/15 text-warning-foreground" :
-                              t.status === "half-day" ? "bg-warning/15 text-warning-foreground" :
-                                t.status === "wfh" ? "bg-info/15 text-info" :
-                                  "bg-destructive/10 text-destructive"
+                          statusClass(t.status)
                       )}
-                    >{getDisplayStatus(t) === "on-duty" ? "On Duty" : t.status}</Badge>
-                    {(() => {
+                    >{getDisplayStatus(t) === "on-duty" ? "On Duty" : statusLabel(t.status)}</Badge>
+                    {lateLabel(t) && (
+                      <Badge variant="outline" className="text-[10px] font-bold px-2 py-0 border-transparent rounded-full bg-warning/15 text-warning-foreground whitespace-nowrap">
+                        {lateLabel(t)}
+                      </Badge>
+                    )}
+                    <WfhMark record={t} />
+                    {!isVirtualAbsent(t) && (() => {
                       const { icon: SourceIcon, label } = getSourceMeta(t);
                       return (
                         <span title={label} className="text-muted-foreground/60">
@@ -922,29 +1271,19 @@ function AttendancePage() {
                   </div>
                 }
                 actions={
-                  canEdit ? (
+                  canEdit && !isVirtualAbsent(t) ? (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" className="h-8 w-8 p-0">
+                      <Button variant="ghost" className="h-10 w-10 sm:h-8 sm:w-8 p-0" aria-label={`Actions for ${t.employeeId?.name || "this day"}`}>
                         <MoreVertical className="h-4 w-4" />
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       <DropdownMenuItem onClick={() => { setDetailRecord(t); setShowAllSessions(false); }}>View Details</DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => {
-                        setModifyForm({
-                          id: t._id,
-                          punchIn: t.punchIn ? toDatetimeLocalValue(t.punchIn) : "",
-                          punchOut: t.punchOut ? toDatetimeLocalValue(t.punchOut) : "",
-                          lunchInTime: t.lunchInTime ? toDatetimeLocalValue(t.lunchInTime) : "",
-                          lunchOutTime: t.lunchOutTime ? toDatetimeLocalValue(t.lunchOutTime) : "",
-                          status: t.status
-                        });
-                        setModifyOpen(true);
-                      }}>Edit Punch</DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => openEdit(t)}>Edit Punch</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => { setRemarkOpenId(t._id); setRemarkText(t.remarks || ""); }}>Add Remark</DropdownMenuItem>
                       {t.status !== "absent" && (
-                        <DropdownMenuItem className="text-destructive" onClick={() => handleMarkAbsent(t.employeeId._id, t.date)}>Mark Absent</DropdownMenuItem>
+                        <DropdownMenuItem className="text-destructive" onClick={() => setAbsentTarget({ employeeId: t.employeeId._id, name: t.employeeId?.name || "this employee", date: t.date })}>Mark Absent</DropdownMenuItem>
                       )}
                     </DropdownMenuContent>
                   </DropdownMenu>
@@ -957,7 +1296,7 @@ function AttendancePage() {
                       <ClockIcon className="h-2.5 w-2.5" /> Punch In
                     </p>
                     <p className="text-[12px] font-mono font-bold text-foreground">
-                      {t.punchIn ? new Date(t.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
+                      {t.punchIn ? fmtClock(t.punchIn) : <span className="text-muted-foreground/40">--:--</span>}
                     </p>
                   </div>
                   <div className="p-2 rounded-lg bg-muted/30 border border-border/40">
@@ -965,7 +1304,7 @@ function AttendancePage() {
                       <ClockIcon className="h-2.5 w-2.5" /> Lunch In
                     </p>
                     <p className="text-[12px] font-mono font-bold text-foreground">
-                      {getDisplayLunchIn(t) ? new Date(getDisplayLunchIn(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
+                      {getDisplayLunchIn(t) ? fmtClock(getDisplayLunchIn(t)) : <span className="text-muted-foreground/40">--:--</span>}
                     </p>
                   </div>
                   <div className="p-2 rounded-lg bg-muted/30 border border-border/40">
@@ -973,7 +1312,7 @@ function AttendancePage() {
                       <ClockIcon className="h-2.5 w-2.5" /> Lunch Out
                     </p>
                     <p className="text-[12px] font-mono font-bold text-foreground">
-                      {getDisplayLunchOut(t) ? new Date(getDisplayLunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
+                      {getDisplayLunchOut(t) ? fmtClock(getDisplayLunchOut(t)) : <span className="text-muted-foreground/40">--:--</span>}
                     </p>
                   </div>
                   <div className="p-2 rounded-lg bg-muted/30 border border-border/40">
@@ -981,7 +1320,8 @@ function AttendancePage() {
                       <ClockIcon className="h-2.5 w-2.5" /> Punch Out
                     </p>
                     <p className="text-[12px] font-mono font-bold text-foreground">
-                      {getDisplayPunchOut(t) ? new Date(getDisplayPunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
+                      {getDisplayPunchOut(t) ? fmtClock(getDisplayPunchOut(t)) : <span className="text-muted-foreground/40">--:--</span>}
+                      {isProvisionalOut(t) && <ProvisionalOutTag />}
                     </p>
                   </div>
                 </div>
@@ -990,7 +1330,7 @@ function AttendancePage() {
                   <MapPin className="h-3 w-3 text-primary/40" />
                   {t.punchInLocation && typeof t.punchInLocation === 'object'
                     ? `${t.punchInLocation.lat?.toFixed(4)}, ${t.punchInLocation.lng?.toFixed(4)}`
-                    : (t.punchInLocation || "No location data")}
+                    : (t.punchInLocation || (isVirtualAbsent(t) ? "Not punched in today" : "No location data"))}
                 </div>
               </GridCard>
             ))}
@@ -1014,7 +1354,12 @@ function AttendancePage() {
             className="space-y-4"
           >
             <DataTable
-              headers={["Staff", "Date", "Punch In", "Lunch In", "Lunch Out", "Punch Out", "Selfie", "Total Hrs", "Location", "Status", "Actions"]}
+              headers={isMobile
+                ? ["Staff", "In", "Out", "Hrs", "Status", ""]
+                // The Date column only earns its width when a range is shown;
+                // with one day picked it repeated the filter on every row and,
+                // wrapped to three lines, pushed Actions off the edge at 1280px.
+                : ["Staff", ...(dateFilter ? [] : ["Date"]), "Punch In", "Lunch In", "Lunch Out", "Punch Out", "Selfie", "Total Hrs", "Location", "Status", "Actions"]}
               isEmpty={filtered.length === 0}
               emptyMessage={`No logs found.`}
               className="shadow-sm"
@@ -1023,10 +1368,12 @@ function AttendancePage() {
                 <DataTableRow key={t._id}>
                   <DataTableCell isFirst>
                     <div className="flex items-center gap-3">
-                      <Avatar className="h-9 w-9 shrink-0 ring-2 ring-primary/5">
-                        {t.punchInPhoto ? (
+                      {/* Avatar and phone only from sm up: at 360px they took a
+                          third of the row and pushed Hours and Status off-screen. */}
+                      <Avatar className="h-9 w-9 shrink-0 ring-2 ring-primary/5 hidden sm:flex">
+                        {inPhoto(t) ? (
                           <img
-                            src={t.punchInPhoto}
+                            src={inPhoto(t)}
                             alt={t.employeeId?.name}
                             className="h-full w-full object-cover"
                           />
@@ -1038,52 +1385,87 @@ function AttendancePage() {
                       </Avatar>
                       <div className="flex flex-col">
                         <span className="font-bold text-[13px] text-foreground leading-tight">{t.employeeId?.name}</span>
-                        <span className="text-[11px] text-muted-foreground mt-0.5">{t.employeeId?.phone}</span>
+                        <span className="text-[11px] text-muted-foreground mt-0.5 hidden sm:block">{t.employeeId?.phone}</span>
                       </div>
                     </div>
                   </DataTableCell>
-                  <DataTableCell className="text-[13px] text-muted-foreground">{new Date(t.date).toLocaleDateString()}</DataTableCell>
+                  {/* Date: shown only for a range; one picked day is in the filter bar. */}
+                  {!isMobile && !dateFilter && (
+                    <DataTableCell className="text-[13px] text-muted-foreground whitespace-nowrap">{fmtDay(t.date)}</DataTableCell>
+                  )}
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {t.punchIn ? new Date(t.punchIn).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
+                    {t.punchIn ? fmtClock(t.punchIn) : <span className="text-muted-foreground/40">--:--</span>}
                   </DataTableCell>
+                  {!isMobile && (
+                    <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
+                      {getDisplayLunchIn(t) ? fmtClock(getDisplayLunchIn(t)) : <span className="text-muted-foreground/40">--:--</span>}
+                    </DataTableCell>
+                  )}
+                  {!isMobile && (
+                    <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
+                      {getDisplayLunchOut(t) ? fmtClock(getDisplayLunchOut(t)) : <span className="text-muted-foreground/40">--:--</span>}
+                    </DataTableCell>
+                  )}
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {getDisplayLunchIn(t) ? new Date(getDisplayLunchIn(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
-                  </DataTableCell>
-                  <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {getDisplayLunchOut(t) ? new Date(getDisplayLunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
-                  </DataTableCell>
-                  <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {getDisplayPunchOut(t) ? new Date(getDisplayPunchOut(t)!).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true }) : <span className="text-muted-foreground/40">--:--</span>}
-                  </DataTableCell>
-                  <DataTableCell>
-                    <div className="flex items-center gap-1.5">
-                      {([["IN", t.punchInPhoto], ["OUT", t.punchOutPhoto]] as const).map(([label, src]) => (
-                        <div key={label} className="flex flex-col items-center gap-0.5">
-                          <span className="text-[8px] font-bold uppercase tracking-wider text-muted-foreground/60">{label}</span>
-                          {src ? (
-                            <img
-                              src={src}
-                              alt={`${label} selfie`}
-                              loading="lazy"
-                              className="h-8 w-8 rounded-lg object-cover border border-border/50"
-                            />
-                          ) : (
-                            <div className="h-8 w-8 rounded-lg bg-muted/40 border border-border/40 grid place-items-center text-muted-foreground/40 text-[11px]">
-                              –
-                            </div>
+                    {getDisplayPunchOut(t) ? fmtClock(getDisplayPunchOut(t)) : <span className="text-muted-foreground/40">--:--</span>}
+                    {isProvisionalOut(t) && <ProvisionalOutTag />}
+                    {(() => {
+                      const meta = getCloseMeta(t);
+                      return meta ? (
+                        <span
+                          className={cn(
+                            "mt-0.5 block w-fit rounded border px-1 py-px font-sans text-[8px] font-black uppercase tracking-wide",
+                            meta.className,
                           )}
+                        >
+                          {meta.label}
+                        </span>
+                      ) : null;
+                    })()}
+                  </DataTableCell>
+                  {/* Selfies: too wide for a phone row; both are in View Details. */}
+                  {!isMobile && (
+                      <DataTableCell>
+                        <div className="flex items-center gap-1.5">
+                          {([["IN", inPhoto(t)], ["OUT", outPhoto(t)]] as const).map(([label, src]) => (
+                            <div key={label} className="flex flex-col items-center gap-0.5">
+                              <span className="text-[8px] font-bold uppercase tracking-wider text-muted-foreground/60">{label}</span>
+                              {src ? (
+                                <img
+                                  src={src}
+                                  alt={`${label} selfie`}
+                                  loading="lazy"
+                                  className="h-8 w-8 rounded-lg object-cover border border-border/50"
+                                />
+                              ) : (
+                                <div className="h-8 w-8 rounded-lg bg-muted/40 border border-border/40 grid place-items-center text-muted-foreground/40 text-[11px]">
+                                  –
+                                </div>
+                              )}
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                    </div>
-                  </DataTableCell>
+                      </DataTableCell>
+                  )}
                   <DataTableCell className="text-[13px] font-mono font-bold text-foreground/80">
-                    {workedHours(t) ?? <span className="text-muted-foreground/40">—</span>}
+                    {(() => {
+                      const h = hoursFor(t);
+                      if (!h) return <span className="text-muted-foreground/40">—</span>;
+                      return h.live ? (
+                        <span title="Hours so far today, not yet final">
+                          {h.text}
+                          <span className="block font-sans text-[10px] font-semibold text-muted-foreground">so far</span>
+                        </span>
+                      ) : h.text;
+                    })()}
                   </DataTableCell>
-                  <DataTableCell className="text-[12px] text-muted-foreground max-w-[150px] truncate italic">
-                    {t.punchInLocation && typeof t.punchInLocation === 'object'
-                      ? `${t.punchInLocation.lat?.toFixed(2)}, ${t.punchInLocation.lng?.toFixed(2)}`
-                      : (t.punchInLocation || "N/A")}
-                  </DataTableCell>
+                  {!isMobile && (
+                    <DataTableCell className="text-[12px] text-muted-foreground max-w-[150px] truncate italic">
+                      {t.punchInLocation && typeof t.punchInLocation === 'object'
+                        ? `${t.punchInLocation.lat?.toFixed(2)}, ${t.punchInLocation.lng?.toFixed(2)}`
+                        : (t.punchInLocation || (isVirtualAbsent(t) ? "—" : "N/A"))}
+                    </DataTableCell>
+                  )}
                   <DataTableCell>
                     <div className="flex items-center gap-1.5">
                       <Badge
@@ -1091,14 +1473,16 @@ function AttendancePage() {
                         className={cn(
                           "capitalize text-[10px] font-bold px-2 py-0.5 border-transparent",
                           getDisplayStatus(t) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
-                            t.status === "present" ? "bg-success/10 text-success" :
-                              t.status === "late" ? "bg-warning/15 text-warning-foreground" :
-                                t.status === "half-day" ? "bg-warning/15 text-warning-foreground" :
-                                  t.status === "wfh" ? "bg-info/15 text-info" :
-                                    "bg-destructive/10 text-destructive"
+                            statusClass(t.status)
                         )}
-                      >{getDisplayStatus(t) === "on-duty" ? "On Duty" : t.status}</Badge>
-                      {(() => {
+                      >{getDisplayStatus(t) === "on-duty" ? "On Duty" : statusLabel(t.status)}</Badge>
+                      {lateLabel(t) && (
+                        <Badge variant="outline" className="text-[10px] font-bold px-2 py-0.5 border-transparent bg-warning/15 text-warning-foreground whitespace-nowrap">
+                          {lateLabel(t)}
+                        </Badge>
+                      )}
+                    <WfhMark record={t} />
+                      {!isVirtualAbsent(t) && (() => {
                         const { icon: SourceIcon, label } = getSourceMeta(t);
                         return (
                           <span title={label} className="text-muted-foreground/60">
@@ -1109,33 +1493,50 @@ function AttendancePage() {
                     </div>
                   </DataTableCell>
                   <DataTableCell isLast>
+                    {isVirtualAbsent(t) ? (
+                      <span className="block text-right text-[12px] text-muted-foreground/60">Not punched in</span>
+                    ) : isMobile ? (
+                      // One 40px menu instead of four buttons, which on a phone
+                      // were wider than the rest of the row put together.
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" className="h-10 w-10 p-0" aria-label={`Actions for ${t.employeeId?.name || "this day"}`}>
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem className="min-h-10" onClick={() => { setDetailRecord(t); setShowAllSessions(false); }}>View Details</DropdownMenuItem>
+                          {canEdit && <DropdownMenuItem className="min-h-10" onClick={() => openEdit(t)}>Edit Punch</DropdownMenuItem>}
+                          {canEdit && <DropdownMenuItem className="min-h-10" onClick={() => { setRemarkOpenId(t._id); setRemarkText(t.remarks || ""); }}>Add Remark</DropdownMenuItem>}
+                          {canEdit && t.status !== "absent" && (
+                            <DropdownMenuItem className="min-h-10 text-destructive" onClick={() => setAbsentTarget({ employeeId: t.employeeId._id, name: t.employeeId?.name || "this employee", date: t.date })}>Mark Absent</DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    ) : (
                     <div className="flex justify-end items-center gap-1">
                       <ActionButton
                         variant="view"
                         tooltip="View Details"
+                        aria-label={`View ${t.employeeId?.name || "day"} details`}
+                        className="h-9 w-9"
                         onClick={() => { setDetailRecord(t); setShowAllSessions(false); }}
                       />
                       {canEdit && (
                       <ActionButton
                         variant="edit"
                         tooltip="Edit Punch"
-                        onClick={() => {
-                          setModifyForm({
-                            id: t._id,
-                            punchIn: t.punchIn ? toDatetimeLocalValue(t.punchIn) : "",
-                            punchOut: t.punchOut ? toDatetimeLocalValue(t.punchOut) : "",
-                            lunchInTime: t.lunchInTime ? toDatetimeLocalValue(t.lunchInTime) : "",
-                            lunchOutTime: t.lunchOutTime ? toDatetimeLocalValue(t.lunchOutTime) : "",
-                            status: t.status
-                          });
-                          setModifyOpen(true);
-                        }}
+                        aria-label={`Edit ${t.employeeId?.name || "day"} punch times`}
+                        className="hidden 2xl:inline-flex h-9 w-9"
+                        onClick={() => openEdit(t)}
                       />
                       )}
                       {canEdit && (
                       <ActionButton
                         variant="more"
                         tooltip="Add Remark"
+                        aria-label={`Add a remark for ${t.employeeId?.name || "this day"}`}
+                        className="hidden 2xl:inline-flex h-9 w-9"
                         icon={MessageSquare}
                         onClick={() => { setRemarkOpenId(t._id); setRemarkText(t.remarks || ""); }}
                       />
@@ -1144,11 +1545,32 @@ function AttendancePage() {
                       <ActionButton
                         variant="reject"
                         tooltip="Mark Absent"
+                        aria-label={`Mark ${t.employeeId?.name || "employee"} absent`}
+                        className="hidden 2xl:inline-flex h-9 w-9"
                         icon={UserX}
-                        onClick={() => handleMarkAbsent(t.employeeId._id, t.date)}
+                        onClick={() => setAbsentTarget({ employeeId: t.employeeId._id, name: t.employeeId?.name || "this employee", date: t.date })}
                       />
                       )}
+                      {/* Below 2xl the secondary actions share one menu: four
+                          buttons overflowed the table by 126px at 1280px. */}
+                      {canEdit && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="ghost" className="h-9 w-9 p-0 2xl:hidden" aria-label={`More actions for ${t.employeeId?.name || "this day"}`}>
+                              <MoreVertical className="h-4 w-4" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => openEdit(t)}>Edit Punch</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => { setRemarkOpenId(t._id); setRemarkText(t.remarks || ""); }}>Add Remark</DropdownMenuItem>
+                            {t.status !== "absent" && (
+                              <DropdownMenuItem className="text-destructive" onClick={() => setAbsentTarget({ employeeId: t.employeeId._id, name: t.employeeId?.name || "this employee", date: t.date })}>Mark Absent</DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      )}
                     </div>
+                    )}
                   </DataTableCell>
                 </DataTableRow>
               ))}
@@ -1163,6 +1585,7 @@ function AttendancePage() {
           </motion.div>
         )}
       </AnimatePresence>
+      )}
 
       {/* Remark Dialog */}
       <Dialog open={!!remarkOpenId} onOpenChange={(o) => { if (!o) { setRemarkOpenId(null); setRemarkText(""); } }}>
@@ -1171,7 +1594,7 @@ function AttendancePage() {
             <DialogTitle className="text-[15px]">Add admin remark</DialogTitle>
             <DialogDescription className="text-[12px]">This note will be visible to the employee.</DialogDescription>
           </DialogHeader>
-          <Textarea value={remarkText} onChange={(e) => setRemarkText(e.target.value)} placeholder="Verified with team lead…" rows={4} className="text-[13px]" />
+          <Textarea value={remarkText} maxLength={1000} onChange={(e) => setRemarkText(e.target.value)} placeholder="Verified with team lead…" rows={4} className="text-[13px]" />
           <DialogFooter className="gap-2">
             <Button size="sm" variant="outline" onClick={() => { setRemarkOpenId(null); setRemarkText(""); }} className="rounded-xl">Cancel</Button>
             <ActionButton
@@ -1185,86 +1608,127 @@ function AttendancePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Modify Login Time Dialog */}
-      <Dialog open={modifyOpen} onOpenChange={setModifyOpen}>
-        <DialogContent className="max-w-sm">
+      {/* Modify Punch Time -- one day of one employee */}
+      <Dialog open={modifyOpen} onOpenChange={(o) => { if (!isUpdating) setModifyOpen(o); }}>
+        <DialogContent className="max-w-sm max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-[15px]">Modify Punch Time</DialogTitle>
-            <DialogDescription className="text-[12px]">Adjust punch in / out and status for this record.</DialogDescription>
+            <DialogDescription className="text-[12px]">
+              <span className="font-semibold text-foreground">{modifyForm.name}</span>
+              {modifyForm.dayKey ? ` · ${fmtDay(modifyForm.dayKey)}` : ""}. Clear a time to remove it. Hours and status are
+              recalculated from the times unless you choose a status.
+            </DialogDescription>
           </DialogHeader>
-          <form
-            onSubmit={async (e) => {
-              e.preventDefault();
-              await updateAttendance({
-                id: modifyForm.id,
-                data: {
-                  punchIn: modifyForm.punchIn,
-                  punchOut: modifyForm.punchOut,
-                  lunchInTime: modifyForm.lunchInTime,
-                  lunchOutTime: modifyForm.lunchOutTime,
-                  status: modifyForm.status
-                }
-              });
-              setModifyOpen(false);
-            }}
-            className="space-y-3"
-          >
-            <FormInput
-              label="Punch In"
-              type="datetime-local"
-              value={modifyForm.punchIn}
-              onChange={(e) => setModifyForm({ ...modifyForm, punchIn: e.target.value })}
-              className="h-9"
-              containerClassName="space-y-1"
-            />
-            <FormInput
-              label="Punch Out"
-              type="datetime-local"
-              value={modifyForm.punchOut}
-              onChange={(e) => setModifyForm({ ...modifyForm, punchOut: e.target.value })}
-              className="h-9"
-              containerClassName="space-y-1"
-            />
-            <FormInput
-              label="Lunch In"
-              type="datetime-local"
-              value={modifyForm.lunchInTime}
-              onChange={(e) => setModifyForm({ ...modifyForm, lunchInTime: e.target.value })}
-              className="h-9"
-              containerClassName="space-y-1"
-            />
-            <FormInput
-              label="Lunch Out"
-              type="datetime-local"
-              value={modifyForm.lunchOutTime}
-              onChange={(e) => setModifyForm({ ...modifyForm, lunchOutTime: e.target.value })}
-              className="h-9"
-              containerClassName="space-y-1"
-            />
+          <form onSubmit={submitEdit} className="space-y-3" noValidate>
+            {([
+              ["punchIn", "Punch In"],
+              ["punchOut", "Punch Out"],
+              ["lunchInTime", "Lunch In"],
+              ["lunchOutTime", "Lunch Out"],
+            ] as const).map(([key, label]) => (
+              <FormInput
+                key={key}
+                label={label}
+                type="datetime-local"
+                value={modifyForm[key]}
+                min={modifyForm.dayKey ? `${modifyForm.dayKey}T00:00` : undefined}
+                max={modifyForm.dayKey ? `${(modifyForm.overnight && (key === "punchOut" || key === "lunchOutTime")) ? addDaysKey(modifyForm.dayKey, 1) : modifyForm.dayKey}T23:59` : undefined}
+                onChange={(e) => { setModifyForm({ ...modifyForm, [key]: e.target.value }); setModifyError(null); }}
+                className="h-10"
+                containerClassName="space-y-1"
+              />
+            ))}
             <FormSelect
               label="Status"
               value={modifyForm.status}
               onValueChange={(v) => setModifyForm({ ...modifyForm, status: v })}
               options={[
+                { label: "Auto — from the times", value: "auto" },
                 { label: "Present", value: "present" },
                 { label: "Late", value: "late" },
                 { label: "Half Day", value: "half-day" },
                 { label: "WFH", value: "wfh" },
                 { label: "Absent", value: "absent" },
+                { label: "Needs review", value: "needs_review" },
               ]}
               containerClassName="space-y-1"
             />
-             <DialogFooter className="gap-2 pt-1">
-               <Button type="button" size="sm" variant="outline" onClick={() => setModifyOpen(false)} className="rounded-xl">Cancel</Button>
-               <ActionButton
-                 variant="add"
-                 type="submit"
-                 showLabel
-                 label="Save Changes"
-                 icon={Check}
-               />
-             </DialogFooter>
+
+            {/* Its own control, not folded into Status.
+                A remote day that fell short of the hours bar is graded
+                'half-day' and is still remote, so the two cannot share one
+                field. Setting Status to "WFH" turns this on by itself
+                (server-side too), but the reverse is not implied. */}
+            <div className={cn(
+              "flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5 transition-colors",
+              modifyForm.isWFH
+                ? "border-indigo-400/50 bg-indigo-500/10"
+                : "border-border/60 bg-muted/20"
+            )}>
+              <div className="space-y-0.5">
+                <p className="text-[12px] font-bold flex items-center gap-1.5">
+                  <Home className={cn("h-3.5 w-3.5", modifyForm.isWFH ? "text-indigo-500" : "text-muted-foreground")} />
+                  Worked from home
+                </p>
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  Marks the day remote. Branch distance is not checked and auto punch-out is skipped.
+                </p>
+              </div>
+              <Switch
+                checked={modifyForm.isWFH}
+                onCheckedChange={(v) => setModifyForm({ ...modifyForm, isWFH: v })}
+                aria-label="Worked from home"
+              />
+            </div>
+
+            {modifyError && (
+              <p role="alert" className="text-[12px] font-medium text-destructive">{modifyError}</p>
+            )}
+
+            <DialogFooter className="gap-2 pt-1">
+              <Button type="button" variant="outline" onClick={() => setModifyOpen(false)} disabled={isUpdating} className="h-10 rounded-xl">Cancel</Button>
+              <ActionButton
+                variant="add"
+                type="submit"
+                showLabel
+                label={isUpdating ? "Saving…" : "Save Changes"}
+                icon={Check}
+                disabled={isUpdating}
+                className="h-10"
+              />
+            </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Mark absent is destructive -- it removes the day's punches and
+          sessions -- so it asks first. It used to fire on a single tap of an
+          icon next to Edit. */}
+      <Dialog open={!!absentTarget} onOpenChange={(o) => !o && setAbsentTarget(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-[15px]">Mark {absentTarget?.name} absent?</DialogTitle>
+            <DialogDescription className="text-[12px]">
+              {absentTarget && fmtDay(absentTarget.date)}. This removes the day's punch times and sessions, and the day is
+              paid as absent. Use Edit Punch instead if only a time is wrong.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="outline" className="h-10 rounded-xl" onClick={() => setAbsentTarget(null)}>Cancel</Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="h-10 rounded-xl font-bold"
+              onClick={async () => {
+                if (!absentTarget) return;
+                const target = absentTarget;
+                setAbsentTarget(null);
+                await handleMarkAbsent(target.employeeId, target.date);
+              }}
+            >
+              Mark absent
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -1274,17 +1738,27 @@ function AttendancePage() {
           <div className="h-full flex flex-col">
             <SheetHeader className="p-6 pb-4 border-b border-border/40">
               <SheetTitle className="text-xl font-black tracking-tight flex items-center gap-2">
-                <UserX className="h-5 w-5 text-destructive" /> Absent Today
+                <UserX className="h-5 w-5 text-destructive" /> Absent {dayWord}
               </SheetTitle>
               <SheetDescription className="text-sm font-medium">
-                Active employees with no punch record for {new Date(todayStr).toLocaleDateString()}.
+                Expected at work on {fmtDay(todayStr)} and not punched in. People on approved leave, on their weekly off
+                or on a holiday are not counted here.
               </SheetDescription>
+              {stats && ((stats.onLeaveToday ?? 0) + (stats.weeklyOffToday ?? 0) + (stats.holidayToday ?? 0)) > 0 && (
+                <p className="text-[12px] text-muted-foreground">
+                  {[
+                    stats.onLeaveToday ? `${stats.onLeaveToday} on leave` : null,
+                    stats.weeklyOffToday ? `${stats.weeklyOffToday} on weekly off` : null,
+                    stats.holidayToday ? `${stats.holidayToday} on holiday${stats.holidayName ? ` (${stats.holidayName})` : ""}` : null,
+                  ].filter(Boolean).join(" · ")}
+                </p>
+              )}
             </SheetHeader>
             <div className="flex-1 overflow-y-auto p-6 space-y-3">
               {absentees.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-14 text-center">
                   <UserCheck className="h-8 w-8 text-muted-foreground/30 mb-2" />
-                  <p className="text-[13px] text-muted-foreground">Everyone has punched in today.</p>
+                  <p className="text-[13px] text-muted-foreground">Nobody expected today is missing.</p>
                 </div>
               ) : (
                 absentees.map((e) => (
@@ -1305,7 +1779,8 @@ function AttendancePage() {
                     {e.phone && (
                       <a
                         href={`tel:${e.phone}`}
-                        className="h-9 w-9 rounded-xl bg-primary/5 text-primary flex items-center justify-center hover:bg-primary/10 transition-colors shrink-0"
+                        aria-label={`Call ${e.name}`}
+                        className="h-10 w-10 rounded-xl bg-primary/5 text-primary flex items-center justify-center hover:bg-primary/10 transition-colors shrink-0"
                       >
                         <Phone className="h-4 w-4" />
                       </a>
@@ -1345,31 +1820,34 @@ function AttendancePage() {
                           {r.employeeId?.name?.split(" ").map((n) => n[0]).join("")}
                         </AvatarFallback>
                       </Avatar>
-                      <div>
-                        <p className="text-[13px] font-bold text-foreground leading-tight">{r.employeeId?.name}</p>
-                        <p className="text-[11px] text-muted-foreground">{new Date(r.date).toLocaleDateString()}</p>
+                      <div className="min-w-0">
+                        <p className="text-[13px] font-bold text-foreground leading-tight truncate">{r.employeeId?.name}</p>
+                        <p className="text-[11px] text-muted-foreground">{fmtDay(r.date)}</p>
                       </div>
                     </div>
+                    {/* The claim beside what the record says now: approving a
+                        time without seeing what it replaces is not a review. */}
                     <div className="grid grid-cols-2 gap-2 text-[11px]">
-                      {r.requestedPunchIn && (
-                        <div className="p-2 rounded-lg bg-white border border-border/30">
-                          <span className="text-muted-foreground">Punch In: </span>
-                          <span className="font-mono font-bold">{new Date(r.requestedPunchIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                      {([
+                        ["Punch in", r.requestedPunchIn, r.currentPunchIn],
+                        ["Punch out", r.requestedPunchOut, r.currentPunchOut],
+                      ] as const).filter(([, claimed]) => !!claimed).map(([label, claimed, current]) => (
+                        <div key={label} className="p-2 rounded-lg bg-background border border-border/30">
+                          <span className="text-muted-foreground">{label}: </span>
+                          <span className="font-mono font-bold">{fmtClock(claimed)}</span>
+                          <span className="block text-[10px] text-muted-foreground">was {fmtClock(current) || "—"}</span>
                         </div>
-                      )}
-                      {r.requestedPunchOut && (
-                        <div className="p-2 rounded-lg bg-white border border-border/30">
-                          <span className="text-muted-foreground">Punch Out: </span>
-                          <span className="font-mono font-bold">{new Date(r.requestedPunchOut).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
+                      ))}
+                      {(r.requestedLunchInTime || r.requestedLunchOutTime) && (
+                        <div className="p-2 rounded-lg bg-background border border-border/30 col-span-2">
+                          <span className="text-muted-foreground">Lunch: </span>
+                          <span className="font-mono font-bold">{fmtClock(r.requestedLunchInTime) || "—"} – {fmtClock(r.requestedLunchOutTime) || "—"}</span>
                         </div>
                       )}
                     </div>
-                    <p className="text-[12px] text-muted-foreground italic">"{r.reason}"</p>
+                    <p className="text-[12px] text-muted-foreground italic break-words">"{r.reason}"</p>
                     {canEdit && (
-                      <div className="flex gap-2 pt-1">
-                        <ActionButton variant="approve" showLabel label="Approve" className="flex-1 h-9" onClick={() => approveRegularization({ id: r._id })} />
-                        <ActionButton variant="reject" showLabel label="Reject" className="flex-1 h-9" onClick={() => rejectRegularization({ id: r._id })} />
-                      </div>
+                      <ActionButton variant="edit" showLabel label="Review" icon={ClipboardList} className="w-full h-10" onClick={() => setReviewTarget(r)} />
                     )}
                   </Card>
                 ))
@@ -1379,12 +1857,17 @@ function AttendancePage() {
         </SheetContent>
       </Sheet>
 
+      {/* Approve (optionally with an edited time) or reject with a reason the
+          employee is shown. The sheet used to approve or reject on one tap,
+          with no reason and no view of what the request would overwrite. */}
+      <CorrectionReviewDialog request={reviewTarget} onClose={() => setReviewTarget(null)} />
+
       {/* Request Correction Dialog */}
-      <Dialog open={correctionOpen} onOpenChange={setCorrectionOpen}>
-        <DialogContent className="max-w-md rounded-2xl border-none shadow-2xl p-0 overflow-hidden">
-          <div className="h-2 w-full bg-primary" />
-          <div className="p-6">
-            <DialogHeader className="mb-6">
+      <Dialog open={correctionOpen} onOpenChange={(o) => { setCorrectionOpen(o); if (!o) { setCorrectionForm(emptyCorrection); setCorrectionError(null); } }}>
+        <DialogContent className="max-w-md rounded-2xl border-none shadow-2xl p-0 overflow-hidden max-h-[90vh] flex flex-col">
+          <div className="h-2 w-full bg-primary shrink-0" />
+          <div className="p-6 flex-1 flex flex-col min-h-0">
+            <DialogHeader className="mb-6 shrink-0">
               <div className="h-12 w-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-4">
                 <ClipboardList className="h-6 w-6" />
               </div>
@@ -1393,75 +1876,80 @@ function AttendancePage() {
                 Submit an attendance correction for admin approval.
               </DialogDescription>
             </DialogHeader>
-            <form className="space-y-4" onSubmit={handleSubmitCorrection}>
-              <div className="space-y-2">
-                <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Employee</label>
-                <Select value={correctionForm.employeeId} onValueChange={(v) => setCorrectionForm({ ...correctionForm, employeeId: v })}>
-                  <SelectTrigger className="h-11 rounded-xl">
-                    <SelectValue placeholder="Select employee..." />
-                  </SelectTrigger>
-                  <SelectContent className="rounded-xl">
-                    {employees.map((e) => (
-                      <SelectItem key={e._id} value={e._id}>{e.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <FormInput
-                label="Date"
-                type="date"
-                value={correctionForm.date}
-                onChange={(e) => setCorrectionForm({ ...correctionForm, date: e.target.value })}
-                className="h-11"
-                containerClassName="space-y-1"
-              />
-              <div className="grid grid-cols-2 gap-3">
+            <form className="flex-1 flex flex-col min-h-0" onSubmit={handleSubmitCorrection}>
+              <div className="space-y-4 flex-1 overflow-y-auto min-h-0">
+                <div className="space-y-2">
+                  <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Employee</label>
+                  <Select value={correctionForm.employeeId} onValueChange={(v) => setCorrectionForm({ ...correctionForm, employeeId: v })}>
+                    <SelectTrigger className="h-11 rounded-xl">
+                      <SelectValue placeholder="Select employee..." />
+                    </SelectTrigger>
+                    <SelectContent className="rounded-xl">
+                      {employees.map((e) => (
+                        <SelectItem key={e._id} value={e._id}>{e.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
                 <FormInput
-                  label="Punch In"
-                  type="datetime-local"
-                  value={correctionForm.requestedPunchIn}
-                  onChange={(e) => setCorrectionForm({ ...correctionForm, requestedPunchIn: e.target.value })}
+                  label="Date"
+                  type="date"
+                  max={todayStr}
+                  value={correctionForm.date}
+                  onChange={(e) => setCorrectionForm({ ...correctionForm, date: e.target.value })}
                   className="h-11"
                   containerClassName="space-y-1"
                 />
-                <FormInput
-                  label="Punch Out"
-                  type="datetime-local"
-                  value={correctionForm.requestedPunchOut}
-                  onChange={(e) => setCorrectionForm({ ...correctionForm, requestedPunchOut: e.target.value })}
-                  className="h-11"
-                  containerClassName="space-y-1"
-                />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <FormInput
+                    label="Punch In"
+                    type="time"
+                    value={correctionForm.requestedPunchIn}
+                    onChange={(e) => setCorrectionForm({ ...correctionForm, requestedPunchIn: e.target.value })}
+                    className="h-11"
+                    containerClassName="space-y-1"
+                  />
+                  <FormInput
+                    label="Punch Out"
+                    type="time"
+                    value={correctionForm.requestedPunchOut}
+                    onChange={(e) => setCorrectionForm({ ...correctionForm, requestedPunchOut: e.target.value })}
+                    className="h-11"
+                    containerClassName="space-y-1"
+                  />
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <FormInput
+                    label="Lunch In"
+                    type="time"
+                    value={correctionForm.requestedLunchInTime}
+                    onChange={(e) => setCorrectionForm({ ...correctionForm, requestedLunchInTime: e.target.value })}
+                    className="h-11"
+                    containerClassName="space-y-1"
+                  />
+                  <FormInput
+                    label="Lunch Out"
+                    type="time"
+                    value={correctionForm.requestedLunchOutTime}
+                    onChange={(e) => setCorrectionForm({ ...correctionForm, requestedLunchOutTime: e.target.value })}
+                    className="h-11"
+                    containerClassName="space-y-1"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Reason</label>
+                  <Textarea
+                    value={correctionForm.reason}
+                    onChange={(e) => setCorrectionForm({ ...correctionForm, reason: e.target.value })}
+                    placeholder="e.g. Forgot to punch out, GPS was off..."
+                    rows={3}
+                    maxLength={500}
+                    className="text-[13px]"
+                  />
+                </div>
+                {correctionError && <p role="alert" className="text-[12px] font-medium text-destructive">{correctionError}</p>}
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <FormInput
-                  label="Lunch In"
-                  type="datetime-local"
-                  value={correctionForm.requestedLunchInTime}
-                  onChange={(e) => setCorrectionForm({ ...correctionForm, requestedLunchInTime: e.target.value })}
-                  className="h-11"
-                  containerClassName="space-y-1"
-                />
-                <FormInput
-                  label="Lunch Out"
-                  type="datetime-local"
-                  value={correctionForm.requestedLunchOutTime}
-                  onChange={(e) => setCorrectionForm({ ...correctionForm, requestedLunchOutTime: e.target.value })}
-                  className="h-11"
-                  containerClassName="space-y-1"
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-[11px] font-black uppercase tracking-[0.15em] text-muted-foreground ml-1">Reason</label>
-                <Textarea
-                  value={correctionForm.reason}
-                  onChange={(e) => setCorrectionForm({ ...correctionForm, reason: e.target.value })}
-                  placeholder="e.g. Forgot to punch out, GPS was off..."
-                  rows={3}
-                  className="text-[13px]"
-                />
-              </div>
-              <DialogFooter className="pt-2 gap-3">
+              <DialogFooter className="pt-2 gap-3 shrink-0">
                 <Button type="button" variant="ghost" onClick={() => setCorrectionOpen(false)} className="rounded-xl h-11 flex-1 font-bold">Cancel</Button>
                 <ActionButton
                   variant="add"
@@ -1494,7 +1982,7 @@ function AttendancePage() {
           </DialogHeader>
           <p className="text-[12px] text-muted-foreground leading-relaxed">
             If they <span className="font-bold text-foreground">did</span> leave but at a different time, close this
-            and use <span className="font-bold text-foreground">Modify Punch Time</span> instead — that keeps the
+            and use <span className="font-bold text-foreground">Edit punch times</span> instead — that keeps the
             day closed with the correct hours.
           </p>
           <DialogFooter className="gap-2">
@@ -1530,15 +2018,12 @@ function AttendancePage() {
                       className={cn(
                         "capitalize text-[10px] font-black px-3 py-1 rounded-full border-transparent",
                         getDisplayStatus(detailRecord) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
-                          detailRecord.status === "present" ? "bg-success/10 text-success" :
-                            detailRecord.status === "late" ? "bg-warning/15 text-warning-foreground" :
-                              detailRecord.status === "half-day" ? "bg-warning/15 text-warning-foreground" :
-                                detailRecord.status === "wfh" ? "bg-info/15 text-info" :
-                                  "bg-destructive/10 text-destructive"
+                          statusClass(detailRecord.status)
                       )}
                     >
-                      {getDisplayStatus(detailRecord) === "on-duty" ? "On Duty" : detailRecord.status}
+                      {getDisplayStatus(detailRecord) === "on-duty" ? "On Duty" : statusLabel(detailRecord.status)}
                     </Badge>
+                    <WfhMark record={detailRecord} size="md" />
                     {(() => {
                       const { icon: SourceIcon, label } = getSourceMeta(detailRecord);
                       return (
@@ -1559,7 +2044,7 @@ function AttendancePage() {
                       </button>
                     )}
                   </div>
-                  <span className="text-[11px] text-muted-foreground font-medium">{new Date(detailRecord.date).toLocaleDateString()}</span>
+                  <span className="text-[11px] text-muted-foreground font-medium">{fmtDay(detailRecord.date)}</span>
                 </div>
                 <SheetTitle className="text-xl font-black tracking-tight">{detailRecord.employeeId?.name}</SheetTitle>
                 <SheetDescription className="text-sm font-medium">{detailRecord.employeeId?.phone}</SheetDescription>
@@ -1569,14 +2054,14 @@ function AttendancePage() {
                   <div className="space-y-2">
                     <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Punch In</p>
                     <div className="h-28 rounded-xl overflow-hidden bg-muted/30 border border-border/40 flex items-center justify-center">
-                      {detailRecord.punchInPhoto ? (
-                        <img src={detailRecord.punchInPhoto} alt="Punch in selfie" className="h-full w-full object-cover" />
+                      {inPhoto(detailRecord) ? (
+                        <img src={inPhoto(detailRecord)} alt="Punch in selfie" className="h-full w-full object-cover" />
                       ) : (
                         <span className="text-[11px] text-muted-foreground">No photo</span>
                       )}
                     </div>
                     <p className="text-[13px] font-mono font-bold text-foreground">
-                      {detailRecord.punchIn ? new Date(detailRecord.punchIn).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}
+                      {detailRecord.punchIn ? fmtClock(detailRecord.punchIn) : "—"}
                     </p>
                     <p className="text-[11px] text-muted-foreground flex items-center gap-1">
                       <MapPin className="h-3 w-3 shrink-0" />
@@ -1595,14 +2080,15 @@ function AttendancePage() {
                   <div className="space-y-2">
                     <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Punch Out</p>
                     <div className="h-28 rounded-xl overflow-hidden bg-muted/30 border border-border/40 flex items-center justify-center">
-                      {detailRecord.punchOutPhoto ? (
-                        <img src={detailRecord.punchOutPhoto} alt="Punch out selfie" className="h-full w-full object-cover" />
+                      {outPhoto(detailRecord) ? (
+                        <img src={outPhoto(detailRecord)} alt="Punch out selfie" className="h-full w-full object-cover" />
                       ) : (
                         <span className="text-[11px] text-muted-foreground">No photo</span>
                       )}
                     </div>
                     <p className="text-[13px] font-mono font-bold text-foreground">
-                      {getDisplayPunchOut(detailRecord) ? new Date(getDisplayPunchOut(detailRecord)!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}
+                      {getDisplayPunchOut(detailRecord) ? fmtClock(getDisplayPunchOut(detailRecord)) : "—"}
+                      {isProvisionalOut(detailRecord) && <ProvisionalOutTag />}
                     </p>
                     <p className="text-[11px] text-muted-foreground flex items-center gap-1">
                       <MapPin className="h-3 w-3 shrink-0" />
@@ -1623,9 +2109,9 @@ function AttendancePage() {
                 <Card className="p-4 bg-muted/20 border-border/40 rounded-2xl shadow-none space-y-2">
                   <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Lunch Break</p>
                   <div className="flex items-center justify-between text-[13px] font-mono font-bold text-foreground">
-                    <span>{getDisplayLunchIn(detailRecord) ? new Date(getDisplayLunchIn(detailRecord)!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
+                    <span>{getDisplayLunchIn(detailRecord) ? fmtClock(getDisplayLunchIn(detailRecord)) : "—"}</span>
                     <span className="text-muted-foreground font-sans font-normal text-[11px]">to</span>
-                    <span>{getDisplayLunchOut(detailRecord) ? new Date(getDisplayLunchOut(detailRecord)!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}</span>
+                    <span>{getDisplayLunchOut(detailRecord) ? fmtClock(getDisplayLunchOut(detailRecord)) : "—"}</span>
                   </div>
                   {getDisplayLunchIn(detailRecord) && getDisplayLunchOut(detailRecord) && (() => {
                     const mins = Math.round((new Date(getDisplayLunchOut(detailRecord)!).getTime() - new Date(getDisplayLunchIn(detailRecord)!).getTime()) / 60000);
@@ -1640,7 +2126,21 @@ function AttendancePage() {
                 {/* Every session, each END tagged with the channel that
                     reported it -- in on the phone, out on the machine. */}
                 {detail && detail.sessions.length > 0 && (
-                  <SessionTimeline sessions={detail.sessions} />
+                  <SessionTimeline
+                    sessions={detail.sessions}
+                    totalWorkMs={detailRecord.totalWorkMs}
+                    onAutoExitClick={(i) => {
+                      setFocusedExit(i);
+                      // The card can sit below the fold on a long day, so
+                      // opening it is not enough -- it has to be brought into
+                      // view or the click looks like it did nothing.
+                      requestAnimationFrame(() => {
+                        document
+                          .getElementById(`auto-exit-${i}`)
+                          ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                      });
+                    }}
+                  />
                 )}
 
                 {showAllSessions && detailTaps.length > 0 && (
@@ -1648,15 +2148,18 @@ function AttendancePage() {
                 )}
 
                 {/* Worked hours come from the server's totalWorkMs, which is
-                    already lunch-deducted and clamped to the shift, whenever
-                    it's present and trustworthy. `detail.worked` falls back to
-                    a clearly-flagged client estimate only for the known
-                    totalWorkMs=0 bug or a missing punch-out — see
-                    day-detail-blocks.tsx header comment. It never overrides
-                    record.status or the figure payroll actually pays. */}
-                <DayStatsRow record={detailRecord} displayStatus={getDisplayStatus(detailRecord)} worked={detail?.worked ?? null} />
+                    already lunch-deducted and clamped to the shift. This used
+                    to recompute punchOut - punchIn in the browser, so it
+                    ignored the break and every session after the first, and
+                    disagreed with the figure payroll actually pays. */}
+                <DayStatsRow record={detailRecord} displayStatus={getDisplayStatus(detailRecord)} />
 
-                <AutoPunchOutCard record={detailRecord} onRevert={() => setRevertTarget(detailRecord)} />
+                <AutoPunchOutCard
+                  record={detailRecord}
+                  onRevert={() => setRevertTarget(detailRecord)}
+                  focusIndex={focusedExit}
+                  onFocusChange={setFocusedExit}
+                />
 
                 {detail && (
                   <>
@@ -1664,7 +2167,8 @@ function AttendancePage() {
                       shift={detail.shift}
                       lunchMins={detail.lunchMins}
                       graceMins={detail.graceMins}
-                      worked={detail.worked}
+                      workedMs={detailRecord.totalWorkMs || 0}
+                      grading={detailRecord.grading}
                     />
                     <WhyHalfDay
                       record={detailRecord}
@@ -1672,7 +2176,6 @@ function AttendancePage() {
                       shift={detail.shift}
                       lunchMins={detail.lunchMins}
                       graceMins={detail.graceMins}
-                      worked={detail.worked}
                     />
                   </>
                 )}
@@ -1682,8 +2185,14 @@ function AttendancePage() {
 
                 <div className="space-y-1">
                   <span className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Remarks</span>
-                  <div className="font-medium text-foreground/80 text-[13px]">{detailRecord.remarks || "—"}</div>
+                  <div className="font-medium text-foreground/80 text-[13px] break-words">{detailRecord.remarks || "—"}</div>
                 </div>
+
+                {canEdit && (
+                  <Button type="button" variant="outline" className="w-full h-10 rounded-xl" onClick={() => openEdit(detailRecord)}>
+                    <Pencil className="h-4 w-4 mr-2" /> Edit punch times
+                  </Button>
+                )}
               </div>
             </div>
           )}

@@ -4,25 +4,23 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { motion } from 'framer-motion'
-import { Plus, Search, Edit, Trash2, Users, DollarSign } from 'lucide-react'
-import { mockDepartments, Department } from '@/lib/mock-data'
+import { Plus, Search, Edit, Trash2, Users } from 'lucide-react'
+import { departments as initialDepartments, Department } from '@/lib/mock-data'
 import { toast } from 'sonner'
 
 export function DepartmentsPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [isOpen, setIsOpen] = useState(false)
   const [editingDept, setEditingDept] = useState<Department | null>(null)
-  const [departments, setDepartments] = useState(mockDepartments)
+  const [departments, setDepartments] = useState<Department[]>(initialDepartments)
   const [formData, setFormData] = useState({
     name: '',
-    head: '',
-    budget: 0,
+    color: '#6366f1',
     employees: 0
   })
 
   const filteredDepartments = departments.filter(dept =>
-    dept.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    dept.head.toLowerCase().includes(searchQuery.toLowerCase())
+    dept.name.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
   const handleOpenDialog = (dept?: Department) => {
@@ -30,19 +28,18 @@ export function DepartmentsPage() {
       setEditingDept(dept)
       setFormData({
         name: dept.name,
-        head: dept.head,
-        budget: dept.budget,
+        color: dept.color,
         employees: dept.employees
       })
     } else {
       setEditingDept(null)
-      setFormData({ name: '', head: '', budget: 0, employees: 0 })
+      setFormData({ name: '', color: '#6366f1', employees: 0 })
     }
     setIsOpen(true)
   }
 
   const handleSave = () => {
-    if (!formData.name || !formData.head) {
+    if (!formData.name) {
       toast.error('Please fill in all required fields')
       return
     }
@@ -58,7 +55,7 @@ export function DepartmentsPage() {
       const newDept: Department = {
         id: `dept-${Date.now()}`,
         ...formData,
-        createdAt: new Date()
+        createdAt: new Date().toISOString().slice(0, 10)
       }
       setDepartments(prev => [...prev, newDept])
       toast.success('Department added successfully')
@@ -113,12 +110,11 @@ export function DepartmentsPage() {
             transition={{ delay: index * 0.1 }}
           >
             <Card className="border-0 shadow-md hover:shadow-lg transition-shadow overflow-hidden">
-              <div className="h-1 bg-linear-to-r from-purple-500 to-purple-700"></div>
+              <div className="h-1" style={{ backgroundColor: dept.color }}></div>
               <CardHeader>
                 <div className="flex items-start justify-between mb-3">
                   <div>
                     <CardTitle className="text-xl">{dept.name}</CardTitle>
-                    <CardDescription>Led by {dept.head}</CardDescription>
                   </div>
                   <div className="flex gap-1">
                     <Button
@@ -146,15 +142,6 @@ export function DepartmentsPage() {
                     <span className="text-sm font-medium">Employees</span>
                   </div>
                   <span className="text-xl font-bold text-purple-600 dark:text-purple-400">{dept.employees}</span>
-                </div>
-                <div className="flex items-center justify-between p-3 bg-green-50 dark:bg-green-950/30 rounded-lg">
-                  <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
-                    <DollarSign className="w-4 h-4" />
-                    <span className="text-sm font-medium">Budget</span>
-                  </div>
-                  <span className="text-lg font-bold text-green-600 dark:text-green-400">
-                    ৳{(dept.budget / 100000).toFixed(1)}L
-                  </span>
                 </div>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
                   Created {new Date(dept.createdAt).toLocaleDateString()}
@@ -184,22 +171,12 @@ export function DepartmentsPage() {
               />
             </div>
             <div>
-              <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">Department Head *</label>
+              <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">Colour</label>
               <Input
-                placeholder="Head name"
-                value={formData.head}
-                onChange={(e) => setFormData(prev => ({ ...prev, head: e.target.value }))}
-                className="border-2 border-slate-200 dark:border-slate-700"
-              />
-            </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">Budget</label>
-              <Input
-                type="number"
-                placeholder="500000"
-                value={formData.budget}
-                onChange={(e) => setFormData(prev => ({ ...prev, budget: parseFloat(e.target.value) }))}
-                className="border-2 border-slate-200 dark:border-slate-700"
+                type="color"
+                value={formData.color}
+                onChange={(e) => setFormData(prev => ({ ...prev, color: e.target.value }))}
+                className="h-10 border-2 border-slate-200 dark:border-slate-700"
               />
             </div>
             <div>

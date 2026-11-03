@@ -29,14 +29,13 @@ import {
   GraduationCap,
   ShieldCheck,
   FileText,
-  Play,
-  Square,
   ArrowLeft,
   ChevronDown,
   ListChecks,
   ScanFace,
   Fingerprint,
-  Smartphone
+  Smartphone,
+  Home
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { ActionButton } from "@/components/shared/action-button";
@@ -50,10 +49,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { useQuery } from "@tanstack/react-query";
 import { useAttendanceService, type AttendanceRecord } from "@/services/attendance-service";
-import { fmtHM, getWorkedEstimate, ESTIMATE_TOOLTIP } from "@/components/attendance/day-detail-blocks";
-import { apiClient } from "@/lib/api-client";
 import { cn, toISTDateKey } from "@/lib/utils";
 import { useEmployeeService } from "@/services/employee-service";
 import { useDepartmentService } from "@/services/department-service";
@@ -61,7 +57,34 @@ import { useBranchService } from "@/services/branch-service";
 import { useShiftService } from "@/services/shift-service";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { useClientDevices, useClientErrors, PERMISSION_LABELS, TRACKING_PERMISSIONS } from "@/services/client-service";
+import { statusLabel, statusClass } from "@/lib/attendance-status";
+import { DeviceTab } from "@/components/employees/device-tab";
+import { formatINR, formatINRFull } from "@/lib/format";
+import { usePermission } from "@/hooks/use-permission";
+
+// A stored calendar date (DOB, joining date) as people read it. Printed raw,
+// these showed as "2026-09-01T00:00:00.000Z". Read in IST, which gives the
+// intended day whether the value was saved at UTC or at IST midnight.
+const formatCalendarDate = (value?: string) => {
+  if (!value) return undefined;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return undefined;
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
+};
+
+// Worked time for one day: the server's lunch-deducted total when it has one,
+// else the sum of closed sessions. Whole hours from punch-in to punch-out
+// counted the lunch break as work and rounded 8h40 up to 9h.
+const workedMsOf = (log: AttendanceRecord, punchOut?: string | null) => {
+  if (typeof log.totalWorkMs === "number") return log.totalWorkMs;
+  const sessions = log.shifts?.length ? log.shifts : [{ punchIn: log.punchIn, punchOut: punchOut ?? log.punchOut }];
+  return sessions.reduce((sum, sess) => (sess.punchIn && sess.punchOut
+    ? sum + Math.max(0, new Date(sess.punchOut).getTime() - new Date(sess.punchIn).getTime())
+    : sum), 0);
+};
+const formatHm = (ms: number) => `${Math.floor(ms / 3600000)}h ${String(Math.floor((ms % 3600000) / 60000)).padStart(2, "0")}m`;
+
+const EMPLOYMENT_LABELS: Record<string, string> = { monthly: "Monthly pay", daily: "Daily wage", hourly: "Hourly pay" };
 
 export const Route = createFileRoute("/_app/employees/$employeeId")({
   component: EmployeeDetailsPage,
@@ -85,14 +108,7 @@ function EmployeeDetailsPage() {
     undefined, 
     employeeId
   );
-  const { lunchIn, lunchOut } = useAttendanceService();
-  const { data: devices, isLoading: devicesLoading } = useClientDevices(employeeId);
-  const { data: errors } = useClientErrors(employeeId, 50);
-  const { data: appSettings } = useQuery({
-    queryKey: ["settings"],
-    queryFn: async () => (await apiClient.get("/settings")).data,
-  });
-  const lunchMins = Number(appSettings?.attendance?.minLunch ?? 30);
+  const { can } = usePermission();
 
   const isLoading = empLoading || deptLoading || branchLoading;
 
@@ -150,10 +166,6 @@ function EmployeeDetailsPage() {
   };
   const isSameMonth = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
 
-  // Drives the "Start/End Lunch" control in the log header — always about
-  // *today's* punch, independent of whatever month is currently browsed.
-  const todayLog = allAttendance.find((l) => isRecordToday(l.date));
-
   const monthLogs = useMemo(
     () =>
       [...allAttendance]
@@ -169,37 +181,10 @@ function EmployeeDetailsPage() {
     wfh: monthLogs.filter((l) => l.isWFH).length,
   }), [monthLogs]);
 
-  const totalWorkingHours = useMemo(() => {
-    const totalMs = monthLogs.reduce((sum, log) => {
-      const sessions = log.shifts?.length ? log.shifts : [{ punchIn: log.punchIn, punchOut: log.punchOut }];
-      return sum + sessions.reduce((s, sess) => {
-        if (sess.punchIn && sess.punchOut) {
-          return s + (new Date(sess.punchOut).getTime() - new Date(sess.punchIn).getTime());
-        }
-        return s;
-      }, 0);
-    }, 0);
-    const hours = Math.floor(totalMs / (1000 * 60 * 60));
-    const minutes = Math.floor((totalMs % (1000 * 60 * 60)) / (1000 * 60));
-    return `${hours} : ${String(minutes).padStart(2, "0")} h`;
-  }, [monthLogs]);
-
-  const sortedDevices = useMemo(
-    () => [...(devices ?? [])].sort((a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime()),
-    [devices]
+  const totalWorkingHours = useMemo(
+    () => formatHm(monthLogs.reduce((sum, log) => sum + workedMsOf(log), 0)),
+    [monthLogs]
   );
-  const formatDeviceDate = (value: string) => new Date(value).toLocaleString("en-IN", {
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-  const permissionBadgeClass = (state: string) => {
-    if (state === "granted") return "bg-success/10 text-success border-success/20";
-    if (state === "denied") return "bg-destructive/10 text-destructive border-destructive/20";
-    return "bg-muted text-muted-foreground border-border/60";
-  };
 
   const isCurrentMonth = isSameMonth(currentMonth, new Date());
   const monthLabel = currentMonth.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
@@ -209,36 +194,9 @@ function EmployeeDetailsPage() {
   // Lens syncs every arrival/departure (including lunch) as a generic
   // punch-in/punch-out, so today's `punchOut` may just be the most recent
   // lunch-out, not the real end of day — only trust it once the day is over.
-  // "Lens Info" (below) shows every raw event for today regardless.
+  // "Session details" (below) shows every raw event for today regardless.
   const getDisplayPunchOut = (l: AttendanceRecord) =>
     l.source === "lens" && isRecordToday(l.date) ? null : l.punchOut;
-
-  // Punched in but not yet punched out TODAY — shown as "On Duty" instead of
-  // whatever status was set at punch-in time. Restricted to today's date: a
-  // past day missing a punch-out is a stale/forgotten record, not someone
-  // still working, so it should keep showing its real stored status.
-  const getDisplayStatus = (l: AttendanceRecord) =>
-    l.punchIn && !getDisplayPunchOut(l) && isRecordToday(l.date) ? "on-duty" : l.status;
-
-  // This employee's primary assigned shift (first of shiftIds, falling back to
-  // the single legacy shiftId) — used only to estimate hours for a past day
-  // that's missing a punch-out; there's no real punch-out to measure from.
-  const getPrimaryShift = () => {
-    const e = employee as any;
-    const raw = (e?.shiftIds?.length ? e.shiftIds : (e?.shiftId ? [e.shiftId] : [])) as any[];
-    const first = raw[0];
-    if (!first) return null;
-    const id = typeof first === "object" ? first?._id : first;
-    return (typeof first === "object" && first?.startTime) ? first : shifts.find((x: any) => x._id === id);
-  };
-
-  // Worked time for a log row — prefers the server's real, lunch-deducted
-  // totalWorkMs (shared logic with the Attendance page's detail panel; see
-  // day-detail-blocks.tsx for the stale-zero/live/missing-punch-out fallback
-  // rules). Not rounded to whole hours — "6h" hides a 55-minute difference
-  // that "6h 23m" doesn't.
-  const getWorkedHours = (log: AttendanceRecord) =>
-    getWorkedEstimate(log, getPrimaryShift(), lunchMins, getDisplayPunchOut(log), isRecordToday(log.date));
 
   const SOURCE_META: Record<string, { icon: typeof ScanFace; label: string }> = {
     lens: { icon: ScanFace, label: "Lens (camera)" },
@@ -402,23 +360,21 @@ function EmployeeDetailsPage() {
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2 sm:gap-3">
-          <ActionButton
-            variant="download"
-            showLabel
-            label="Export"
-            className="flex-1 sm:flex-none h-10"
-          />
-          <ActionButton
-            variant="edit"
-            showLabel
-            label="Edit Profile"
-            className="flex-1 sm:flex-none h-10 shadow-lg shadow-primary/20"
-            asChild
-          >
-            <Link to={`/employees/create`} search={{ employeeId: employee._id }} />
-          </ActionButton>
-        </div>
+        {/* "Export" sat here with no handler at all. Edit is offered only
+            to someone who may edit; the form would bounce anyone else. */}
+        {can("employees", "edit") && (
+          <div className="flex items-center gap-2 sm:gap-3">
+            <ActionButton
+              variant="edit"
+              showLabel
+              label="Edit Profile"
+              className="flex-1 sm:flex-none h-11 shadow-lg shadow-primary/20"
+              asChild
+            >
+              <Link to={`/employees/create`} search={{ employeeId: employee._id }} />
+            </ActionButton>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -473,18 +429,28 @@ function EmployeeDetailsPage() {
                 </div>
                 <CardContent className="relative pt-0 flex flex-col items-center text-center pb-6 px-4">
                   <div className="-mt-16 mb-4 z-10 relative">
+                    {/* The photo the employee uploaded, else initials drawn here.
+                        This used to fetch an avatar from api.dicebear.com with
+                        the employee's full name in the URL -- sending every
+                        viewed name to a third party -- and ignored the photo. */}
                     <div className="h-32 w-32 rounded-full border-4 border-card bg-card overflow-hidden shadow-lg relative group">
-                      <img
-                        src={`https://api.dicebear.com/7.x/initials/svg?seed=${employee.name}&backgroundColor=8b0a7a,2e1065,4c1d95&textColor=ffffff`}
-                        alt={employee.name}
-                        className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                      />
+                      {employee.profileImage ? (
+                        <img
+                          src={employee.profileImage}
+                          alt={employee.name}
+                          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center bg-gradient-primary text-3xl font-black uppercase text-white">
+                          {employee.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}
+                        </div>
+                      )}
                     </div>
                   </div>
                   
                   <div className="space-y-1 mb-6">
                     <h3 className="text-xl font-bold text-foreground tracking-tight">{employee.name}</h3>
-                    <p className="text-xs font-semibold text-primary tracking-wide uppercase">{employee.designation}</p>
+                    <p className="text-xs font-semibold text-primary tracking-wide uppercase">{EMPLOYMENT_LABELS[employee.employmentType || "monthly"]}</p>
                     <p className="text-[9px] text-muted-foreground font-semibold uppercase tracking-widest bg-muted/50 px-2 py-1 rounded mt-2">
                       Tenure: <span className="text-foreground">{workDuration}</span>
                     </p>
@@ -497,7 +463,7 @@ function EmployeeDetailsPage() {
                       </div>
                       <div className="flex flex-col text-left">
                         <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">Birthday</span>
-                        <span className="text-xs font-semibold text-foreground/90">{employee.dob ? new Date(employee.dob).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : "N/A"}</span>
+                        <span className="text-xs font-semibold text-foreground/90">{employee.dob ? new Date(employee.dob).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' }) : "N/A"}</span>
                       </div>
                     </div>
 
@@ -507,24 +473,37 @@ function EmployeeDetailsPage() {
                       </div>
                       <div className="flex flex-col text-left">
                         <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest">Anniversary</span>
-                        <span className="text-xs font-semibold text-foreground/90">{employee.joiningDate ? new Date(employee.joiningDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : "N/A"}</span>
+                        <span className="text-xs font-semibold text-foreground/90">{employee.joiningDate ? new Date(employee.joiningDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', timeZone: 'Asia/Kolkata' }) : "N/A"}</span>
                       </div>
                     </div>
                   </div>
 
+                  {/* Opens the scan the employee uploaded. These two buttons had
+                      no handler; now they are disabled when nothing is on file. */}
                   <div className="w-full grid grid-cols-2 gap-2 mt-5">
-                    <ActionButton
-                      variant="download"
-                      showLabel
-                      label="PAN"
-                      className="h-9 border-primary/20 text-primary hover:bg-primary/5"
-                    />
-                    <ActionButton
-                      variant="download"
-                      showLabel
-                      label="Aadhaar"
-                      className="h-9 border-primary/20 text-primary hover:bg-primary/5"
-                    />
+                    {([["PAN", employee.panCardUrls], ["Aadhaar", employee.aadhaarCardUrls]] as const).map(([label, urls]) =>
+                      urls?.length ? (
+                        <ActionButton
+                          key={label}
+                          variant="download"
+                          showLabel
+                          label={label}
+                          className="h-11 border-primary/20 text-primary hover:bg-primary/5"
+                          asChild
+                        >
+                          <a href={urls[0]} target="_blank" rel="noopener noreferrer" />
+                        </ActionButton>
+                      ) : (
+                        <ActionButton
+                          key={label}
+                          variant="download"
+                          showLabel
+                          label={`No ${label}`}
+                          disabled
+                          className="h-11 border-border/40 text-muted-foreground"
+                        />
+                      )
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -534,18 +513,18 @@ function EmployeeDetailsPage() {
                   <IndianRupee className="h-24 w-24" />
                 </div>
                 <CardContent className="p-6 relative z-10">
-                  <div className="flex items-center justify-between mb-6">
-                    <div>
+                  <div className="flex items-center justify-between mb-6 gap-2">
+                    <div className="min-w-0">
                       <h4 className="text-[9px] font-bold opacity-70 uppercase tracking-widest mb-1 text-white">Annual CTC</h4>
-                      <div className="text-2xl font-bold tracking-tight">₹{(employee.salary * 12).toLocaleString()}</div>
+                      <div className="text-2xl font-bold tracking-tight truncate">{formatINR(employee.salary * 12)}</div>
                     </div>
-                    <div className="h-10 w-10 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur-md border border-white/10 shadow-inner">
+                    <div className="h-10 w-10 rounded-xl bg-white/10 flex items-center justify-center backdrop-blur-md border border-white/10 shadow-inner shrink-0">
                       <CreditCard className="h-4 w-4 text-white" />
                     </div>
                   </div>
-                  <div className="flex items-center justify-between p-2.5 rounded-lg bg-white/5 border border-white/10 backdrop-blur-sm">
-                    <span className="text-[9px] font-bold opacity-60 uppercase tracking-wider">Monthly Base</span>
-                    <span className="text-xs font-semibold">₹{employee.salary.toLocaleString()}</span>
+                  <div className="flex items-center justify-between gap-2 p-2.5 rounded-lg bg-white/5 border border-white/10 backdrop-blur-sm">
+                    <span className="text-[9px] font-bold opacity-60 uppercase tracking-wider shrink-0">Monthly Base</span>
+                    <span className="text-xs font-semibold truncate min-w-0">{formatINRFull(employee.salary)}</span>
                   </div>
                 </CardContent>
               </Card>
@@ -579,8 +558,8 @@ function EmployeeDetailsPage() {
                           { label: "Local Address", value: employee.address, icon: MapPin },
                           { label: "Branch(es)", value: getBranchNames(), icon: MapPin },
                           { label: "Shift(s)", value: getShiftNames(), icon: Clock },
-                          { label: "Date of Birth", value: employee.dob, icon: Calendar },
-                          { label: "Date of Joining", value: employee.joiningDate, icon: Clock },
+                          { label: "Date of Birth", value: formatCalendarDate(employee.dob), icon: Calendar },
+                          { label: "Date of Joining", value: formatCalendarDate(employee.joiningDate), icon: Clock },
                         ].map((item, i) => (
                           <div key={i} className="flex items-center gap-3.5 group">
                             <div className="h-8 w-8 rounded-lg bg-muted/50 flex items-center justify-center group-hover:bg-primary/5 transition-colors">
@@ -679,46 +658,46 @@ function EmployeeDetailsPage() {
                         <span className="text-[10px] font-bold text-muted-foreground/80 uppercase tracking-widest">Earnings</span>
                       </div>
                       {expectedEarnings.map((e, i) => (
-                        <div key={i} className="flex items-center justify-between">
+                        <div key={i} className="flex items-center justify-between gap-2">
                           <span className="text-[12px] font-medium text-muted-foreground">
                             {e.name}
                             {!e.included && <Badge className="ml-2 bg-primary/10 text-primary border-none text-[8px] px-1 py-0">ON TOP</Badge>}
                           </span>
-                          <p className="text-[14px] font-bold text-foreground">₹{e.amount.toLocaleString()}</p>
+                          <p className="text-[14px] font-bold text-foreground truncate min-w-0">{formatINRFull(e.amount)}</p>
                         </div>
                       ))}
-                      <div className="pt-4 mt-2 border-t border-border/40 flex items-center justify-between">
-                        <span className="text-[11px] font-bold text-foreground uppercase tracking-widest">Gross Salary</span>
-                        <span className="text-[15px] font-bold text-success">₹{grossSalary.toLocaleString()}</span>
+                      <div className="pt-4 mt-2 border-t border-border/40 flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold text-foreground uppercase tracking-widest shrink-0">Gross Salary</span>
+                        <span className="text-[15px] font-bold text-success truncate min-w-0 text-right">{formatINRFull(grossSalary)}</span>
                       </div>
                     </div>
-                    
+
                     <div className="p-6 space-y-4">
                       <div className="flex items-center gap-2 mb-2">
                         <div className="h-1 w-3 bg-destructive rounded-full" />
                         <span className="text-[10px] font-bold text-muted-foreground/80 uppercase tracking-widest">Deductions</span>
                       </div>
                       {expectedDeductions.length > 0 ? expectedDeductions.map((d, i) => (
-                        <div key={i} className="flex items-center justify-between">
+                        <div key={i} className="flex items-center justify-between gap-2">
                           <span className="text-[12px] font-medium text-muted-foreground">
                             {d.name}
                             {!d.included && <Badge className="ml-2 bg-muted/50 text-muted-foreground border-none text-[8px] px-1 py-0">IGNORED</Badge>}
                           </span>
-                          <span className="text-[13px] font-bold text-foreground">₹{d.amount.toLocaleString()}</span>
+                          <span className="text-[13px] font-bold text-foreground truncate min-w-0">{formatINRFull(d.amount)}</span>
                         </div>
                       )) : (
                         <div className="text-[12px] text-muted-foreground/50 italic py-2">No deductions configured</div>
                       )}
-                      <div className="pt-4 mt-auto border-t border-border/40 flex items-center justify-between">
-                        <span className="text-[11px] font-bold text-foreground uppercase tracking-widest">Total Deductions</span>
-                        <span className="text-[15px] font-bold text-destructive">₹{totalDeductions.toLocaleString()}</span>
+                      <div className="pt-4 mt-auto border-t border-border/40 flex items-center justify-between gap-2">
+                        <span className="text-[11px] font-bold text-foreground uppercase tracking-widest shrink-0">Total Deductions</span>
+                        <span className="text-[15px] font-bold text-destructive truncate min-w-0 text-right">{formatINRFull(totalDeductions)}</span>
                       </div>
                     </div>
                   </div>
-                  
-                  <div className="bg-primary/5 p-4 border-t border-primary/10 flex items-center justify-between px-6">
-                    <span className="text-[12px] font-bold text-primary uppercase tracking-widest">Net Payable Salary</span>
-                    <span className="text-xl font-black text-primary tracking-tight">₹{netSalary.toLocaleString()}</span>
+
+                  <div className="bg-primary/5 p-4 border-t border-primary/10 flex items-center justify-between gap-2 px-6">
+                    <span className="text-[12px] font-bold text-primary uppercase tracking-widest shrink-0">Net Payable Salary</span>
+                    <span className="text-xl font-black text-primary tracking-tight truncate min-w-0 text-right">{formatINRFull(netSalary)}</span>
                   </div>
                 </CardContent>
               </Card>
@@ -733,22 +712,41 @@ function EmployeeDetailsPage() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-6">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {["Aadhar Card", "PAN Card", "Educational", "Experience"].map((doc, i) => (
-                      <div key={i} className="flex items-center justify-between p-3.5 rounded-xl border border-border/60 hover:border-primary/30 hover:bg-primary/2 transition-all cursor-pointer group">
-                        <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 rounded-lg bg-muted/50 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
-                            <Download className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
-                          </div>
-                          <div>
-                            <span className="text-[12px] font-semibold text-foreground/80 group-hover:text-primary transition-colors">{doc}</span>
-                            <p className="text-[9px] text-muted-foreground font-medium uppercase tracking-widest">PDF • 2MB</p>
-                          </div>
-                        </div>
-                        <Badge variant="secondary" className="bg-success/5 text-success border-none text-[8px] font-bold px-1.5 py-0 rounded-sm">VERIFIED</Badge>
+                  {/* What is actually on file. This card used to list four
+                      invented documents ("Educational", "Experience"), each
+                      "PDF • 2MB" and badged VERIFIED, for every employee --
+                      including ones who had uploaded nothing. */}
+                  {(() => {
+                    const docs = [
+                      ...(employee.panCardUrls || []).map((url, i, all) => ({ url, label: all.length > 1 ? `PAN card (${i === 0 ? "front" : "back"})` : "PAN card" })),
+                      ...(employee.aadhaarCardUrls || []).map((url, i, all) => ({ url, label: all.length > 1 ? `Aadhaar card (${i === 0 ? "front" : "back"})` : "Aadhaar card" })),
+                    ];
+                    if (docs.length === 0) {
+                      return (
+                        <p className="text-[12px] text-muted-foreground">
+                          No documents uploaded yet. The employee can add PAN and Aadhaar scans from their app (Account).
+                        </p>
+                      );
+                    }
+                    return (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {docs.map((doc) => (
+                          <a
+                            key={doc.url}
+                            href={doc.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex min-h-11 items-center gap-3 p-3.5 rounded-xl border border-border/60 hover:border-primary/30 hover:bg-primary/2 transition-all group"
+                          >
+                            <div className="h-9 w-9 rounded-lg bg-muted/50 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
+                              <Download className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                            </div>
+                            <span className="text-[12px] font-semibold text-foreground/80 group-hover:text-primary transition-colors">{doc.label}</span>
+                          </a>
+                        ))}
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })()}
                 </CardContent>
               </Card>
             </div>
@@ -794,36 +792,15 @@ function EmployeeDetailsPage() {
                       </CardTitle>
                       <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Track punch-in, breaks, and punch-out history.</p>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {todayLog?.punchIn && !todayLog?.punchOut && (
-                        <>
-                          {!(todayLog.lunchInTime && !todayLog.lunchOutTime) ? (
-                            <ActionButton
-                              variant="approve"
-                              showLabel
-                              label="START LUNCH"
-                              icon={Play}
-                              className="h-7 bg-amber-500 hover:bg-amber-600 border-none text-[10px]"
-                              onClick={() => lunchIn({ employeeId: employee._id })}
-                            />
-                          ) : (
-                            <ActionButton
-                              variant="destructive"
-                              showLabel
-                              label="END LUNCH"
-                              icon={Square}
-                              className="h-7 bg-slate-800 hover:bg-slate-900 border-none text-[10px]"
-                              onClick={() => lunchOut({ employeeId: employee._id })}
-                            />
-                          )}
-                        </>
-                      )}
-                      <Badge variant="outline" className="bg-primary/5 text-primary h-7">{monthLabel}</Badge>
-                    </div>
+                    {/* START/END LUNCH used to sit here. The server takes the
+                        employee from the caller's own token, never the body,
+                        so those buttons tried to start the ADMIN's lunch.
+                        Corrections go through Attendance / regularization. */}
+                    <Badge variant="outline" className="bg-primary/5 text-primary h-7">{monthLabel}</Badge>
                   </CardHeader>
                   <CardContent className="p-0">
                     <div className="overflow-x-auto">
-                      <table className="w-full text-sm min-w-[720px]">
+                      <table className="w-full text-sm">
                         <thead className="bg-muted/30 text-muted-foreground font-medium text-xs uppercase tracking-wider">
                           <tr>
                             <th className="px-6 py-4 text-left">Date</th>
@@ -838,7 +815,7 @@ function EmployeeDetailsPage() {
                           {monthLogs.length === 0 && (
                             <tr>
                               <td colSpan={6} className="px-6 py-10 text-center text-xs font-medium text-muted-foreground">
-                                No attendance records for {monthLabel}.
+                                {attLoading ? "Loading attendance..." : `No attendance records for ${monthLabel}.`}
                               </td>
                             </tr>
                           )}
@@ -864,33 +841,30 @@ function EmployeeDetailsPage() {
                                 </td>
                                 <td className="px-6 py-4 text-center text-muted-foreground font-medium text-xs">{formatTime(getDisplayPunchOut(log) ?? undefined)}</td>
                                 <td className="px-6 py-4 text-center">
-                                  {(() => {
-                                    const worked = getWorkedHours(log);
-                                    return (
-                                      <Badge
-                                        variant="secondary"
-                                        title={worked?.estimated ? ESTIMATE_TOOLTIP[worked.reason] : undefined}
-                                        className={cn(
-                                          "font-medium text-[9px] px-1.5 py-0 border-none",
-                                          worked?.estimated ? "bg-amber-50 text-amber-600 italic" : "bg-muted/50 text-muted-foreground"
-                                        )}
-                                      >
-                                        {worked ? `${fmtHM(worked.ms)}${worked.estimated ? "*" : ""}` : "0h 0m"}
-                                      </Badge>
-                                    );
-                                  })()}
+                                  <Badge variant="secondary" className="font-medium text-[9px] px-1.5 py-0 bg-muted/50 text-muted-foreground border-none">
+                                    {log.punchIn && getDisplayPunchOut(log) ? formatHm(workedMsOf(log, getDisplayPunchOut(log))) : "—"}
+                                  </Badge>
                                 </td>
                                 <td className="px-6 py-4 text-right">
                                   <div className="flex items-center justify-end gap-1.5">
                                     <span className={cn(
                                       "inline-flex items-center px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide",
-                                      getDisplayStatus(log) === "on-duty" ? "bg-blue-500/10 text-blue-600" :
-                                        log.status === "present" ? "bg-success/10 text-success" :
-                                          log.status === "absent" ? "bg-red-50 text-red-500" :
-                                            "bg-amber-50 text-amber-500"
+                                      statusClass(log.status)
                                     )}>
-                                      {getDisplayStatus(log) === "on-duty" ? "On Duty" : log.status}
+                                      {statusLabel(log.status)}
                                     </span>
+                                    {/* Driven by the flag, not the status: a
+                                        remote day that fell short of the hours
+                                        bar is stored as 'half-day'. */}
+                                    {log.isWFH && (
+                                      <span
+                                        title="Worked from home — branch distance not checked, exempt from auto punch-out."
+                                        className="inline-flex items-center gap-1 rounded-full bg-indigo-500/10 px-1.5 py-0 text-[9px] font-bold text-indigo-600 dark:text-indigo-400"
+                                      >
+                                        <Home className="h-2.5 w-2.5" />
+                                        WFH
+                                      </span>
+                                    )}
                                     {(() => {
                                       const { icon: SourceIcon, label } = getSourceMeta(log);
                                       return (
@@ -935,33 +909,17 @@ function EmployeeDetailsPage() {
                         <span className="text-muted-foreground font-medium">Total Working Hours</span>
                         <span className="font-bold text-primary">{totalWorkingHours}</span>
                       </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground font-medium">Estimated Net Salary</span>
-                        <span className="font-bold text-success">₹{(employee.salary).toLocaleString()}</span>
+                      {/* It said "Estimated Net Salary" over the plain monthly
+                          base -- no deductions, no attendance. Payroll lives
+                          on the Salary page; this is only the base. */}
+                      <div className="flex items-center justify-between gap-2 text-sm">
+                        <span className="text-muted-foreground font-medium shrink-0">Monthly Salary</span>
+                        <span className="font-bold text-success truncate min-w-0">{formatINRFull(employee.salary)}</span>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
 
-                <Card className="border-none shadow-elegant bg-primary/5 border border-primary/10">
-                  <CardContent className="p-6">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                        <Mail className="h-5 w-5 text-primary" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-bold">Need assistance?</h4>
-                        <p className="text-xs text-muted-foreground">Contact HR regarding attendance</p>
-                      </div>
-                    </div>
-                    <ActionButton
-                      variant="add"
-                      showLabel
-                      label="Raise Ticket"
-                      className="w-full"
-                    />
-                  </CardContent>
-                </Card>
               </div>
             </div>
           </motion.div>
@@ -973,160 +931,7 @@ function EmployeeDetailsPage() {
             exit={{ opacity: 0, y: -10 }}
             className="space-y-6"
           >
-            <section className="space-y-4">
-              <div>
-                <h2 className="text-sm font-bold">Installs</h2>
-                <p className="text-xs text-muted-foreground">Current and historical app installs reported by this employee.</p>
-              </div>
-              {devicesLoading ? (
-                <Card className="border-none shadow-soft rounded-2xl">
-                  <CardContent className="p-6 text-sm text-muted-foreground">Loading app reports…</CardContent>
-                </Card>
-              ) : sortedDevices.length === 0 ? (
-                <Card className="border-none shadow-soft rounded-2xl">
-                  <CardHeader className="border-b border-border/40 bg-muted/5 py-4 px-6">
-                    <CardTitle className="text-sm font-bold flex items-center gap-2"><Smartphone className="h-4 w-4 text-primary" /> No installs reported</CardTitle>
-                  </CardHeader>
-                  <CardContent className="p-6 text-sm text-muted-foreground">
-                    No app reports yet. Employees must be running an APK built after this feature shipped.
-                  </CardContent>
-                </Card>
-              ) : sortedDevices.map((device, index) => (
-                <Card key={device._id} className={cn("border-none shadow-soft rounded-2xl overflow-hidden", index === 0 && "ring-1 ring-primary/20")}>
-                  <CardHeader className="border-b border-border/40 bg-muted/5 py-4 px-6 flex flex-row items-center justify-between">
-                    <CardTitle className="text-sm font-bold flex items-center gap-2">
-                      <Smartphone className="h-4 w-4 text-primary" />
-                      {device.appVersion ?? "Unknown version"}{device.appBuild ? ` (build ${device.appBuild})` : ""}
-                    </CardTitle>
-                    <Badge variant="outline" className={index === 0 ? "border-primary/20 bg-primary/5 text-primary" : "text-muted-foreground"}>
-                      {index === 0 ? "Most recently seen" : "Historical install"}
-                    </Badge>
-                  </CardHeader>
-                  <CardContent className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 text-sm">
-                    {[
-                      ["Platform", device.platform], ["Device", device.deviceModel], ["Manufacturer", device.manufacturer], ["OS version", device.osVersion],
-                      ["App opens", device.appOpenCount.toLocaleString()], ["First seen", formatDeviceDate(device.firstSeenAt)], ["Last seen", formatDeviceDate(device.lastSeenAt)],
-                    ].map(([label, value]) => (
-                      <div key={label} className="space-y-1">
-                        <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{label}</p>
-                        <p className="font-medium text-foreground break-words">{value || "—"}</p>
-                      </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              ))}
-            </section>
-
-            <Card className="border-none shadow-soft rounded-2xl overflow-hidden">
-              <CardHeader className="border-b border-border/40 bg-muted/5 py-4 px-6">
-                <CardTitle className="text-sm font-bold">Permissions</CardTitle>
-              </CardHeader>
-              <CardContent className="p-6 space-y-6">
-                {sortedDevices.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">Permissions will appear after an app install reports in.</p>
-                ) : sortedDevices.map((device, index) => (
-                  <div key={device._id} className={cn("space-y-3", index > 0 && "border-t border-border/40 pt-6")}>
-                    <p className="text-xs font-semibold text-foreground">{device.deviceModel || device.platform || "App install"}{index === 0 && <span className="ml-2 text-muted-foreground font-normal">(most recently seen)</span>}</p>
-                    {/* Setup verdict first. This is the single line support
-                        reads when an employee says "my BOT isn't working": it
-                        distinguishes NEVER SET UP from SET UP AND SINCE BROKEN,
-                        which need completely different help. */}
-                    {(() => {
-                      const blocking = TRACKING_PERMISSIONS.filter(
-                        (p) => !p.selfDeclared && device.permissions[p.key] === "denied",
-                      );
-                      const unreadable = TRACKING_PERMISSIONS.every(
-                        (p) => device.permissions[p.key] === "unknown",
-                      );
-                      if (unreadable) {
-                        return (
-                          <div className="rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
-                            <p className="text-[11px] font-semibold text-muted-foreground">
-                              This build predates background tracking — it cannot report these settings.
-                              Nothing is wrong with the phone; the employee needs the newer APK.
-                            </p>
-                          </div>
-                        );
-                      }
-                      return blocking.length === 0 ? (
-                        <div className="rounded-lg border border-success/25 bg-success/10 px-3 py-2">
-                          <p className="text-[11px] font-bold text-success">
-                            Background tracking is fully enabled on this device.
-                            {device.trackingSetupComplete === false && " Setup was never formally completed, but every required permission is granted."}
-                          </p>
-                        </div>
-                      ) : (
-                        <div className="rounded-lg border border-destructive/25 bg-destructive/10 px-3 py-2 space-y-1">
-                          <p className="text-[11px] font-bold text-destructive">
-                            Location will stop when the screen locks — {blocking.length} setting
-                            {blocking.length > 1 ? "s are" : " is"} blocking it.
-                          </p>
-                          {blocking.map((p) => (
-                            <p key={p.key} className="text-[10px] leading-relaxed text-destructive/80">
-                              <span className="font-bold">{p.label}:</span> {p.fix}
-                            </p>
-                          ))}
-                        </div>
-                      );
-                    })()}
-
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                      {TRACKING_PERMISSIONS.map((perm) => {
-                        const state = device.permissions[perm.key];
-                        return (
-                          <div key={perm.key} className="rounded-lg border border-border/50 p-3 space-y-2">
-                            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                              {perm.label}
-                            </p>
-                            <Badge variant="outline" className={cn("capitalize", permissionBadgeClass(state))}>
-                              {PERMISSION_LABELS[state]}
-                            </Badge>
-                            {/* Auto-start cannot be read by any Android API, so
-                                a "granted" here is the employee's own claim. Saying
-                                so stops support treating it as verified. */}
-                            {perm.selfDeclared && state === "granted" && (
-                              <p className="text-[9px] leading-tight text-muted-foreground/70">
-                                Self-reported — not verifiable
-                              </p>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
-
-            <Card className="border-none shadow-soft rounded-2xl overflow-hidden">
-              <CardHeader className="border-b border-border/40 bg-muted/5 py-4 px-6">
-                <CardTitle className="text-sm font-bold">Recent errors</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                {!errors?.length ? (
-                  <p className="p-6 text-sm text-muted-foreground">No app errors have been reported for this employee.</p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[850px] text-sm">
-                      <thead className="bg-muted/30 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-                        <tr><th className="px-6 py-3 text-left">Occurred</th><th className="px-6 py-3 text-left">Kind</th><th className="px-6 py-3 text-left">Message</th><th className="px-6 py-3 text-left">Route</th><th className="px-6 py-3 text-left">Request</th></tr>
-                      </thead>
-                      <tbody className="divide-y divide-border/40">
-                        {errors.map((error) => (
-                          <tr key={error._id} className="align-top">
-                            <td className="px-6 py-4 text-xs text-muted-foreground whitespace-nowrap">{formatDeviceDate(error.occurredAt)}</td>
-                            <td className="px-6 py-4"><Badge variant="outline" className="capitalize">{error.kind}</Badge></td>
-                            <td className="px-6 py-4 max-w-sm break-words">{error.message}{error.stack && <Collapsible className="mt-2"><CollapsibleTrigger className="text-xs font-semibold text-primary hover:underline">Show stack</CollapsibleTrigger><CollapsibleContent><pre className="mt-2 max-w-sm whitespace-pre-wrap break-words rounded bg-muted p-3 text-[11px] text-muted-foreground">{error.stack}</pre></CollapsibleContent></Collapsible>}</td>
-                            <td className="px-6 py-4 text-xs text-muted-foreground">{error.route || "—"}</td>
-                            <td className="px-6 py-4 text-xs text-muted-foreground break-all">{error.statusCode ? <span className="mr-2 font-semibold text-foreground">{error.statusCode}</span> : null}{error.requestUrl || "—"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            <DeviceTab employeeId={employeeId} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -1140,14 +945,19 @@ function EmployeeDetailsPage() {
                 <div className="flex items-center justify-between">
                   <DialogTitle className="text-xl font-bold">Attendance Detail</DialogTitle>
                   <div className="flex items-center gap-2">
-                    {selectedLog.source === "lens" && (selectedLog.shifts?.length ?? 0) > 0 && (
+                    {/* Gated on there being sessions, not on source === "lens".
+                        That source value is unreachable — BOTLens is retired and
+                        device punches write "biometric" — so this button never
+                        appeared on any modern record, and an admin could not open
+                        session details at all. */}
+                    {(selectedLog.shifts?.length ?? 0) > 0 && (
                       <button
                         type="button"
                         onClick={() => setShowAllSessions((v) => !v)}
                         className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-white/80 hover:text-white bg-white/10 hover:bg-white/20 border border-white/20 rounded-full px-2.5 py-1 transition-colors"
                       >
                         <ListChecks className="h-3 w-3" />
-                        Lens Info
+                        Session details
                         <ChevronDown className={`h-3 w-3 transition-transform ${showAllSessions ? "rotate-180" : ""}`} />
                       </button>
                     )}
@@ -1169,7 +979,7 @@ function EmployeeDetailsPage() {
                         <UserCheck className="h-4 w-4 text-primary" />
                         <h4 className="font-semibold text-primary uppercase tracking-wider text-[10px]">Step 1: Punch In (Login)</h4>
                       </div>
-                      <div className="bg-white p-4 rounded-2xl shadow-sm border border-border/40">
+                      <div className="bg-card p-4 rounded-2xl shadow-sm border border-border/40">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
                             <Clock className="h-4 w-4 text-muted-foreground" />
@@ -1184,7 +994,7 @@ function EmployeeDetailsPage() {
                       </div>
                     </div>
                     <div className="flex flex-col items-center gap-2">
-                      <div className="w-32 h-32 rounded-xl overflow-hidden shadow-md border border-border/50 bg-white flex items-center justify-center transition-transform hover:scale-105">
+                      <div className="w-32 h-32 rounded-xl overflow-hidden shadow-md border border-border/50 bg-card flex items-center justify-center transition-transform hover:scale-105">
                         {selectedLog.punchInPhoto ? (
                           <img src={selectedLog.punchInPhoto} alt="Login Selfie" className="w-full h-full object-cover" />
                         ) : (
@@ -1209,7 +1019,7 @@ function EmployeeDetailsPage() {
                       transition={{ duration: 0.25 }}
                       className="overflow-hidden"
                     >
-                      <div className="bg-white p-4 rounded-2xl shadow-sm border border-border/40">
+                      <div className="bg-card p-4 rounded-2xl shadow-sm border border-border/40">
                         <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider block mb-2">
                           All Sessions Today ({selectedLog.shifts?.length ?? 0})
                         </span>
@@ -1246,7 +1056,7 @@ function EmployeeDetailsPage() {
                         <Utensils className="h-4 w-4 text-amber-500" />
                         <h4 className="font-semibold text-amber-600 uppercase tracking-wider text-[10px]">Step 2: Lunch Break In</h4>
                       </div>
-                      <div className="bg-white p-4 rounded-2xl shadow-sm border border-border/40 border-l-4 border-l-amber-500">
+                      <div className="bg-card p-4 rounded-2xl shadow-sm border border-border/40 border-l-4 border-l-amber-500">
                         <div className="flex items-center gap-2 mb-2">
                           <Clock className="h-4 w-4 text-muted-foreground" />
                           <span className="text-lg font-semibold">{new Date(selectedLog.lunchInTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
@@ -1269,7 +1079,7 @@ function EmployeeDetailsPage() {
                         <Utensils className="h-4 w-4 text-amber-400" />
                         <h4 className="font-semibold text-amber-500 uppercase tracking-wider text-[10px]">Step 3: Lunch Break Out</h4>
                       </div>
-                      <div className="bg-white p-4 rounded-2xl shadow-sm border border-border/40 border-l-4 border-l-amber-400">
+                      <div className="bg-card p-4 rounded-2xl shadow-sm border border-border/40 border-l-4 border-l-amber-400">
                         <div className="flex items-center gap-2 mb-2">
                           <Clock className="h-4 w-4 text-muted-foreground" />
                           <span className="text-lg font-semibold">{new Date(selectedLog.lunchOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true })}</span>
@@ -1292,7 +1102,7 @@ function EmployeeDetailsPage() {
                         <UserMinus className="h-4 w-4 text-slate-500" />
                         <h4 className="font-semibold text-slate-500 uppercase tracking-wider text-[10px]">Step 4: Punch Out (Logout)</h4>
                       </div>
-                      <div className="bg-white p-4 rounded-2xl shadow-sm border border-border/40">
+                      <div className="bg-card p-4 rounded-2xl shadow-sm border border-border/40">
                         <div className="flex items-center justify-between mb-2">
                           <div className="flex items-center gap-2">
                             <Clock className="h-4 w-4 text-muted-foreground" />
@@ -1307,7 +1117,7 @@ function EmployeeDetailsPage() {
                       </div>
                     </div>
                     <div className="flex flex-col items-center gap-2">
-                      <div className="w-32 h-32 rounded-xl overflow-hidden shadow-md border border-border/50 bg-white flex items-center justify-center transition-transform hover:scale-105">
+                      <div className="w-32 h-32 rounded-xl overflow-hidden shadow-md border border-border/50 bg-card flex items-center justify-center transition-transform hover:scale-105">
                         {selectedLog.punchOutPhoto && getDisplayPunchOut(selectedLog) ? (
                           <img src={selectedLog.punchOutPhoto} alt="Logout Selfie" className="w-full h-full object-cover" />
                         ) : (
@@ -1323,7 +1133,7 @@ function EmployeeDetailsPage() {
                 </div>
               </div>
 
-              <div className="mt-auto shrink-0 bg-white p-6 border-t border-border/40 flex justify-end">
+              <div className="mt-auto shrink-0 bg-card p-6 border-t border-border/40 flex justify-end">
                 <ActionButton
                   variant="view"
                   showLabel

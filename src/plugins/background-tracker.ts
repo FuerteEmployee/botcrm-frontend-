@@ -32,6 +32,14 @@ export interface TrackerStatus {
   /** Epoch milliseconds, not an ISO string -- the native side sends a Long. */
   lastFixAt: number | null;
   permissionState: "granted" | "denied" | "partial" | "unknown";
+  /**
+   * True on an APK that honours the company's "track always" setting (APK 17+).
+   * Absent on older builds: those stop the service whenever no shift is open, so
+   * the web layer must not ask them to track off duty.
+   */
+  supportsAlwaysMode?: boolean;
+  /** The mode the native service last applied. */
+  trackAlways?: boolean;
 }
 
 /**
@@ -49,10 +57,32 @@ export interface TrackerReadiness {
   background: boolean;
   notifications: boolean;
   batteryUnrestricted: boolean;
+  /**
+   * Physical-activity permission. Lets the tracker read the accelerometer and
+   * tell a phone standing still from one whose GPS is drifting.
+   *
+   * Optional in the sense that refusing it costs route accuracy, not
+   * attendance -- but it is the difference between a desk phone logging 0 km
+   * and logging 11.
+   */
+  activityRecognition: boolean;
+  /** Android camera grant. Only APK 19 and later send it. */
+  camera?: boolean;
   locationState: "always" | "foreground" | "denied";
   manufacturer: string;
   /** Whether this OEM has an auto-start screen worth sending the user to. */
   hasAutostartScreen: boolean;
+  /**
+   * Has the app ever actually resumed tracking after a device reboot?
+   *
+   * The only real evidence that OEM auto-start is enabled. No Android API
+   * exposes that setting, so the alternative is asking the employee — and an
+   * admin reading "granted" wants to know whether that was observed or merely
+   * claimed. Absent on builds older than 1.5.
+   */
+  autostartProven?: boolean;
+  /** Epoch ms of that reboot recovery, 0 if it has never happened. */
+  lastBootRestartAt?: number;
 }
 
 export interface TrackerPermissions {
@@ -66,10 +96,32 @@ export interface StartOptions {
   apiBase: string;
   employeeId: string;
   sessionId?: string;
+  /**
+   * The web layer's install id, handed to native so the device event log and
+   * the device row describe the same install. Optional: an older native build
+   * ignores it, and a missing one only costs the events their device grouping.
+   */
+  installId?: string;
+  /**
+   * Company setting "track always": keep recording with no open shift. An older
+   * native build ignores it and stops at punch-out, as before.
+   */
+  trackAlways?: boolean;
+}
+
+export interface NativeCrash {
+  /** Epoch ms at which the process died. */
+  at: number;
+  thread: string;
+  /** Fully-qualified Throwable class, e.g. android.app.RemoteServiceException. */
+  type: string;
+  message: string;
+  stack: string;
 }
 
 interface BackgroundTrackerPlugin {
   start(options: StartOptions): Promise<{ started: boolean }>;
+  getLastCrash(): Promise<{ crash: NativeCrash | null }>;
   stop(): Promise<void>;
   getStatus(): Promise<TrackerStatus>;
   requestPermissions(): Promise<TrackerPermissions>;
@@ -112,11 +164,45 @@ export async function startBackgroundTracking(opts: StartOptions): Promise<boole
   if (!available()) return false;
   try {
     const res = await Native.start(opts);
-    return !!res?.started;
+    // `started` now means the service CONFIRMED it is up, not merely that the
+    // start was dispatched -- see BackgroundTrackerPlugin.start(). A false here
+    // is a real failure on a build that has the plugin, and the caller must
+    // treat it as "not tracking" rather than as "use the web fallback and carry
+    // on", because the web tracker stops the moment the WebView is suspended.
+    const started = !!res?.started;
+    // No location permission yet is the normal state before setup, not a failure:
+    // APK 17+ declines to start and says why, instead of starting and being refused.
+    if (!started && (res as { reason?: string } | undefined)?.reason !== "no_location_permission") {
+      console.warn("[bg-tracker] native service did not come up");
+      reportTrackerIssue("native background tracker did not start");
+    }
+    return started;
   } catch (err) {
     console.warn("[bg-tracker] start failed:", err);
+    reportTrackerIssue(`native background tracker threw: ${String((err as Error)?.message || err)}`);
     return false;
   }
+}
+
+/**
+ * Surface a tracker start failure where somebody will actually see it.
+ *
+ * The native side records its own `start_failed` event, but that only reaches
+ * the server when the service is alive enough to flush its queue -- which is
+ * exactly what is in doubt here. This is the independent path: it goes through
+ * the ordinary client-error channel, so a device that cannot track still says
+ * so from the web layer.
+ *
+ * Imported lazily because client-telemetry pulls in apiClient, and this module
+ * is imported by the punch screen at load; a static import would drag the axios
+ * instance into that chunk for a path that almost never runs.
+ */
+function reportTrackerIssue(message: string) {
+  void import("@/lib/client-telemetry")
+    .then((m) => m.reportClientError?.({ kind: "tracker", message }))
+    .catch(() => {
+      /* telemetry must never break a punch */
+    });
 }
 
 export async function stopBackgroundTracking(): Promise<void> {
@@ -125,6 +211,25 @@ export async function stopBackgroundTracking(): Promise<void> {
     await Native.stop();
   } catch (err) {
     console.warn("[bg-tracker] stop failed:", err);
+  }
+}
+
+/**
+ * The stack trace of the last fatal NATIVE crash, or null.
+ *
+ * Native crashes are invisible to every other channel we have: the system kills
+ * the process, so window.onerror never fires and no request is ever made. This
+ * is the only way one is ever seen. Reading it clears it.
+ */
+export async function getLastNativeCrash(): Promise<NativeCrash | null> {
+  if (!available()) return null;
+  try {
+    const res = await Native.getLastCrash();
+    return res?.crash ?? null;
+  } catch {
+    // An older APK has no such method. Nothing to report, and certainly nothing
+    // worth surfacing at startup.
+    return null;
   }
 }
 

@@ -6,44 +6,46 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Badge } from '@/components/ui/badge'
 import { motion } from 'framer-motion'
 import { Plus, Search, Edit, Trash2, MapPin, Users } from 'lucide-react'
-import { mockBranches, Branch } from '@/lib/mock-data'
+import { branches as initialBranches, Branch } from '@/lib/mock-data'
 import { toast } from 'sonner'
 
 export function BranchesPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [isOpen, setIsOpen] = useState(false)
   const [editingBranch, setEditingBranch] = useState<Branch | null>(null)
-  const [branches, setBranches] = useState(mockBranches)
+  const [branches, setBranches] = useState<Branch[]>(initialBranches)
   const [formData, setFormData] = useState({
-    name: '',
-    location: '',
-    manager: '',
+    branchName: '',
+    branchLocation: '',
+    latitude: 0,
+    longitude: 0,
     employees: 0
   })
 
   const filteredBranches = branches.filter(branch =>
-    branch.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    branch.location.toLowerCase().includes(searchQuery.toLowerCase())
+    branch.branchName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    branch.branchLocation.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
   const handleOpenDialog = (branch?: Branch) => {
     if (branch) {
       setEditingBranch(branch)
       setFormData({
-        name: branch.name,
-        location: branch.location,
-        manager: branch.manager,
+        branchName: branch.branchName,
+        branchLocation: branch.branchLocation,
+        latitude: branch.latitude,
+        longitude: branch.longitude,
         employees: branch.employees
       })
     } else {
       setEditingBranch(null)
-      setFormData({ name: '', location: '', manager: '', employees: 0 })
+      setFormData({ branchName: '', branchLocation: '', latitude: 0, longitude: 0, employees: 0 })
     }
     setIsOpen(true)
   }
 
   const handleSave = () => {
-    if (!formData.name || !formData.location) {
+    if (!formData.branchName || !formData.branchLocation) {
       toast.error('Please fill in all required fields')
       return
     }
@@ -58,7 +60,8 @@ export function BranchesPage() {
     } else {
       const newBranch: Branch = {
         id: `branch-${Date.now()}`,
-        ...formData
+        ...formData,
+        createdAt: new Date().toISOString()
       }
       setBranches(prev => [...prev, newBranch])
       toast.success('Branch added successfully')
@@ -117,10 +120,10 @@ export function BranchesPage() {
               <CardHeader>
                 <div className="flex items-start justify-between mb-3">
                   <div>
-                    <CardTitle className="text-xl">{branch.name}</CardTitle>
+                    <CardTitle className="text-xl">{branch.branchName}</CardTitle>
                     <CardDescription className="flex items-center gap-1 mt-1">
                       <MapPin className="w-3 h-3" />
-                      {branch.location}
+                      {branch.branchLocation}
                     </CardDescription>
                   </div>
                   <div className="flex gap-1">
@@ -145,10 +148,12 @@ export function BranchesPage() {
               <CardContent className="space-y-4">
                 <div className="flex items-center justify-between p-3 bg-slate-100 dark:bg-slate-800/50 rounded-lg">
                   <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
-                    <Users className="w-4 h-4" />
-                    <span className="text-sm font-medium">Branch Manager</span>
+                    <MapPin className="w-4 h-4" />
+                    <span className="text-sm font-medium">Coordinates</span>
                   </div>
-                  <span className="font-medium text-slate-900 dark:text-white">{branch.manager}</span>
+                  <span className="font-medium text-slate-900 dark:text-white">
+                    {branch.latitude.toFixed(4)}, {branch.longitude.toFixed(4)}
+                  </span>
                 </div>
                 <div className="flex items-center justify-between p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
                   <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
@@ -176,8 +181,8 @@ export function BranchesPage() {
               <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">Branch Name *</label>
               <Input
                 placeholder="e.g., Dhaka HQ"
-                value={formData.name}
-                onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                value={formData.branchName}
+                onChange={(e) => setFormData(prev => ({ ...prev, branchName: e.target.value }))}
                 className="border-2 border-slate-200 dark:border-slate-700"
               />
             </div>
@@ -185,19 +190,32 @@ export function BranchesPage() {
               <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">Location *</label>
               <Input
                 placeholder="City/Area"
-                value={formData.location}
-                onChange={(e) => setFormData(prev => ({ ...prev, location: e.target.value }))}
+                value={formData.branchLocation}
+                onChange={(e) => setFormData(prev => ({ ...prev, branchLocation: e.target.value }))}
                 className="border-2 border-slate-200 dark:border-slate-700"
               />
             </div>
-            <div>
-              <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">Branch Manager</label>
-              <Input
-                placeholder="Manager name"
-                value={formData.manager}
-                onChange={(e) => setFormData(prev => ({ ...prev, manager: e.target.value }))}
-                className="border-2 border-slate-200 dark:border-slate-700"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">Latitude</label>
+                <Input
+                  type="number"
+                  placeholder="19.0760"
+                  value={formData.latitude}
+                  onChange={(e) => setFormData(prev => ({ ...prev, latitude: parseFloat(e.target.value) }))}
+                  className="border-2 border-slate-200 dark:border-slate-700"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">Longitude</label>
+                <Input
+                  type="number"
+                  placeholder="72.8777"
+                  value={formData.longitude}
+                  onChange={(e) => setFormData(prev => ({ ...prev, longitude: parseFloat(e.target.value) }))}
+                  className="border-2 border-slate-200 dark:border-slate-700"
+                />
+              </div>
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">Number of Employees</label>

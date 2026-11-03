@@ -6,14 +6,16 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { motion } from 'framer-motion'
 import { Search, Eye, Download, Filter } from 'lucide-react'
-import { mockSalary } from '@/lib/mock-data'
+import { salaryRecords, SalaryRecord } from '@/lib/mock-data'
 import { toast } from 'sonner'
+
+type StatusFilter = 'all' | SalaryRecord['status']
 
 export function SalaryPage() {
   const [searchQuery, setSearchQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'approved' | 'pending'>('all')
-  const [monthFilter, setMonthFilter] = useState('April 2024')
-  const [salary, setSalary] = useState(mockSalary)
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [monthFilter, setMonthFilter] = useState('April 2025')
+  const [salary, setSalary] = useState<SalaryRecord[]>(salaryRecords)
 
   const filteredSalary = salary.filter(record => {
     const matchesSearch = record.employeeName.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -29,10 +31,10 @@ export function SalaryPage() {
 
   const getTotalStats = () => {
     const total = filteredSalary.reduce((acc, r) => ({
-      baseSalary: acc.baseSalary + r.baseSalary,
+      baseSalary: acc.baseSalary + r.base,
       bonus: acc.bonus + r.bonus,
-      deductions: acc.deductions + r.deductions,
-      net: acc.net + r.netSalary
+      deductions: acc.deductions + r.deduction,
+      net: acc.net + r.net
     }), { baseSalary: 0, bonus: 0, deductions: 0, net: 0 })
     return total
   }
@@ -57,7 +59,7 @@ export function SalaryPage() {
             <CardContent className="p-6">
               <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">Total Base Salary</p>
               <p className="text-2xl font-bold text-blue-700 dark:text-blue-400">
-                ৳{stats.baseSalary.toLocaleString()}
+                ₹{stats.baseSalary.toLocaleString('en-IN')}
               </p>
             </CardContent>
           </Card>
@@ -68,7 +70,7 @@ export function SalaryPage() {
             <CardContent className="p-6">
               <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">Total Bonus</p>
               <p className="text-2xl font-bold text-green-700 dark:text-green-400">
-                ৳{stats.bonus.toLocaleString()}
+                ₹{stats.bonus.toLocaleString('en-IN')}
               </p>
             </CardContent>
           </Card>
@@ -79,7 +81,7 @@ export function SalaryPage() {
             <CardContent className="p-6">
               <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">Total Deductions</p>
               <p className="text-2xl font-bold text-red-700 dark:text-red-400">
-                ৳{stats.deductions.toLocaleString()}
+                ₹{stats.deductions.toLocaleString('en-IN')}
               </p>
             </CardContent>
           </Card>
@@ -90,7 +92,7 @@ export function SalaryPage() {
             <CardContent className="p-6">
               <p className="text-sm text-slate-600 dark:text-slate-400 mb-2">Total Net Salary</p>
               <p className="text-2xl font-bold text-purple-700 dark:text-purple-400">
-                ৳{stats.net.toLocaleString()}
+                ₹{stats.net.toLocaleString('en-IN')}
               </p>
             </CardContent>
           </Card>
@@ -115,19 +117,18 @@ export function SalaryPage() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="April 2024">April 2024</SelectItem>
-                <SelectItem value="March 2024">March 2024</SelectItem>
-                <SelectItem value="February 2024">February 2024</SelectItem>
+                <SelectItem value="April 2025">April 2025</SelectItem>
+                <SelectItem value="March 2025">March 2025</SelectItem>
+                <SelectItem value="February 2025">February 2025</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as any)}>
+            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
               <SelectTrigger className="w-full md:w-40 border-2 border-slate-200 dark:border-slate-700">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
                 <SelectItem value="paid">Paid</SelectItem>
-                <SelectItem value="approved">Approved</SelectItem>
                 <SelectItem value="pending">Pending</SelectItem>
               </SelectContent>
             </Select>
@@ -175,26 +176,25 @@ export function SalaryPage() {
                           <p className="text-xs text-slate-500">{record.employeeId}</p>
                         </div>
                       </td>
-                      <td className="px-6 py-4 text-right text-slate-900 dark:text-white">৳{record.baseSalary.toLocaleString()}</td>
+                      <td className="px-6 py-4 text-right text-slate-900 dark:text-white">₹{record.base.toLocaleString('en-IN')}</td>
                       <td className="px-6 py-4 text-right">
                         <span className="text-green-600 dark:text-green-400 font-medium">
-                          {record.bonus > 0 ? '+' : ''}৳{record.bonus.toLocaleString()}
+                          {record.bonus > 0 ? '+' : ''}₹{record.bonus.toLocaleString('en-IN')}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right">
                         <span className="text-red-600 dark:text-red-400 font-medium">
-                          -৳{record.deductions.toLocaleString()}
+                          -₹{record.deduction.toLocaleString('en-IN')}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right">
-                        <p className="font-bold text-slate-900 dark:text-white">৳{record.netSalary.toLocaleString()}</p>
+                        <p className="font-bold text-slate-900 dark:text-white">₹{record.net.toLocaleString('en-IN')}</p>
                       </td>
                       <td className="px-6 py-4">
                         <Badge
-                          variant={record.status === 'paid' ? 'default' : record.status === 'approved' ? 'secondary' : 'outline'}
+                          variant={record.status === 'paid' ? 'default' : 'outline'}
                           className={
                             record.status === 'paid' ? 'bg-green-600 text-white' :
-                            record.status === 'approved' ? 'bg-blue-600 text-white' :
                             'border-yellow-500 text-yellow-700'
                           }
                         >

@@ -1,4 +1,4 @@
-﻿import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard,
   Users,
@@ -23,6 +23,7 @@ import {
   CreditCard,
   Coins,
   Fingerprint,
+  ScanFace,
   Search,
 } from "lucide-react";
 import { useState, useCallback, useRef } from "react";
@@ -31,6 +32,7 @@ import { cn } from "@/lib/utils";
 import { logoutAndClear } from "@/lib/logout";
 import { useAuth } from "@/hooks/use-auth";
 import { useSidebarOrder } from "@/hooks/use-sidebar-order";
+import { useFeatureToggles } from "@/hooks/use-feature-toggles";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import logo from "@/assets/bot-logo.png";
@@ -41,7 +43,18 @@ type NavItem = {
   label: string;
   icon: React.ElementType;
   adminOnly?: boolean;
+  /** Feature toggle key — when set, the item is hidden if the super admin
+   *  has disabled this feature for the tenant. */
+  featureKey?: string;
+  /** External URL — when set, the item opens this in a new tab instead of
+   *  routing to `to` (which then only serves as the item's unique key). */
+  href?: string;
 };
+
+// Only .env.development sets this. Staging and production builds used to fall
+// back to localhost:8000, giving every admin a "Lens" link to their own PC.
+// With it unset the item is left out of the sidebar entirely.
+const BOTLENS_URL: string | undefined = import.meta.env.VITE_BOTLENS_URL || undefined;
 
 const NAV: NavItem[] = [
   { to: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -52,16 +65,20 @@ const NAV: NavItem[] = [
   { to: "/attendance", label: "Attendance Dashboard", icon: CalendarCheck },
   { to: "/tickets", label: "Helpdesk Tickets", icon: Ticket },
   { to: "/salary", label: "Salary", icon: Wallet },
-  { to: "/advance-salary", label: "Advance Salary & Loan", icon: Coins },
-  { to: "/leads", label: "Lead Management", icon: UserCheck },
+  { to: "/advance-salary", label: "Advance Salary & Loan", icon: Coins, featureKey: "advanceSalary" },
+  { to: "/leads", label: "Lead Management", icon: UserCheck, featureKey: "leads" },
   { to: "/festivals", label: "Festivals & Holidays", icon: Gift },
-  { to: "/announcements", label: "Notice Board", icon: Megaphone },
-  { to: "/tracking", label: "Tracking", icon: MapPin },
+  { to: "/announcements", label: "Notice Board", icon: Megaphone, featureKey: "announcements" },
+  { to: "/tracking", label: "Tracking", icon: MapPin, featureKey: "tracking" },
   { to: "/leave-types", label: "Leave Types", icon: Settings2 },
   { to: "/shifts", label: "Shift Management", icon: Clock },
-  { to: "/biometric-devices", label: "Biometric Device", icon: Fingerprint },
-  { to: "/assets", label: "Assets Management", icon: Monitor },
-  { to: "/expenses", label: "Expense Management", icon: Receipt },
+  { to: "/biometric-devices", label: "Biometric Device", icon: Fingerprint, featureKey: "biometricDevices" },
+  // BOTLens login is admin-only server-side, so sub-admins never see this.
+  ...(BOTLENS_URL
+    ? [{ to: "/lens", label: "Lens", icon: ScanFace, adminOnly: true, href: BOTLENS_URL }]
+    : []),
+  { to: "/assets", label: "Assets Management", icon: Monitor, featureKey: "assets" },
+  { to: "/expenses", label: "Expense Management", icon: Receipt, featureKey: "expenses" },
   { to: "/users", label: "Users", icon: UserCog, adminOnly: true },
   { to: "/billing", label: "Plan & Billing", icon: CreditCard, adminOnly: true },
   { to: "/settings", label: "Settings", icon: Settings },
@@ -84,9 +101,12 @@ export function AppSidebar({
   const { session } = useAuth();
   const isSubadmin = session?.role === "subadmin";
   const permissions = session?.permissions || {};
+  const { isFeatureEnabled } = useFeatureToggles();
 
   // Filter nav: subadmin sees only permitted pages; admin-only items hidden from subadmin
   const visibleNav = NAV.filter((item) => {
+    // Hide features the super admin has disabled for this tenant
+    if (item.featureKey && !isFeatureEnabled(item.featureKey)) return false;
     if (item.adminOnly && isSubadmin) return false;
     if (!isSubadmin) return true;
     const key = item.to.replace("/", "");
@@ -436,17 +456,35 @@ function NavLink({
   onClose: () => void;
 }) {
   const Icon = item.icon;
+  const className = cn(
+    "relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-all duration-300 group",
+    active
+      ? "bg-primary/10 text-primary"
+      : "text-sidebar-foreground/60 hover:text-primary hover:bg-primary/3",
+  );
+
+  if (item.href) {
+    return (
+      <a
+        href={item.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={onClose}
+        draggable={false}
+        className={className}
+      >
+        <Icon className="h-[18px] w-[18px] shrink-0 transition-all duration-300 group-hover:text-primary group-hover:scale-110" />
+        <span className="truncate">{item.label}</span>
+      </a>
+    );
+  }
+
   return (
     <Link
       to={item.to}
       onClick={onClose}
       draggable={false}
-      className={cn(
-        "relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-all duration-300 group",
-        active
-          ? "bg-primary/10 text-primary"
-          : "text-sidebar-foreground/60 hover:text-primary hover:bg-primary/3",
-      )}
+      className={className}
     >
       {active && (
         <motion.div

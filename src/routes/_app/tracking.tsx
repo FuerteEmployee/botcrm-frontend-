@@ -1,6 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState, useEffect, useMemo, useRef } from "react";
-import { MapPin, Wifi, WifiOff, Search, Play, Square, Radio, Route as RouteIcon, Users, ChevronLeft, ChevronRight, RefreshCw, Satellite, Map as MapIcon, Navigation, Ruler } from "lucide-react";
+import { MapPin, Wifi, WifiOff, Search, List, Radio, Route as RouteIcon, Users, ChevronLeft, ChevronRight, RefreshCw, Satellite, Map as MapIcon, Navigation, Ruler, X, AlertTriangle } from "lucide-react";
+import { usePermission } from "@/hooks/use-permission";
+import { useFeatureToggles } from "@/hooks/use-feature-toggles";
+import { requestErrorMessage } from "@/services/request-error";
+import { AutoPunchOutPanel } from "@/components/tracking/auto-punch-out-panel";
 import { PageHeader } from "@/components/shared/page-header";
 import { ViewToggle } from "@/components/shared/view-toggle";
 import { FormInput } from "@/components/shared/form-input";
@@ -9,20 +13,22 @@ import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { StatCard } from "@/components/shared/stat-card";
-import { useTrackingService, useTrackingStats, useTrackingHistory, usePingEmployee } from "@/services/tracking-service";
+import { useTrackingService, useTrackingStats, useTrackingHistory, usePingEmployee, isLocationLive, locationAgeSeconds, formatAge } from "@/services/tracking-service";
 import { useEmployeeService } from "@/services/employee-service";
 import { useAttendanceService } from "@/services/attendance-service";
 import { cn, toISTDateKey } from "@/lib/utils";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
-import { useLayoutSettings } from "@/hooks/use-layout-settings";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 
 import { z } from "zod";
 import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+// No `import "leaflet/dist/leaflet.css"` here: a side-effect import in a route
+// file stays in the router's start-up bundle, which made every app start
+// (login and the employee app included) fetch the map library. The stylesheet
+// comes with geofence-map-preview, imported below by this page only.
 import { useBranchService, type Branch as BackendBranch } from "@/services/branch-service";
 import { exitBufferM } from "@/components/branches/geofence-map-preview";
 
@@ -33,7 +39,14 @@ const trackingSearchSchema = z.object({
   date: z.string().optional(),
   exitLat: z.coerce.number().optional(),
   exitLng: z.coerce.number().optional(),
+  // WHICH close was clicked, when a day holds several. Coordinates alone are
+  // not a reliable key: two exits can share a spot (someone leaving by the
+  // same gate twice), and the stored pair may round. The instant is unique.
+  exitAt: z.string().optional(),
 });
+
+/** Per-page view preference. Deliberately not the shared layout setting. */
+const TRACKING_VIEW_KEY = "bot_tracking_view";
 
 export const Route = createFileRoute("/_app/tracking")({
   validateSearch: (search) => trackingSearchSchema.parse(search),
@@ -41,16 +54,69 @@ export const Route = createFileRoute("/_app/tracking")({
 });
 
 const TILE_LAYERS = {
+  // Plain OpenStreetMap: genuinely free, no API key, no commercial tier.
+  //
+  // This used to be CARTO's Voyager basemap, which looks better but is free
+  // only for low-volume non-commercial use -- past that it is key-gated and
+  // billed. An admin panel a company runs all day is exactly the usage that
+  // crosses that line, and a basemap that starts demanding a key is a map
+  // that stops working for every admin at once, with no warning.
+  //
+  // The other two map components in this app (branches/geofence-map-preview
+  // and the employee self-service map) already use this same OSM layer, so
+  // this also makes all three consistent.
   street: {
-    url: "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+    url: "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
     attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
   },
   satellite: {
     url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
     attribution: "Tiles &copy; Esri",
   },
 };
+
+// Every time on this page is shown in IST, whatever timezone the admin's
+// computer is on. `toLocaleTimeString([])` used the browser's zone, so an
+// admin travelling (or a laptop left on UTC) saw punch and route times hours
+// off from the attendance screens.
+const IST_TZ = "Asia/Kolkata";
+function istTime(iso: string | number | Date, withSeconds = false): string {
+  return new Date(iso).toLocaleTimeString("en-IN", {
+    hour: "numeric",
+    minute: "2-digit",
+    ...(withSeconds ? { second: "2-digit" } : {}),
+    hour12: true,
+    timeZone: IST_TZ,
+  });
+}
+function istDateTime(iso: string | number | Date): string {
+  return new Date(iso).toLocaleString("en-IN", {
+    day: "numeric", month: "short", hour: "numeric", minute: "2-digit", hour12: true, timeZone: IST_TZ,
+  });
+}
+/** "Sat, 26 Sep" for an IST calendar key. Pure calendar maths: no timezone involved. */
+function dayLabel(key: string): string {
+  const d = new Date(`${key}T12:00:00Z`);
+  return d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+}
+/** Step an IST calendar key by whole days. */
+function shiftKey(key: string, delta: number): string {
+  const d = new Date(`${key}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + delta);
+  return d.toISOString().slice(0, 10);
+}
+
+/** A day closed by the geofence engine rather than by the employee. */
+interface AutoPunchOutPoint {
+  lat: number;
+  lng: number;
+  /** ISO instant of the close — the last confirmed inside fix, not `now`. */
+  at: string;
+  /** Metres from the nearest assigned branch at that moment. */
+  distanceM?: number | null;
+  branchName?: string;
+}
 
 // Imperative Leaflet map — avoids react-leaflet's callback-ref pattern that
 // triggers "Map container is already initialized" under React 19 StrictMode.
@@ -60,6 +126,8 @@ function TrackingMap({
   selectedId,
   onSelect,
   routePoints,
+  autoPunchOuts,
+  focusExit,
   tileMode,
   branches,
 }: {
@@ -68,12 +136,16 @@ function TrackingMap({
   selectedId: string;
   onSelect: (id: string) => void;
   routePoints?: { latitude: number; longitude: number; timestamp: string }[];
+  autoPunchOuts?: AutoPunchOutPoint[];
+  /** Position from a "why this happened" link — centre here and open its popup. */
+  focusExit?: { lat: number; lng: number; at?: string } | null;
   tileMode: "street" | "satellite";
   branches?: BackendBranch[];
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Map<string, L.Marker>>(new Map());
+  const autoPunchLayerRef = useRef<L.LayerGroup | null>(null);
   const tileLayerRef = useRef<L.TileLayer | null>(null);
   const routeLayerRef = useRef<L.LayerGroup | null>(null);
   const fenceLayerRef = useRef<L.LayerGroup | null>(null);
@@ -104,6 +176,8 @@ function TrackingMap({
 
     routeLayerRef.current = L.layerGroup().addTo(map);
     fenceLayerRef.current = L.layerGroup().addTo(map);
+    // Added last so it renders above the route and the fence rings.
+    autoPunchLayerRef.current = L.layerGroup().addTo(map);
 
     mapRef.current = map;
 
@@ -115,6 +189,7 @@ function TrackingMap({
       tileLayerRef.current = null;
       routeLayerRef.current = null;
       fenceLayerRef.current = null;
+      autoPunchLayerRef.current = null;
     };
   }, []);
 
@@ -146,7 +221,7 @@ function TrackingMap({
       iconAnchor: [7, 7],
     });
 
-    const fmt = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true });
+    const fmt = (iso: string) => istTime(iso);
 
     L.marker(latlngs[0], { icon: pin("#16a34a") })
       .bindTooltip(`Start · ${fmt(routePoints[0].timestamp)}`, { permanent: true, direction: "top", offset: [0, -8], className: "route-time-label" })
@@ -180,6 +255,150 @@ function TrackingMap({
 
     map.fitBounds(latlngs, { padding: [60, 60], maxZoom: 16 });
   }, [routePoints]);
+
+  /**
+   * Where the engine ended someone's day, and how far out they were.
+   *
+   * Drawn on its own layer above the route because it is the one point on the
+   * map an admin is ever asked to justify. "The app punched me out" is answered
+   * by a pin at a specific place, at a specific minute, a specific distance
+   * outside the fence — next to the dashed ring showing where that becomes
+   * possible at all. Without it the closure is just a missing afternoon.
+   *
+   * Red and permanently labelled for the same reason: it must be findable
+   * without knowing to look for it.
+   */
+  useEffect(() => {
+    const map = mapRef.current;
+    const layer = autoPunchLayerRef.current;
+    if (!map || !layer) return;
+    layer.clearLayers();
+    if (!autoPunchOuts || autoPunchOuts.length === 0) return;
+
+    // Kept so the focus step below can choose among them AFTER all are built,
+    // rather than deciding inside the loop where only one pin is visible.
+    const markers: { point: AutoPunchOutPoint; marker: L.Marker }[] = [];
+
+    for (const p of autoPunchOuts) {
+      const icon = L.divIcon({
+        className: "auto-punchout-marker",
+        html:
+          '<div style="position:relative;width:18px;height:18px;">' +
+          '<span style="position:absolute;inset:0;border-radius:50%;background:#dc2626;opacity:0.25;animation:apoPulse 2s ease-out infinite;"></span>' +
+          '<span style="position:absolute;inset:4px;border-radius:50%;background:#dc2626;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,0.4);"></span>' +
+          "</div>",
+        iconSize: [18, 18],
+        iconAnchor: [9, 9],
+      });
+
+      // 12-hour with seconds: an auto punch-out is disputed to the minute, and
+      // "2:50 PM" is not precise enough when the argument is about whether
+      // somebody had already left.
+      const at = istTime(p.at, true);
+      const dist = p.distanceM == null
+        ? null
+        : p.distanceM < 1000
+          ? `${Math.round(p.distanceM)} m out`
+          : `${(p.distanceM / 1000).toFixed(1)} km out`;
+
+      const marker = L.marker([p.lat, p.lng], { icon, zIndexOffset: 1000 })
+        .bindTooltip(
+          `Auto punch-out · ${at}${dist ? ` · ${dist}` : ""}`,
+          { permanent: true, direction: "top", offset: [0, -10], className: "auto-punchout-label" },
+        )
+        .bindPopup(
+          `<div style="font-size:12px;line-height:1.5">` +
+          `<b style="color:#dc2626">Automatic punch-out</b><br/>` +
+          `${at}<br/>` +
+          (dist ? `${dist} from ${p.branchName || "the branch"}<br/>` : "") +
+          `<span style="color:#64748b">Recorded at the last confirmed inside position, so the walk out is not counted against them.</span>` +
+          `</div>`,
+        )
+        .addTo(layer);
+
+      markers.push({ point: p, marker });
+    }
+
+    // Arrived from "why this happened": go to that exact closure and open it,
+    // rather than leaving the admin to work out which of a day's pins the link
+    // meant.
+    //
+    // Prefer the INSTANT. Coordinate proximity alone picked the wrong pin on a
+    // multi-exit day whenever two closes sat near each other, and picked
+    // nothing at all when the stored pair differed from the link's by more than
+    // ~11 m -- in which case the old code silently did nothing: no centring, no
+    // popup, so the admin landed on an unchanged map and reasonably concluded
+    // the location was missing.
+    //
+    // Falling back to the NEAREST pin means the link always lands somewhere
+    // defensible. Showing the wrong-but-adjacent pin is recoverable; showing
+    // nothing looks like lost data.
+    if (focusExit && markers.length > 0) {
+      let chosen = focusExit.at
+        ? markers.find((m) => m.point.at === focusExit.at)
+        : undefined;
+
+      if (!chosen) {
+        chosen = markers.find(
+          (m) =>
+            Math.abs(m.point.lat - focusExit.lat) < 1e-4 &&
+            Math.abs(m.point.lng - focusExit.lng) < 1e-4,
+        );
+      }
+
+      if (!chosen) {
+        chosen = markers.reduce((best, m) => {
+          const d = (x: { lat: number; lng: number }) =>
+            (x.lat - focusExit.lat) ** 2 + (x.lng - focusExit.lng) ** 2;
+          return d(m.point) < d(best.point) ? m : best;
+        }, markers[0]);
+      }
+
+      map.setView([chosen.point.lat, chosen.point.lng], 17, { animate: true });
+      chosen.marker.openPopup();
+    }
+  }, [autoPunchOuts, focusExit]);
+
+  // A "why this happened" link whose closure is NOT in autoPunchOuts at all --
+  // the attendance fetch failed, or the row was reverted since the link was
+  // made. Drop a pin on the coordinate the link carries so the page still
+  // answers the question it was opened to answer.
+  useEffect(() => {
+    const layer = autoPunchLayerRef.current;
+    if (!layer || !focusExit) return;
+    const known = (autoPunchOuts ?? []).length > 0;
+    if (known) return;
+
+    const map = mapRef.current;
+    if (!map) return;
+
+    const icon = L.divIcon({
+      className: "",
+      html:
+        '<div style="width:18px;height:18px;border-radius:50%;background:#dc2626;' +
+        'border:3px solid #fff;box-shadow:0 0 0 2px rgba(220,38,38,.35)"></div>',
+      iconSize: [18, 18],
+      iconAnchor: [9, 9],
+    });
+
+    const m = L.marker([focusExit.lat, focusExit.lng], { icon, zIndexOffset: 1000 })
+      .bindTooltip("Auto punch-out", {
+        permanent: true,
+        direction: "top",
+        offset: [0, -10],
+        className: "auto-punchout-label",
+      })
+      .bindPopup(
+        '<div style="font-size:12px;line-height:1.5">' +
+          '<b style="color:#dc2626">Automatic punch-out</b><br/>' +
+          '<span style="color:#64748b">Shown from the link. The attendance record for this day could not be loaded, so the measured distance is unavailable.</span>' +
+          "</div>",
+      )
+      .addTo(layer);
+
+    map.setView([focusExit.lat, focusExit.lng], 17, { animate: true });
+    m.openPopup();
+  }, [focusExit, autoPunchOuts]);
 
   // Branch geo-fences: the solid ring is the allowed punch radius, the dashed
   // one is radius + exit buffer, i.e. where an auto punch-out becomes possible.
@@ -253,16 +472,23 @@ function TrackingMap({
         .join("")
         .toUpperCase();
 
+      // A stale pin is where somebody WAS, sometimes weeks ago and in another
+      // city. Rendering it identically to a live one makes the map lie, so
+      // staleness is carried in the mark itself: grey, faded, smaller, and
+      // labelled with its age instead of just a name.
+      const live = isLocationLive(loc);
+      const age = locationAgeSeconds(loc);
+
       const icon = L.divIcon({
         className: "custom-leaflet-marker",
         html: `
-          <div style="position:relative;display:flex;flex-direction:column;align-items:center;cursor:pointer;">
-            ${isSel ? '<span style="position:absolute;top:-4px;width:44px;height:44px;border-radius:50%;background:rgba(140,32,89,0.25);animation:ping 1.5s cubic-bezier(0,0,0.2,1) infinite;"></span>' : ""}
-            <div style="position:relative;width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#8C2059 0%,#501537 100%);color:white;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 4px 10px rgba(0,0,0,0.25);transform:scale(${isSel ? "1.15" : "1"});transition:transform 0.2s ease-in-out;">
+          <div style="position:relative;display:flex;flex-direction:column;align-items:center;cursor:pointer;opacity:${live ? "1" : "0.55"};">
+            ${isSel && live ? '<span style="position:absolute;top:-4px;width:44px;height:44px;border-radius:50%;background:rgba(140,32,89,0.25);animation:ping 1.5s cubic-bezier(0,0,0.2,1) infinite;"></span>' : ""}
+            <div style="position:relative;width:${live ? 36 : 28}px;height:${live ? 36 : 28}px;border-radius:50%;background:${live ? "linear-gradient(135deg,#8C2059 0%,#501537 100%)" : "linear-gradient(135deg,#94a3b8 0%,#64748b 100%)"};color:white;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 4px 10px rgba(0,0,0,${live ? "0.25" : "0.15"});transform:scale(${isSel ? "1.15" : "1"});transition:transform 0.2s ease-in-out;">
               ${initials}
             </div>
-            <div style="margin-top:4px;background:rgba(15,23,42,0.85);color:white;font-size:9px;font-weight:600;padding:2px 6px;border-radius:4px;box-shadow:0 2px 4px rgba(0,0,0,0.15);border:1px solid rgba(255,255,255,0.1);white-space:nowrap;">
-              ${emp.name.split(" ")[0]}
+            <div style="margin-top:4px;background:${live ? "rgba(15,23,42,0.85)" : "rgba(100,116,139,0.8)"};color:white;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;box-shadow:0 2px 4px rgba(0,0,0,0.15);border:1px solid rgba(255,255,255,0.1);white-space:nowrap;">
+              ${emp.name.split(" ")[0]}${live ? "" : ` · ${formatAge(age)}`}
             </div>
           </div>`,
         iconSize: [40, 50],
@@ -305,39 +531,104 @@ function TrackingMap({
     const target = locations.find((l) => l.employeeId === selectedId);
     if (target) {
       map.setView([target.latitude, target.longitude], 16, { animate: true });
+      return;
+    }
+
+    // No LIVE position for them — which is the normal case for any past date,
+    // because `locations` is today's roster. Before retreating to the neutral
+    // view, show what this day actually has: the route walked, and where the
+    // engine closed the day.
+    //
+    // Jumping straight to all-of-India at zoom 5 is what made a working deep
+    // link look broken: the markers were drawn correctly and were simply
+    // thousands of kilometres off-screen.
+    const dayPoints: L.LatLngTuple[] = [
+      ...(routePoints ?? []).map((p) => [p.latitude, p.longitude] as L.LatLngTuple),
+      ...(autoPunchOuts ?? []).map((p) => [p.lat, p.lng] as L.LatLngTuple),
+    ];
+
+    if (dayPoints.length === 1) {
+      map.setView(dayPoints[0], 16, { animate: true });
+    } else if (dayPoints.length > 1) {
+      map.fitBounds(dayPoints as L.LatLngBoundsExpression, { padding: [60, 60], maxZoom: 16 });
     } else {
       map.setView([20.5937, 78.9629], 5, { animate: true });
     }
-  }, [selectedId, locations]);
+  }, [selectedId, locations, routePoints, autoPunchOuts]);
 
   return <div ref={containerRef} style={{ height: "100%", width: "100%" }} />;
 }
 
 function TrackingPage() {
   const { employees, isLoading: loadingEmployees, updateEmployee } = useEmployeeService({ limit: 1000, status: "active" });
-  const { locations: restLocations, isLoading: loadingLocations } = useTrackingService();
+  const { locations: restLocations, isLoading: loadingLocations, error: locationsError, refresh: refreshLocations } = useTrackingService();
+  const { can } = usePermission();
+  const { isFeatureEnabled } = useFeatureToggles();
+  // The switch saves through the Employees edit route, and Ping needs the
+  // Tracking edit permission; a sub-admin without them sees why, not a 403.
+  const canToggleTracking = can("employees", "edit");
+  const canPing = can("tracking", "edit");
 
   // Admin toggles per-employee live tracking. updateEmployee persists the flag
   // and refetches the list, so the switch reflects the saved state. Employees
   // are only tracked while punched in AND when this is enabled.
+  /**
+   * Is this employee ACTUALLY tracked?
+   *
+   * The server's rule is `user.trackingEnabled === true || department.trackingEnabled === true`
+   * -- the same rule /tracking/ping-check answers with and the location
+   * endpoints now enforce. This switch read and wrote only the user flag, so an
+   * employee in a tracked department showed OFF while their phone kept
+   * reporting, and an admin who switched them off saw nothing change.
+   */
+  const deptTracks = (e: any) => e?.departmentId?.trackingEnabled === true;
+  const isTracked = (e: any) => e?.trackingEnabled === true || deptTracks(e);
+
   const toggleTracking = (e: any) => {
+    if (!canToggleTracking) {
+      toast.info("You need permission to edit employees to switch tracking on or off.");
+      return;
+    }
+    // Turning the personal flag off cannot win against a department that
+    // enables tracking for everyone in it. Saying so is the whole point --
+    // silently accepting the click is what made the switch untrustworthy.
+    if (isTracked(e) && deptTracks(e)) {
+      toast.info(
+        `${e.name} is tracked because their department has tracking on. ` +
+        `Turn it off for the whole department, or move them out of it.`,
+      );
+      return;
+    }
     updateEmployee({ id: e._id, data: { trackingEnabled: !e.trackingEnabled } }).catch(() => {});
   };
 
-  // Fetch today's attendance in two formats — some backends need date, some need none.
-  // IST-keyed (not a raw UTC slice) — attendance `date` fields are anchored to IST
-  // midnight server-side regardless of what timezone either server happens to run in.
+  // Who is on duty now: yesterday and today, IST-keyed (attendance `date` is an
+  // IST-midnight instant server-side). Yesterday is included for night shifts,
+  // whose open day started before midnight.
+  //
+  // This used to ALSO fetch /attendance/reports with no dates, which returns
+  // every attendance row the company has ever had, on every visit. Its records
+  // were merged in as a "fallback", so anyone without a row today was shown by
+  // an arbitrary old day: a day left open weeks ago read as "Online" now, and
+  // its punch-in position was plotted as where they are.
   const today = toISTDateKey(new Date());
-  const { records: attendanceWithDate } = useAttendanceService(today, today);
-  const { records: attendanceAll, lunchIn, lunchOut } = useAttendanceService();
+  const yesterday = shiftKey(today, -1);
+  const { records: recentAttendance } = useAttendanceService(yesterday, today);
 
-  // Merge both: dated records take priority (fresher), fill gaps with undated
+  // One row per employee: their latest day. Yesterday's counts only while it
+  // is still open (a night shift); a closed yesterday says nothing about now.
   const attendanceList = useMemo(() => {
     const map: Record<string, any> = {};
-    attendanceAll.forEach((a) => { if (a.employeeId?._id) map[a.employeeId._id] = a; });
-    attendanceWithDate.forEach((a) => { if (a.employeeId?._id) map[a.employeeId._id] = a; });
+    const dayOf = (a: any) => toISTDateKey(a.date);
+    for (const a of recentAttendance as any[]) {
+      const id = a.employeeId?._id;
+      if (!id) continue;
+      if (dayOf(a) !== today && (!a.punchIn || a.punchOut)) continue;
+      const prev = map[id];
+      if (!prev || dayOf(a) > dayOf(prev)) map[id] = a;
+    }
     return Object.values(map);
-  }, [attendanceWithDate, attendanceAll]);
+  }, [recentAttendance, today]);
 
   const [search, setSearch] = useState("");
   // `search` is already the text filter below, hence the longer name.
@@ -345,36 +636,136 @@ function TrackingPage() {
   // Arriving from an auto punch-out: focus that employee straight away rather
   // than dropping the admin on an unfiltered map of everyone.
   const [selectedId, setSelectedId] = useState(routeSearch.employeeId || "");
-  const { defaultLayout } = useLayoutSettings();
-  const [view, setView] = useState<"grid" | "list">(defaultLayout);
+  /**
+   * This page keeps its OWN view preference, defaulting to the map.
+   *
+   * It used to follow the shared `defaultLayout` setting, but that setting means
+   * "cards or a list" everywhere else and "a map or a table" here — one stored
+   * value standing for two unrelated decisions. An admin who preferred list
+   * layouts on the employees page therefore landed on a table of coordinates
+   * when they opened live tracking, which is the one page where the map IS the
+   * feature.
+   *
+   * An explicit toggle is still remembered, so anyone who genuinely wants the
+   * table gets it back on their next visit.
+   */
+  const [view, setView] = useState<"grid" | "list">(() => {
+    try {
+      const saved = localStorage.getItem(TRACKING_VIEW_KEY);
+      if (saved === "grid" || saved === "list") return saved;
+    } catch {
+      /* private mode — fall through to the map */
+    }
+    return "grid";
+  });
 
-  useEffect(() => {
-    setView(defaultLayout);
-  }, [defaultLayout]);
+  const chooseView = (next: "grid" | "list") => {
+    setView(next);
+    try {
+      localStorage.setItem(TRACKING_VIEW_KEY, next);
+    } catch {
+      /* the choice just will not survive a reload */
+    }
+  };
 
-  const { stats } = useTrackingStats();
+  const { stats, refetch: refetchStats } = useTrackingStats();
   const [tileMode, setTileMode] = useState<"street" | "satellite">("street");
-  const [selectedDate, setSelectedDate] = useState(today);
+  // Honour the ?date= the deep link carried. "Show on map — why this happened"
+  // is always about a PAST event, and defaulting to today meant the map opened
+  // on a day with no auto punch-out on it and drew nothing at all — which read
+  // as the feature being broken rather than as the wrong day being shown.
+  const [selectedDate, setSelectedDate] = useState(routeSearch.date || today);
+
+  // Attendance for the date the MAP is showing, which is not necessarily today.
+  // The lists above deliberately stay on today (they drive the live roster);
+  // this one exists so that opening a past date plots that day's auto
+  // punch-outs rather than this morning's.
+  const { records: dayAttendance } = useAttendanceService(selectedDate, selectedDate);
   const isToday = selectedDate === today;
-  const { points: routePoints, distanceKm, refetch: refetchHistory } = useTrackingHistory(selectedId || undefined, selectedDate);
+  const { points: routePoints, distanceKm, rawCount, refetch: refetchHistory } = useTrackingHistory(selectedId || undefined, selectedDate);
   const { branches } = useBranchService();
   const { mutateAsync: pingEmployee, isPending: isPinging } = usePingEmployee();
 
+  // Calendar steps on the IST key itself. Building a local-midnight Date and
+  // converting back moved the day for any browser east of IST.
   const shiftDate = (deltaDays: number) => {
-    const d = new Date(selectedDate + "T00:00:00");
-    d.setDate(d.getDate() + deltaDays);
-    setSelectedDate(toISTDateKey(d));
+    const next = shiftKey(selectedDate, deltaDays);
+    setSelectedDate(next > today ? today : next);
+  };
+  const pickDate = (value: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return;
+    setSelectedDate(value > today ? today : value);
   };
 
-  const handlePing = async (employeeId: string) => {
+  const refreshAll = () => {
+    refreshLocations();
+    refetchStats();
+    if (selectedId) refetchHistory();
+  };
+
+  // A ping only stamps a request on the server; the phone picks it up on its
+  // next check (about every 30 seconds) -- and only while it is tracking,
+  // which the app does between punch-in and punch-out. Say which case this is.
+  const handlePing = async (employeeId: string, name: string) => {
     try {
-      await pingEmployee(employeeId);
-      toast.success("Ping sent — waiting for a fresh location.");
-      setTimeout(() => refetchHistory(), 4000);
-    } catch {
-      toast.error("Could not reach that device.");
+      const res = await pingEmployee(employeeId);
+      if (res?.punchedIn === false) {
+        toast.info(`Ping sent, but ${name} is not punched in, so their phone is not sending locations right now.`);
+      } else {
+        toast.success(`Ping sent. ${name}'s phone should send a fresh location within about 30 seconds.`);
+      }
+      setTimeout(() => { refetchHistory(); refreshLocations(); }, 30000);
+    } catch (err) {
+      const msg = requestErrorMessage(err, "Could not send the ping. Try again.");
+      if (msg) toast.error(msg);
     }
   };
+
+  /**
+   * Auto punch-outs to plot, for the selected employee on the selected date.
+   *
+   * Read from the attendance document rather than the audit collection because
+   * the document is what payroll actually used: if the two ever disagree, the
+   * map must show the closure that cost somebody their afternoon, not the one
+   * the engine merely considered.
+   *
+   * Sessions AND the root punch are both checked — a single-session day keeps
+   * its close on the root, and looking only at shifts[] would silently plot
+   * nothing for exactly the simplest case.
+   */
+  const autoPunchOuts = useMemo<AutoPunchOutPoint[]>(() => {
+    if (!selectedId) return [];
+    // `as any`: AttendanceRecord in the service layer describes the columns the
+    // attendance TABLE renders, not the whole document. The per-session close
+    // detail is present on the wire but absent from that type, and widening it
+    // here would mean editing a type shared by several pages for one map.
+    const att = dayAttendance.find((a: any) => a.employeeId?._id === selectedId) as any;
+    if (!att) return [];
+
+    const branchName = branches?.find((b) => String(b._id) === String(att.branchId?._id ?? att.branchId))?.branchName;
+
+    const out: AutoPunchOutPoint[] = [];
+    const push = (coords: any, at: any, distance: any) => {
+      const lat = Number(coords?.lat);
+      const lng = Number(coords?.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || !at) return;
+      out.push({ lat, lng, at: new Date(at).toISOString(), distanceM: Number.isFinite(Number(distance)) ? Number(distance) : null, branchName });
+    };
+
+    const sessions = Array.isArray(att.shifts) ? att.shifts.filter(Boolean) : [];
+    if (sessions.length > 0) {
+      for (const sh of sessions) {
+        if (sh?.closeReason === "auto_geofence") push(sh.punchOutCoordinates, sh.punchOut, sh.punchOutDistance);
+      }
+    }
+    // Sessions present but none tagged auto_geofence, while the DAY says an
+    // auto punch-out happened: an older row written before closeReason was
+    // stamped per session. Plot the day-level close rather than nothing.
+    if (out.length === 0 && att.autoPunchOut === true) {
+      push(att.punchOutCoordinates, att.punchOut, att.calculatedDistance ?? att.punchOutDistance);
+    }
+    return out;
+  }, [selectedId, dayAttendance, branches]);
 
   const attendanceMap = useMemo(() => {
     const map: Record<string, any> = {};
@@ -504,30 +895,39 @@ function TrackingPage() {
         title="Employee Tracking"
         description="Real-time location monitoring of your field staff."
         actions={
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1 rounded-xl border border-border/60 bg-white px-1 h-10">
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => shiftDate(-1)}>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-0.5 rounded-xl border border-border/60 bg-card px-0.5 h-11">
+              <Button variant="ghost" size="icon" className="h-10 w-10" aria-label="Previous day" onClick={() => shiftDate(-1)}>
                 <ChevronLeft className="h-4 w-4" />
               </Button>
-              <button
-                type="button"
-                onClick={() => setSelectedDate(today)}
-                className={cn(
-                  "text-[12px] font-semibold px-2 rounded-lg",
-                  isToday ? "text-primary" : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {isToday ? "Today" : selectedDate}
-              </button>
-              <Button variant="ghost" size="icon" className="h-8 w-8" disabled={isToday} onClick={() => shiftDate(1)}>
+              {/* The label is the visible part; the native date picker sits on
+                  top of it, so tapping the date opens a calendar. */}
+              <label className="relative h-10 min-w-[104px] px-2 flex items-center justify-center rounded-lg cursor-pointer hover:bg-muted/40">
+                <span className={cn("text-[13px] font-semibold", isToday ? "text-primary" : "text-foreground")}>
+                  {isToday ? "Today" : dayLabel(selectedDate)}
+                </span>
+                <input
+                  type="date"
+                  aria-label="Choose a day"
+                  value={selectedDate}
+                  max={today}
+                  onChange={(e) => pickDate(e.target.value)}
+                  className="absolute inset-0 opacity-0 cursor-pointer"
+                />
+              </label>
+              <Button variant="ghost" size="icon" className="h-10 w-10" aria-label="Next day" disabled={isToday} onClick={() => shiftDate(1)}>
                 <ChevronRight className="h-4 w-4" />
               </Button>
             </div>
+            {!isToday && (
+              <Button variant="ghost" className="h-11 rounded-xl font-semibold" onClick={() => setSelectedDate(today)}>
+                Today
+              </Button>
+            )}
             <Button
               variant="outline"
-              size="sm"
-              className="h-10 rounded-xl gap-2 font-semibold border-border/60"
-              onClick={() => refetchHistory()}
+              className="h-11 rounded-xl gap-2 font-semibold border-border/60"
+              onClick={refreshAll}
             >
               <RefreshCw className="h-4 w-4 text-muted-foreground" />
               Refresh
@@ -538,14 +938,54 @@ function TrackingPage() {
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <StatCard label="Live Now" value={stats?.liveNow ?? 0} icon={Radio} accent="success" />
-        <StatCard label="Offline" value={stats?.offline ?? 0} icon={WifiOff} accent="warning" />
-        <StatCard label="Tracking Points" value={stats?.trackingPoints ?? 0} icon={RouteIcon} accent="primary" />
-        <StatCard label="Field Staff" value={stats?.fieldStaff ?? 0} icon={Users} accent="info" />
+        <StatCard label="Not Reporting" value={stats?.offline ?? 0} icon={WifiOff} accent="warning" />
+        <StatCard label="Locations Today" value={stats?.trackingPoints ?? 0} icon={RouteIcon} accent="primary" />
+        <StatCard label="Tracked Staff" value={stats?.fieldStaff ?? 0} icon={Users} accent="info" />
       </div>
+      {/* The four cards are live, for right now and today, whatever day the map
+          below shows; say so when another day is picked. */}
+      {!isToday && (
+        <p className="-mt-2 text-[12px] text-muted-foreground">The numbers above are for right now. The map and list below show {dayLabel(selectedDate)}.</p>
+      )}
+
+      {/* "Live now" and "not reporting" say who is sending. This says who
+          SHOULD be and is not: punched in, tracking on, silent. It is the one
+          number here an admin can act on (a dead battery, location switched
+          off), so it gets a sentence rather than a tile. */}
+      {(stats?.expectedButSilent ?? 0) > 0 && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+          <p className="text-[13px] text-amber-900">
+            <strong>{stats?.expectedButSilent} punched-in employee{stats?.expectedButSilent === 1 ? " has" : "s have"} tracking on but sent no location in the last 2 minutes.</strong>{" "}
+            Their phone may be off, out of battery, or have location switched off.
+          </p>
+        </div>
+      )}
+      {!!locationsError && (
+        <div className="flex items-start gap-2.5 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3">
+          <AlertTriangle className="h-4 w-4 text-destructive shrink-0 mt-0.5" />
+          <p className="text-[13px] text-destructive">
+            {(locationsError as { response?: { status?: number } })?.response?.status === 403
+              ? "You do not have permission to see live locations. Ask your admin to give you Tracking access."
+              : requestErrorMessage(locationsError, "Could not load live locations. Try Refresh.") || "Could not load live locations."}
+          </p>
+        </div>
+      )}
 
       <div className="flex flex-col md:flex-row items-center justify-between gap-3 py-1">
         <div className="flex items-center gap-3 w-full md:w-auto">
-          <ViewToggle view={view} onViewChange={setView} />
+          {/* The stored values stay "grid"/"list" to match the shared ViewToggle
+              component, but this page renders a MAP or a TABLE. Labelling the
+              buttons for what they actually do stops the icons promising a
+              layout the page never had. */}
+          <ViewToggle
+            view={view}
+            onViewChange={chooseView}
+            options={[
+              { value: "grid", label: "Map view", icon: MapPin },
+              { value: "list", label: "Table view", icon: List },
+            ]}
+          />
         </div>
 
         <FormInput
@@ -567,8 +1007,13 @@ function TrackingPage() {
             className="grid grid-cols-1 lg:grid-cols-3 gap-4"
           >
             {/* Employee List Sidebar */}
-            <Card className="p-4 border border-border/60 bg-white rounded-xl shadow-sm lg:col-span-1 flex flex-col h-[560px] transition-all hover:border-primary/40">
+            <Card className="p-4 border border-border/60 bg-card rounded-xl shadow-sm lg:col-span-1 flex flex-col h-[560px] transition-all hover:border-primary/40">
               <div className="flex-1 overflow-y-auto scrollbar-thin space-y-1.5 pr-1">
+                {filtered.length === 0 && (
+                  <p className="px-2 py-10 text-center text-[13px] text-muted-foreground">
+                    {search.trim() ? `No employee matches "${search.trim()}".` : "No active employees yet."}
+                  </p>
+                )}
                 {filtered.map((e) => {
                   const att = attendanceMap[e._id];
                   const loc = locationMap[e._id];
@@ -612,16 +1057,32 @@ function TrackingPage() {
                       </div>
                       <Badge
                         variant={isOnline ? "default" : "secondary"}
-                        className="capitalize text-[10px] px-1.5 py-0 shrink-0"
+                        className="capitalize text-[11px] px-1.5 py-0 shrink-0"
                       >
                         {isOnline ? (isOnLunch ? "On Lunch" : "Online") : "Away"}
                       </Badge>
                       <span
                         onClick={(ev) => ev.stopPropagation()}
-                        className="shrink-0 flex items-center"
-                        title={e.trackingEnabled ? "Live tracking ON" : "Live tracking OFF"}
+                        className="shrink-0 flex items-center gap-1"
+                        title={
+                          deptTracks(e)
+                            ? "Live tracking ON \u2014 enabled for this employee's whole department, so it cannot be switched off here"
+                            : !canToggleTracking
+                              ? "You need permission to edit employees to change this"
+                              : e.trackingEnabled
+                              ? "Live tracking ON"
+                              : "Live tracking OFF"
+                        }
                       >
-                        <Switch checked={!!e.trackingEnabled} onCheckedChange={() => toggleTracking(e)} />
+                        {deptTracks(e) && (
+                          <Badge
+                            variant="outline"
+                            className="text-[11px] font-bold px-1 py-0 border-primary/30 bg-primary/5 text-primary"
+                          >
+                            Dept
+                          </Badge>
+                        )}
+                        <Switch checked={isTracked(e)} disabled={!canToggleTracking} aria-label={`Live tracking for ${e.name}`} onCheckedChange={() => toggleTracking(e)} />
                       </span>
                     </motion.div>
                   );
@@ -630,48 +1091,69 @@ function TrackingPage() {
             </Card>
 
             {/* Map Area */}
-            <Card className="p-0 border border-border/60 bg-white rounded-xl shadow-sm lg:col-span-2 overflow-hidden h-[560px] relative">
+            <Card className="p-0 border border-border/60 bg-card rounded-xl shadow-sm lg:col-span-2 overflow-hidden h-[560px] relative">
               <TrackingMap
                 locations={activeLocations}
                 employees={employees}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 routePoints={selectedId ? routePoints : undefined}
+                autoPunchOuts={autoPunchOuts}
+                focusExit={
+                  routeSearch.exitLat != null && routeSearch.exitLng != null
+                    ? { lat: routeSearch.exitLat, lng: routeSearch.exitLng, at: routeSearch.exitAt }
+                    : null
+                }
                 tileMode={tileMode}
                 branches={branches}
               />
 
               {/* Street / Satellite toggle */}
-              <div className="absolute top-3 left-3 z-[1000] flex items-center gap-1 rounded-xl bg-white/95 shadow-md border border-border/50 p-1">
+              <div className="absolute top-3 left-3 z-[1000] flex items-center gap-1 rounded-xl bg-card/95 shadow-md border border-border/50 p-1">
                 <button
                   type="button"
                   onClick={() => setTileMode("street")}
                   className={cn(
-                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide transition-colors",
+                    "flex items-center gap-1.5 px-3 h-10 rounded-lg text-[12px] font-bold transition-colors",
                     tileMode === "street" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/50"
                   )}
                 >
-                  <MapIcon className="h-3 w-3" /> Street
+                  <MapIcon className="h-3.5 w-3.5" /> Street
                 </button>
                 <button
                   type="button"
                   onClick={() => setTileMode("satellite")}
                   className={cn(
-                    "flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wide transition-colors",
+                    "flex items-center gap-1.5 px-3 h-10 rounded-lg text-[12px] font-bold transition-colors",
                     tileMode === "satellite" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/50"
                   )}
                 >
-                  <Satellite className="h-3 w-3" /> Satellite
+                  <Satellite className="h-3.5 w-3.5" /> Satellite
                 </button>
               </div>
+
+              {/* Nobody has reported at all: say what makes locations appear,
+                  rather than showing an empty map of India. */}
+              {!selectedId && activeLocations.length === 0 && !locationsError && (
+                <div className="absolute inset-0 z-[999] flex items-center justify-center pointer-events-none px-4">
+                  <div className="glass rounded-xl px-4 py-3 shadow-lg border border-white/20 text-center max-w-sm">
+                    <p className="text-[13px] font-semibold text-foreground/80">No locations yet</p>
+                    <p className="text-[12px] text-muted-foreground mt-1">
+                      Turn on live tracking for your field staff. Their phone sends its location while they are punched in.
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Clear empty state instead of leaving a stale/unrelated marker on screen */}
               {selectedHasNoLocation && selected && (
                 <div className="absolute inset-0 z-[999] flex items-center justify-center pointer-events-none">
                   <div className="glass rounded-xl px-4 py-3 shadow-lg border border-white/20 text-center max-w-xs">
-                    <p className="text-[12px] font-semibold text-foreground/80">No location reported yet for {selected.name}</p>
-                    <p className="text-[11px] text-muted-foreground mt-1">
-                      Tracking starts once they punch in with location permission granted.
+                    <p className="text-[13px] font-semibold text-foreground/80">No location reported yet for {selected.name}</p>
+                    <p className="text-[12px] text-muted-foreground mt-1">
+                      {isTracked(selected)
+                        ? "Tracking starts once they punch in with location permission granted."
+                        : "Live tracking is off for them. Switch it on in the list to start."}
                     </p>
                   </div>
                 </div>
@@ -700,67 +1182,81 @@ function TrackingPage() {
                         }
                         {attendanceMap[selected._id] && attendanceMap[selected._id].punchIn && !attendanceMap[selected._id].punchOut
                           ? (attendanceMap[selected._id].lunchInTime && !attendanceMap[selected._id].lunchOutTime ? "On Lunch Break" : "Online now")
-                          : "Last seen N/A"}
+                          // "N/A" was shown while the exact time sat in
+                          // locationMap — the admin's next question after "why
+                          // is this person Away" is "since when", and the panel
+                          // was withholding an answer it already had.
+                          : locationMap[selected._id]
+                            ? `Last seen ${formatAge(locationAgeSeconds(locationMap[selected._id]))} ago`
+                            : "Last seen N/A"}
                       </div>
                     </div>
+                    {canPing && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-10 px-3 gap-1.5 text-[12px] font-bold shrink-0"
+                        disabled={isPinging || !isTracked(selected)}
+                        title={isTracked(selected) ? "Ask their phone for a fresh location now" : "Live tracking is off for this employee"}
+                        onClick={() => handlePing(selected._id, selected.name)}
+                      >
+                        <Navigation className="h-3.5 w-3.5" /> Ping
+                      </Button>
+                    )}
                     <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 px-2 gap-1 text-[10px] font-bold shrink-0"
-                      disabled={isPinging}
-                      onClick={() => handlePing(selected._id)}
+                      size="icon"
+                      variant="ghost"
+                      className="h-10 w-10 shrink-0"
+                      aria-label="Show everyone"
+                      title="Show everyone"
+                      onClick={() => setSelectedId("")}
                     >
-                      <Navigation className="h-3 w-3" /> Ping
+                      <X className="h-4 w-4" />
                     </Button>
                   </div>
 
                   <div className="mt-2.5 space-y-1">
                     <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                       <MapPin className="h-3 w-3 shrink-0" />
+                      {/* "Live" is a claim about NOW, so it has to be earned.
+                          This said "Live · 11:38 AM" over a fix six hours old,
+                          next to a badge reading Away and a map pin reading
+                          6h — three labels, one truth, two of them wrong. The
+                          freshness test already existed in the service and was
+                          simply not used here. */}
                       {locationMap[selected._id]
                         ? locationMap[selected._id].isFallback
-                          ? `Punch-in location · ${new Date(locationMap[selected._id].timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}`
-                          : `Live · ${new Date(locationMap[selected._id].timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: true })}`
+                          ? `Punch-in location · ${istTime(locationMap[selected._id].timestamp)}`
+                          : isLocationLive(locationMap[selected._id])
+                            ? `Live · ${istTime(locationMap[selected._id].timestamp)}`
+                            : `Last fix · ${istTime(locationMap[selected._id].timestamp)} · ${formatAge(locationAgeSeconds(locationMap[selected._id]))} ago`
                         : "No coordinates available"}
                     </div>
                     {locationMap[selected._id] && (
-                      <div className="text-[10px] font-mono text-muted-foreground/70">
+                      <div className="text-[11px] font-mono text-muted-foreground">
                         {locationMap[selected._id].latitude.toFixed(4)}°N · {locationMap[selected._id].longitude.toFixed(4)}°E
                       </div>
                     )}
                     {routePoints.length > 0 && (
                       <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground pt-0.5">
                         <Ruler className="h-3 w-3 shrink-0" />
-                        {distanceKm} km travelled {isToday ? "today" : `on ${selectedDate}`} · {routePoints.length} point{routePoints.length === 1 ? "" : "s"}
+                        {/* Fixes RECEIVED, not points drawn. The route is smoothed
+                            server-side, so a desk phone draws 11 points from 568
+                            fixes -- reporting the drawn count would read as most
+                            of the day's data having gone missing. */}
+                        {distanceKm} km travelled {isToday ? "today" : `on ${selectedDate}`} &middot; {rawCount} fix{rawCount === 1 ? "" : "es"}
                       </div>
                     )}
                   </div>
 
-                  <div className="mt-4 flex gap-2">
-                    {attendanceMap[selected._id] && attendanceMap[selected._id].punchIn && !attendanceMap[selected._id].punchOut && (
-                      <>
-                        {!(attendanceMap[selected._id].lunchInTime && !attendanceMap[selected._id].lunchOutTime) ? (
-                          <Button
-                            size="sm"
-                            className="flex-1 h-8 text-[11px] font-bold bg-amber-500 hover:bg-amber-600 border-none shadow-sm"
-                            onClick={() => lunchIn({ employeeId: selected._id })}
-                          >
-                            <Play className="h-3 w-3 mr-1.5 fill-current" />
-                            START LUNCH
-                          </Button>
-                        ) : (
-                          <Button
-                            size="sm"
-                            className="flex-1 h-8 text-[11px] font-bold bg-slate-800 hover:bg-slate-900 border-none shadow-sm"
-                            onClick={() => lunchOut({ employeeId: selected._id })}
-                          >
-                            <Square className="h-3 w-3 mr-1.5 fill-current" />
-                            END LUNCH
-                          </Button>
-                        )}
-                      </>
-                    )}
-                  </div>
+                  {/* START/END LUNCH used to sit here. Removed deliberately: it
+                      writes lunchInTime/lunchOutTime, which feed the half-day
+                      rules and then payroll, and a page about where someone IS
+                      is the wrong place to silently change what they are PAID.
+                      Break control belongs on Attendance, next to the other
+                      punch edits, where it is auditable as an attendance
+                      change. Ping stays -- asking a device for a fresh fix is
+                      a tracking action and alters no record. */}
                 </motion.div>
               )}
             </Card>
@@ -786,7 +1282,7 @@ function TrackingPage() {
                     <DataTableCell isFirst>
                       <div className="flex items-center gap-3">
                         <Avatar className="h-8 w-8">
-                          <AvatarFallback className="bg-primary/10 text-primary text-[10px] font-bold">
+                          <AvatarFallback className="bg-primary/10 text-primary text-[11px] font-bold">
                             {e.name.split(" ").map((n: string) => n[0]).join("")}
                           </AvatarFallback>
                         </Avatar>
@@ -797,14 +1293,23 @@ function TrackingPage() {
                       </div>
                     </DataTableCell>
                     <DataTableCell>
-                      <span title={e.trackingEnabled ? "Live tracking ON" : "Live tracking OFF"}>
-                        <Switch checked={!!e.trackingEnabled} onCheckedChange={() => toggleTracking(e)} />
+                      {/* Same rule as the map list: own switch OR department. It
+                          showed the personal flag only, so a department-tracked
+                          employee read OFF here and ON in the map view. */}
+                      <span
+                        className="inline-flex items-center gap-1"
+                        title={deptTracks(e) ? "Live tracking ON \u2014 enabled for the whole department" : isTracked(e) ? "Live tracking ON" : "Live tracking OFF"}
+                      >
+                        {deptTracks(e) && (
+                          <Badge variant="outline" className="text-[11px] font-bold px-1 py-0 border-primary/30 bg-primary/5 text-primary">Dept</Badge>
+                        )}
+                        <Switch checked={isTracked(e)} disabled={!canToggleTracking} aria-label={`Live tracking for ${e.name}`} onCheckedChange={() => toggleTracking(e)} />
                       </span>
                     </DataTableCell>
                     <DataTableCell>
                       <Badge
                         variant={isOnline ? "default" : "secondary"}
-                        className="capitalize text-[10px] px-2 py-0.5"
+                        className="capitalize text-[11px] px-2 py-0.5"
                       >
                         {isOnline ? (isOnLunch ? "On Lunch" : "Online") : "Away"}
                       </Badge>
@@ -829,7 +1334,7 @@ function TrackingPage() {
                     </DataTableCell>
                     <DataTableCell isLast className="text-[12px] text-muted-foreground">
                       {loc
-                        ? `${new Date(loc.timestamp).toLocaleString()}${loc.isFallback ? " (punch-in)" : ""}`
+                        ? `${istDateTime(loc.timestamp)}${loc.isFallback ? " (punch-in)" : ""}`
                         : "—"}
                     </DataTableCell>
                   </DataTableRow>
@@ -839,6 +1344,15 @@ function TrackingPage() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Auto punch-out is a paid add-on switched on per company by the super
+          admin; without it the panel has nothing to show or switch. */}
+      {isFeatureEnabled("geofenceAutoPunchOut") && <AutoPunchOutPanel
+        employeeId={selectedId || undefined}
+        employeeName={selected?.name}
+        date={selectedDate}
+        dateLabel={isToday ? "today" : `on ${dayLabel(selectedDate)}`}
+      />}
     </div>
   );
 }

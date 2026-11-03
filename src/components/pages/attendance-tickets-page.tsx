@@ -8,27 +8,27 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { motion } from 'framer-motion'
 import { Search, CheckCircle, XCircle, Clock, MessageSquare } from 'lucide-react'
-import { mockTickets, Ticket } from '@/lib/mock-data'
+import { tickets as initialTickets, AttendanceTicket } from '@/lib/mock-data'
 import { toast } from 'sonner'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 export function AttendanceTicketsPage() {
   const [searchQuery, setSearchQuery] = useState('')
-  const [tickets, setTickets] = useState(mockTickets)
-  const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null)
+  const [tickets, setTickets] = useState<AttendanceTicket[]>(initialTickets)
+  const [selectedTicket, setSelectedTicket] = useState<AttendanceTicket | null>(null)
   const [remarks, setRemarks] = useState('')
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [actionType, setActionType] = useState<'approve' | 'reject' | null>(null)
 
   const filteredTickets = tickets.filter(ticket =>
     ticket.employeeName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    ticket.details.toLowerCase().includes(searchQuery.toLowerCase())
+    ticket.reason.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
   const pendingTickets = filteredTickets.filter(t => t.status === 'pending')
   const processedTickets = filteredTickets.filter(t => t.status !== 'pending')
 
-  const handleAction = (ticket: Ticket, action: 'approve' | 'reject') => {
+  const handleAction = (ticket: AttendanceTicket, action: 'approve' | 'reject') => {
     setSelectedTicket(ticket)
     setActionType(action)
     setRemarks('')
@@ -38,12 +38,12 @@ export function AttendanceTicketsPage() {
   const submitAction = () => {
     if (!selectedTicket || !actionType) return
 
-    setTickets(prev => prev.map(t =>
+    setTickets(prev => prev.map((t): AttendanceTicket =>
       t.id === selectedTicket.id
         ? {
           ...t,
           status: actionType === 'approve' ? 'approved' : 'rejected',
-          adminRemarks: remarks || undefined
+          remarks: remarks || undefined
         }
         : t
     ))
@@ -53,14 +53,12 @@ export function AttendanceTicketsPage() {
     setSelectedTicket(null)
   }
 
-  const getTypeIcon = (type: string) => {
+  const getTypeIcon = (type: AttendanceTicket['type']) => {
     switch (type) {
-      case 'forgot-punch-in':
+      case 'punch_in':
         return '⏰'
-      case 'forgot-punch-out':
+      case 'punch_out':
         return '🛑'
-      case 'modify-time':
-        return '⚙️'
       default:
         return '📋'
     }
@@ -150,10 +148,10 @@ export function AttendanceTicketsPage() {
                             {ticket.type.replace('_', ' ').toUpperCase()} Request
                           </p>
                           <p className="text-slate-700 dark:text-slate-300 mb-2">
-                            {ticket.details}
+                            {ticket.reason}
                           </p>
                           <p className="text-xs text-slate-500">
-                            Requested on: {new Date(ticket.requestDate).toLocaleString()}
+                            Requested time: {ticket.date} at {ticket.requestedTime}
                           </p>
                         </div>
                       </div>
@@ -219,12 +217,12 @@ export function AttendanceTicketsPage() {
                             {ticket.type.replace('_', ' ').toUpperCase()} Request
                           </p>
                           <p className="text-slate-700 dark:text-slate-300 mb-2">
-                            {ticket.details}
+                            {ticket.reason}
                           </p>
-                          {ticket.adminRemarks && (
+                          {ticket.remarks && (
                             <div className="mt-3 p-3 bg-slate-100 dark:bg-slate-800 rounded text-sm">
                               <p className="font-medium text-slate-900 dark:text-white mb-1">Admin Remarks:</p>
-                              <p className="text-slate-700 dark:text-slate-300">{ticket.adminRemarks}</p>
+                              <p className="text-slate-700 dark:text-slate-300">{ticket.remarks}</p>
                             </div>
                           )}
                         </div>
@@ -253,7 +251,7 @@ export function AttendanceTicketsPage() {
           <div className="space-y-4 py-4">
             <div className="p-4 bg-slate-100 dark:bg-slate-800 rounded-lg">
               <p className="text-sm text-slate-600 dark:text-slate-400 mb-2 font-medium">Request Details:</p>
-              <p className="text-slate-900 dark:text-white">{selectedTicket?.details}</p>
+              <p className="text-slate-900 dark:text-white">{selectedTicket?.reason}</p>
             </div>
             <div>
               <label className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2 block">

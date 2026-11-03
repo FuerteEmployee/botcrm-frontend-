@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Capacitor } from "@capacitor/core";
+import { reportClient } from "@/lib/client-telemetry";
 import {
   available,
   checkAllPermissions,
@@ -56,6 +57,7 @@ export type StepId =
   | "precise"
   | "background"
   | "notifications"
+  | "activity"
   | "battery"
   | "autostart";
 
@@ -67,6 +69,12 @@ export interface SetupStep {
   done: boolean;
   /** True when nothing can verify this — the employee confirms it themselves. */
   selfDeclared?: boolean;
+}
+
+export interface DeviceIdentity {
+  manufacturer: string;
+  model: string;
+  osVersion: string;
 }
 
 export interface TrackingSetup {
@@ -87,6 +95,15 @@ export interface TrackingSetup {
    * The gate reads this to fail OPEN — see the file header.
    */
   checkFailed: boolean;
+  /**
+   * Brand/model/OS version, shown alongside the auto-start step so the
+   * employee (and whoever is helping them over the phone) can see exactly
+   * which device they're on — auto-start screens differ by OEM and this is
+   * the same information that decides which one `openAutostartSettings()`
+   * opens. Null until `@capacitor/device` resolves, which is near-instant
+   * but still async.
+   */
+  deviceIdentity: DeviceIdentity | null;
 }
 
 /** Per-install, because it is a property of THIS phone, not of the account. */
@@ -110,6 +127,7 @@ export function useTrackingSetup(): TrackingSetup {
   // RAN and came back with nothing, which must fail open rather than present
   // as "0 requirements, stuck forever".
   const [checkFailed, setCheckFailed] = useState(false);
+  const [deviceIdentity, setDeviceIdentity] = useState<DeviceIdentity | null>(null);
 
   // Gate applies whenever the device CAN run the tracker, full stop -- see
   // the file header for why this is no longer also conditioned on the
@@ -123,6 +141,9 @@ export function useTrackingSetup(): TrackingSetup {
     setReadiness(r);
     setCheckFailed(r === null);
     setLoading(false);
+    // Tell the server too, so the admin's Employees page shows what was just
+    // granted. reportClient sends only when something changed.
+    void reportClient();
   }, [applicable]);
 
   useEffect(() => {
@@ -151,9 +172,32 @@ export function useTrackingSetup(): TrackingSetup {
     };
   }, [applicable, refresh]);
 
+  // Device identity for display only -- resolveAutostartIntent() on the
+  // native side picks the OEM screen by checking which vendor packages are
+  // actually installed, not by reading this string, so a mismatch here never
+  // sends anyone to the wrong settings screen. It just lets the employee (and
+  // anyone helping them over the phone) see which device they're on.
+  useEffect(() => {
+    if (!applicable) return;
+    let cancelled = false;
+    import("@capacitor/device")
+      .then(({ Device }) => Device.getInfo())
+      .then((info) => {
+        if (cancelled) return;
+        setDeviceIdentity({
+          manufacturer: info.manufacturer || "",
+          model: info.model || "",
+          osVersion: info.osVersion || "",
+        });
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [applicable]);
+
   const confirmAutostart = useCallback(() => {
     try { localStorage.setItem(AUTOSTART_KEY, "1"); } catch { /* storage blocked */ }
     setAutostartConfirmed(true);
+    void reportClient();
   }, []);
 
   const steps: SetupStep[] = applicable && readiness
@@ -162,28 +206,35 @@ export function useTrackingSetup(): TrackingSetup {
           id: "precise",
           title: "Precise location",
           detail:
-            "Choose Precise, not Approximate. Approximate rounds your position to about a kilometre, which is far too coarse to tell whether you are at your branch.",
+            "When your phone asks, choose Precise (not Approximate).",
           done: !!readiness.precise,
         },
         {
           id: "background",
           title: 'Location set to "Allow all the time"',
           detail:
-            'With "While using the app", Android stops sharing your location seconds after the screen locks — so your attendance stops being recorded the moment you put your phone in your pocket.',
+            'When your phone asks, choose "Allow all the time". If not, your hours stop recording when the screen locks.',
           done: !!readiness.background,
         },
         {
           id: "notifications",
           title: "Notifications",
           detail:
-            "Android requires a visible notification while location is being recorded. Blocking it stops the recording itself, not just the message.",
+            "Allow notifications. A small notice stays on while you are punched in, and it keeps the recording on.",
           done: !!readiness.notifications,
+        },
+        {
+          id: "activity",
+          title: "Physical activity",
+          detail:
+            "Allow this so the app can tell when you are sitting still, and does not record trips you never made.",
+          done: !!readiness.activityRecognition,
         },
         {
           id: "battery",
           title: "Battery set to Unrestricted",
           detail:
-            "Battery optimisation freezes the app after a few minutes with the screen off. Unrestricted keeps attendance recording while you work.",
+            "Set battery to Unrestricted, so the phone does not stop the app while you work.",
           done: !!readiness.batteryUnrestricted,
         },
         ...(readiness.hasAutostartScreen
@@ -191,7 +242,7 @@ export function useTrackingSetup(): TrackingSetup {
               id: "autostart" as StepId,
               title: `Auto-start${readiness.manufacturer ? ` (${readiness.manufacturer})` : ""}`,
               detail:
-                "Your phone's manufacturer adds its own restriction on top of Android. Without enabling auto-start here, attendance stops after a restart — and we have no way to check this one, so please confirm once you have switched it on.",
+                "Turn on Auto-start for this app. We cannot check this one, so tap \"I turned it on\" after you do it.",
               done: autostartConfirmed,
               selfDeclared: true,
             }]
@@ -214,5 +265,6 @@ export function useTrackingSetup(): TrackingSetup {
     confirmAutostart,
     autostartConfirmed,
     checkFailed,
+    deviceIdentity,
   };
 }

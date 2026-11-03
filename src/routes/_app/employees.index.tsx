@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState, useEffect } from "react";
 import { z } from "zod";
-import { Plus, Search, Pencil, Trash2, Eye, Filter, LayoutGrid, List, MoreVertical, MoreHorizontal, Phone, Mail, MapPin, Building2, UserCircle2, Calendar, Check, Clock } from "lucide-react";
+import { Plus, Search, Pencil, Trash2, Eye, Filter, LayoutGrid, List, MoreVertical, MoreHorizontal, Phone, Mail, MapPin, Building2, UserCircle2, Calendar, Check, Clock, UserX, FileSpreadsheet } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { PageHeader } from "@/components/shared/page-header";
 import { ActionButton } from "@/components/shared/action-button";
@@ -30,18 +30,22 @@ import { DeleteDialog } from "@/components/shared/delete-dialog";
 import { Pagination } from "@/components/shared/pagination";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
-import { Employee, useEmployeeService, type Employee as BackendEmployee } from "@/services/employee-service";
+import { Employee, useEmployeeService, useEmployeeSeatUsage, type Employee as BackendEmployee } from "@/services/employee-service";
 import { useDepartmentService } from "@/services/department-service";
 import { useBranchService } from "@/services/branch-service";
 import { useShiftService } from "@/services/shift-service";
 import { useClientDevices, latestDeviceByEmployee } from "@/services/client-service";
-import { cn } from "@/lib/utils";
+import { cn, toISTDateKey } from "@/lib/utils";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
+import { OrgLoadError } from "@/components/branches/org-load-error";
 import { useLayoutSettings } from "@/hooks/use-layout-settings";
 import { usePermission } from "@/hooks/use-permission";
+import { EmployeeImportDialog } from "@/components/employees/employee-import-dialog";
 
 const employeesSearchSchema = z.object({
   departmentId: z.string().optional(),
+  // Branches page "N staff" link, and its "move them first" delete refusal.
+  branchId: z.string().optional(),
 });
 
 export const Route = createFileRoute("/_app/employees/")({
@@ -53,28 +57,42 @@ const PAGE_SIZE = 10;
 
 function EmployeesPage() {
   const navigate = useNavigate();
-  const { departmentId } = Route.useSearch();
+  const { departmentId, branchId } = Route.useSearch();
   const [hasMounted, setHasMounted] = useState(false);
   const [search, setSearch] = useState("");
   const [deptFilter, setDeptFilter] = useState<string>(departmentId || "all");
+  const [branchFilter, setBranchFilter] = useState<string>(branchId || "all");
   const [shiftFilter, setShiftFilter] = useState<string>("all");
-  const [branchFilter, setBranchFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("active");
+  const [page, setPage] = useState(1);
 
+  // Follow the link when it changes while the page is open (the Branches and
+  // Departments pages link here with ?branchId= / ?departmentId=).
   useEffect(() => {
     if (departmentId) {
       setDeptFilter(departmentId);
+      setPage(1);
     }
   }, [departmentId]);
-  const [page, setPage] = useState(1);
+  useEffect(() => {
+    if (branchId) {
+      setBranchFilter(branchId);
+      setPage(1);
+    }
+  }, [branchId]);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<{ id: string; name: string } | null>(null);
   const [deactivateReason, setDeactivateReason] = useState("");
   const [isDeactivating, setIsDeactivating] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const { defaultLayout, updateDefaultLayout } = useLayoutSettings();
   const [view, setView] = useState<"grid" | "list">(defaultLayout);
   const { can } = usePermission();
   const canCreate = can("employees", "create");
+  // At the plan's seat cap, Add is disabled with the reason on screen instead
+  // of refusing the form after it has been filled in.
+  const seats = useEmployeeSeatUsage();
+  const atSeatLimit = seats?.limit != null && seats.used >= seats.limit;
   const canEdit = can("employees", "edit");
   const canDelete = can("employees", "delete");
 
@@ -88,6 +106,11 @@ function EmployeesPage() {
     totalRecords,
     isLoading,
     isFetching,
+    isError,
+    error: loadError,
+    refetch,
+    isRefetching,
+    isDeleting,
     deleteEmployee,
     updateEmployee
   } = useEmployeeService({
@@ -95,8 +118,8 @@ function EmployeesPage() {
     limit: PAGE_SIZE,
     search,
     departmentId: deptFilter,
-    shiftId: shiftFilter,
     branchId: branchFilter,
+    shiftId: shiftFilter,
     status: statusFilter
   });
 
@@ -115,12 +138,31 @@ function EmployeesPage() {
 
   if (!hasMounted) return null;
 
+  // One honest count for what is on screen. It used to read "25 total staff
+  // members · 10 active (current page)", mixing the filtered total with a
+  // count of whichever ten rows happened to be showing.
+  const isFiltered = !!search.trim() || deptFilter !== "all" || branchFilter !== "all" || shiftFilter !== "all";
+  const headerCount = `${totalRecords} ${statusFilter === "all" ? "" : `${statusFilter} `}${totalRecords === 1 ? "employee" : "employees"}${isFiltered ? " match these filters" : ""}`;
+
   const handleDelete = async () => {
     if (!deleteId) return;
     try {
       await deleteEmployee(deleteId);
       setDeleteId(null);
-    } catch (error) { }
+    } catch (error) {
+      // Refused because the employee has attendance/salary/leave history (the
+      // server has already explained why in a toast): go straight to the thing
+      // they can do instead, rather than leaving them at a dead end.
+      const res = (error as { response?: { status?: number; data?: { hasHistory?: boolean } } })?.response;
+      if (res?.status === 409 && res.data?.hasHistory) {
+        const emp = employees.find((e) => e._id === deleteId);
+        setDeleteId(null);
+        if (emp && emp.status !== "inactive") {
+          setDeactivateTarget({ id: emp._id, name: emp.name || "this employee" });
+          setDeactivateReason("");
+        }
+      }
+    }
   };
 
   const toggleStatus = async (id: string, currentStatus: string, name?: string) => {
@@ -171,30 +213,59 @@ function EmployeesPage() {
     <div className="space-y-5">
       <PageHeader
         title="Employee Directory"
-        description={`${totalRecords} total staff members · ${employees.filter((e) => e.status === "active").length} active (current page)`}
+        description={isError ? "Could not load the list" : headerCount}
         actions={
           canCreate ? (
-            <ActionButton
-              variant="add"
-              showLabel
-              label="Add New Employee"
-              asChild
-            >
-              <Link to="/employees/create" />
-            </ActionButton>
+            <div className="flex items-center gap-3">
+              {seats?.limit != null && (
+                <span className={`text-xs font-semibold ${atSeatLimit ? "text-amber-600" : "text-muted-foreground"}`}>
+                  {seats.used} of {seats.limit} employees used on your plan (inactive included)
+                </span>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                className="h-10 rounded-xl font-semibold gap-1.5"
+                disabled={atSeatLimit}
+                title={atSeatLimit ? "Your plan's employee limit is reached. Ask your provider to upgrade the plan to add more." : "Add many employees from an Excel or CSV file"}
+                onClick={() => setImportOpen(true)}
+              >
+                <FileSpreadsheet className="h-4 w-4" /> Import from Excel
+              </Button>
+              {atSeatLimit ? (
+                <ActionButton
+                  variant="add"
+                  showLabel
+                  label="Add New Employee"
+                  disabled
+                  title="Your plan's employee limit is reached. Ask your provider to upgrade the plan to add more."
+                />
+              ) : (
+                <ActionButton
+                  variant="add"
+                  showLabel
+                  label="Add New Employee"
+                  asChild
+                >
+                  <Link to="/employees/create" />
+                </ActionButton>
+              )}
+            </div>
           ) : null
         }
       />
 
-      {/* Filters Bar */}
-      <div className="flex flex-col md:flex-row items-center justify-between gap-3 py-1">
+      {/* Filters Bar. Two filters per row on a phone: stacked one per row,
+          the four filters and the search filled a 360x600 screen before the
+          first employee. */}
+      <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3 py-1">
         <div className="flex flex-col md:flex-row items-center gap-3 w-full md:w-auto">
           <ViewToggle view={view} onViewChange={updateDefaultLayout} />
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-2 w-full md:w-auto md:flex md:flex-wrap items-center gap-2">
             <Select value={deptFilter} onValueChange={(v) => { setDeptFilter(v); setPage(1); }}>
-              <SelectTrigger className="w-full md:w-[180px] h-10 border border-primary/20 bg-primary/5 text-primary hover:bg-primary/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
-                <Building2 className="h-3.5 w-3.5" />
+              <SelectTrigger className="w-full md:w-[180px] h-11 md:h-10 border border-primary/20 bg-primary/5 text-primary hover:bg-primary/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
+                <Building2 className="hidden sm:block h-3.5 w-3.5 shrink-0" />
                 <SelectValue placeholder="Department" />
               </SelectTrigger>
               <SelectContent className="rounded-xl border-border/60">
@@ -205,9 +276,25 @@ function EmployeesPage() {
               </SelectContent>
             </Select>
 
+            <Select value={branchFilter} onValueChange={(v) => { setBranchFilter(v); setPage(1); }}>
+              <SelectTrigger className="w-full md:w-[170px] h-11 md:h-10 border border-info/20 bg-info/5 text-info hover:bg-info/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
+                <MapPin className="hidden sm:block h-3.5 w-3.5 shrink-0" />
+                <SelectValue placeholder="Branch" />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl border-border/60">
+                <SelectItem value="all">All Branches</SelectItem>
+                {/* Branches carry `branchName`, not `name`: every option here
+                    rendered blank, and so did the trigger after following a
+                    Branches-page "N staff" link. */}
+                {branches.map((b) => (
+                  <SelectItem key={b._id} value={b._id}>{b.branchName}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
             <Select value={shiftFilter} onValueChange={(v) => { setShiftFilter(v); setPage(1); }}>
-              <SelectTrigger className="w-full md:w-[160px] h-10 border border-warning/20 bg-warning/5 text-warning-foreground hover:bg-warning/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
-                <Clock className="h-3.5 w-3.5" />
+              <SelectTrigger className="w-full md:w-[160px] h-11 md:h-10 border border-warning/20 bg-warning/5 text-warning-foreground hover:bg-warning/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
+                <Clock className="hidden sm:block h-3.5 w-3.5 shrink-0" />
                 <SelectValue placeholder="Shift" />
               </SelectTrigger>
               <SelectContent className="rounded-xl border-border/60">
@@ -218,43 +305,36 @@ function EmployeesPage() {
               </SelectContent>
             </Select>
 
-            <Select value={branchFilter} onValueChange={(v) => { setBranchFilter(v); setPage(1); }}>
-              <SelectTrigger className="w-full md:w-[160px] h-10 border border-info/20 bg-info/5 text-info hover:bg-info/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
-                <MapPin className="h-3.5 w-3.5" />
-                <SelectValue placeholder="Branch" />
-              </SelectTrigger>
-              <SelectContent className="rounded-xl border-border/60">
-                <SelectItem value="all">All Branches</SelectItem>
-                {branches.map((b: any) => (
-                  <SelectItem key={b._id} value={b._id}>{b.branchName}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
             <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setPage(1); }}>
-              <SelectTrigger className="w-full md:w-[130px] h-10 border border-success/20 bg-success/5 text-success hover:bg-success/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
+              <SelectTrigger className="w-full md:w-[130px] h-11 md:h-10 border border-success/20 bg-success/5 text-success hover:bg-success/10 rounded-xl text-[13px] font-medium transition-all gap-2 px-3 shadow-none">
                 <div className={cn("h-2 w-2 rounded-full", statusFilter === 'active' ? "bg-success" : statusFilter === 'inactive' ? "bg-muted-foreground" : "bg-primary")} />
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent className="rounded-xl border-border/60">
                 <SelectItem value="active">Active</SelectItem>
                 <SelectItem value="inactive">Inactive</SelectItem>
+                <SelectItem value="all">All statuses</SelectItem>
               </SelectContent>
             </Select>
           </div>
         </div>
 
         <FormInput
-          placeholder="Search employees..."
+          placeholder="Search name or phone..."
           icon={Search}
-          className="h-10 w-full md:w-[260px] shadow-none bg-background"
+          className="h-11 md:h-10 w-full md:w-[260px] shadow-none bg-background"
+          containerClassName="w-full md:w-auto"
           value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1); }}
         />
       </div>
 
       <AnimatePresence mode="wait">
-        {(isLoading || (employees.length === 0 && isFetching)) ? (
+        {isError && employees.length === 0 ? (
+          // A failed load used to fall through to "No employees found -- try
+          // adjusting your filters", which reads as an empty company.
+          <OrgLoadError key="error" what="employees" error={loadError} onRetry={() => void refetch()} retrying={isRefetching} />
+        ) : (isLoading || (employees.length === 0 && isFetching)) ? (
           <SkeletonLoader key="loading" type="table" count={PAGE_SIZE} />
         ) : view === "grid" ? (
           <motion.div
@@ -286,7 +366,8 @@ function EmployeesPage() {
                       checked={e.status === "active"}
                       onCheckedChange={() => toggleStatus(e._id, e.status, e.name)}
                       disabled={!canEdit}
-                      className="data-[state=checked]:bg-success scale-75 shadow-sm"
+                      aria-label={e.status === "active" ? `Deactivate ${e.name}` : `Activate ${e.name}`}
+                      className="data-[state=checked]:bg-success shadow-sm"
                     />
                   }
                   onView={() => navigate({ to: "/employees/$employeeId", params: { employeeId: e._id } })}
@@ -295,7 +376,11 @@ function EmployeesPage() {
                   metaLeft={{ icon: Building2, label: (e.departmentId as any)?.name || "Not Assigned" }}
                   metaRight={{
                     icon: Calendar,
-                    label: `Joined: ${new Date(e.createdAt || Date.now()).toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '-')}`
+                    // The joining date the admin entered, not when the record
+                    // was typed in (createdAt), which is what this used to show.
+                    label: e.joiningDate
+                      ? `Joined: ${toISTDateKey(e.joiningDate).split("-").reverse().join("-")}`
+                      : "Joined: —"
                   }}
                 >
                   <div className="flex items-center gap-1.5 mb-2">
@@ -361,8 +446,10 @@ function EmployeesPage() {
                       <div className="min-w-0">
                         <div className="text-[14px] font-bold text-foreground leading-tight mb-1">{e.name}</div>
                         <div className="flex items-center gap-4">
+                          {/* No invented address: "emp@bot-hrms.com" stood in
+                              for every employee without an email. */}
                           <div className="text-[11px] text-muted-foreground/70 flex items-center gap-1.5">
-                            <Mail className="h-3.5 w-3.5 opacity-60" /> {e.email || "emp@bot-hrms.com"}
+                            <Mail className="h-3.5 w-3.5 opacity-60" /> {e.email || "No email"}
                           </div>
                         </div>
                       </div>
@@ -428,7 +515,8 @@ function EmployeesPage() {
                         checked={e.status === "active"}
                         onCheckedChange={() => toggleStatus(e._id, e.status, e.name)}
                         disabled={!canEdit}
-                        className="data-[state=checked]:bg-success scale-90"
+                        aria-label={e.status === "active" ? `Deactivate ${e.name}` : `Activate ${e.name}`}
+                        className="data-[state=checked]:bg-success"
                       />
                       <span className={cn(
                         "text-[12px] font-bold",
@@ -473,18 +561,26 @@ function EmployeesPage() {
       </AnimatePresence>
 
 
+      {/* Mounted only while open: it loads settings and the whole roster for
+          its duplicate checks, which the list itself does not need. */}
+      {importOpen && <EmployeeImportDialog open={importOpen} onOpenChange={setImportOpen} />}
+
+      {/* Delete is only for employees with no history (someone added by
+          mistake). The server refuses anyone with attendance, leave, salary,
+          advance or expense records, and the page then offers Deactivate. */}
       <DeleteDialog
         open={!!deleteId}
-        onOpenChange={(o) => !o && setDeleteId(null)}
+        onOpenChange={(o) => !o && !isDeleting && setDeleteId(null)}
         onConfirm={handleDelete}
-        title="Delete employee?"
-        description="This will permanently remove the employee from the system and archive their records. This action cannot be reversed."
+        isLoading={isDeleting}
+        title={`Delete ${employees.find((e) => e._id === deleteId)?.name || "this employee"}?`}
+        description="Only an employee with no attendance, leave or salary records yet (for example, someone added by mistake) can be deleted, and it cannot be undone. For anyone with history, deactivate them instead: their records are kept and they can no longer log in."
         cancelText="Keep Employee"
       />
 
       <Dialog open={!!deactivateTarget} onOpenChange={(o) => !o && setDeactivateTarget(null)}>
-        <DialogContent className="rounded-2xl">
-          <DialogHeader>
+        <DialogContent className="rounded-2xl max-h-[90vh] flex flex-col">
+          <DialogHeader className="shrink-0">
             <DialogTitle className="text-[18px] font-black tracking-tight">
               Deactivate {deactivateTarget?.name}?
             </DialogTitle>
@@ -493,7 +589,7 @@ function EmployeesPage() {
               it will be shown to them on the login screen.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
+          <div className="space-y-2 flex-1 overflow-y-auto min-h-0">
             <Label htmlFor="deactivate-reason" className="text-xs font-bold text-muted-foreground/80">
               Reason (optional)
             </Label>
@@ -502,11 +598,12 @@ function EmployeesPage() {
               placeholder="e.g. Your account has been deactivated due to policy violation. Contact HR for details."
               value={deactivateReason}
               onChange={(e) => setDeactivateReason(e.target.value)}
+              maxLength={300}
               rows={3}
               className="rounded-xl"
             />
           </div>
-          <DialogFooter className="gap-2 mt-2">
+          <DialogFooter className="gap-2 mt-2 shrink-0">
             <Button
               variant="outline"
               className="rounded-xl"
@@ -515,8 +612,10 @@ function EmployeesPage() {
             >
               Cancel
             </Button>
+            {/* Not the trash can: deactivating keeps the record and can be undone. */}
             <ActionButton
               variant="destructive"
+              icon={UserX}
               showLabel
               label="Deactivate"
               onClick={confirmDeactivate}

@@ -53,6 +53,13 @@ import kotlinx.coroutines.launch
         Permission(
             alias = "notifications",
             strings = [Manifest.permission.POST_NOTIFICATIONS]
+        ),
+        // Lets the tracker tell a phone that is standing still from one whose
+        // GPS is drifting. Asked for LAST and never blocking: refusing it costs
+        // route smoothing, not attendance.
+        Permission(
+            alias = "activity",
+            strings = [Manifest.permission.ACTIVITY_RECOGNITION]
         )
     ]
 )
@@ -60,6 +67,10 @@ class BackgroundTrackerPlugin : Plugin() {
 
     companion object {
         private const val TAG = "BgTracker/Plugin"
+
+        /** How long to wait for the service to report itself up before calling it a failure. */
+        private const val CONFIRM_TIMEOUT_MS = 6_000L
+        private const val CONFIRM_POLL_MS = 200L
     }
 
     // Coroutine scope for off-thread DB access (count query for getStatus).
@@ -73,27 +84,107 @@ class BackgroundTrackerPlugin : Plugin() {
         val apiBase    = call.getString("apiBase") ?: ""
         val employeeId = call.getString("employeeId") ?: ""
         val sessionId  = call.getString("sessionId") ?: ""
+        // Ties the native event log to the same install the web layer reports
+        // under, so the Device tab can show one timeline per device.
+        val installId  = call.getString("installId") ?: ""
 
         if (token.isBlank() || apiBase.isBlank()) {
             call.reject("token and apiBase are required")
             return
         }
 
-        Prefs.save(context, token, apiBase, sessionId, employeeId)
+        // No location permission: do not start the service at all. Starting it only
+        // for it to be refused by Android (it must go foreground before it can check)
+        // logged a false "fg_denied" failure on every app open after login, before
+        // the employee had even reached the permission screen. Nothing is marked
+        // active, so the watchdog and boot receiver do not try either.
+        val hasLocation =
+            androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
+            androidx.core.content.ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+        if (!hasLocation) {
+            call.resolve(JSObject().put("started", false).put("reason", "no_location_permission"))
+            return
+        }
+
+        Prefs.save(context, token, apiBase, sessionId, employeeId, installId)
+        // "Track always" (company setting). The server repeats it on every
+        // /attendance/today poll, so this start value only covers the first poll.
+        Prefs.setTrackAlways(context, call.getBoolean("trackAlways", false) ?: false)
 
         val intent = Intent(context, LocationTrackingService::class.java)
             .apply { action = LocationTrackingService.ACTION_START }
+
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
             } else {
                 context.startService(intent)
             }
-            Log.i(TAG, "start() dispatched (session=$sessionId)")
-            call.resolve(JSObject().put("started", true))
         } catch (e: Exception) {
-            Log.e(TAG, "start() failed: ${e.message}")
-            call.reject("Failed to start tracking service: ${e.message}")
+            // The synchronous refusal: ForegroundServiceStartNotAllowedException
+            // and friends. Recorded, not just logged -- see below.
+            Log.e(TAG, "start() dispatch failed: ${e.javaClass.simpleName}: ${e.message}")
+            TrackerEventLog.record(
+                context, TrackerEventLog.START_FAILED,
+                mapOf("stage" to "dispatch", "error" to e.javaClass.simpleName),
+            )
+            scheduleImmediateRetry()
+            call.resolve(JSObject().put("started", false))
+            return
+        }
+
+        // CONFIRM, do not assume.
+        //
+        // startForegroundService() returns the moment the start is DISPATCHED.
+        // It says nothing about whether the service came up: Android kills a
+        // service that has not called startForeground() within ~5 s, and
+        // delivers that failure asynchronously, so it can never reach the catch
+        // above. Resolving `started: true` here was therefore a claim the code
+        // had no evidence for -- and the web layer reads it to decide whether
+        // to run its own fallback, so a false positive means NEITHER tracker is
+        // running and nothing anywhere says so.
+        //
+        // Brij Fuerte, 2026-09-22: punched in at 13:37, the service never came
+        // up, and the next background fix was at 15:14 when the watchdog
+        // happened to run. An hour out of the office went unrecorded.
+        //
+        // So wait for the service to actually report itself alive. This runs on
+        // a coroutine rather than blocking the bridge thread (constraint #10).
+        pluginScope.launch {
+            var up = false
+            val deadline = System.currentTimeMillis() + CONFIRM_TIMEOUT_MS
+            while (System.currentTimeMillis() < deadline) {
+                if (LocationTrackingService.isRunning) { up = true; break }
+                kotlinx.coroutines.delay(CONFIRM_POLL_MS)
+            }
+
+            if (!up) {
+                Log.e(TAG, "start() dispatched but service never came up")
+                TrackerEventLog.record(
+                    context, TrackerEventLog.START_FAILED,
+                    mapOf("stage" to "confirm", "waitedMs" to CONFIRM_TIMEOUT_MS),
+                )
+                scheduleImmediateRetry()
+            } else {
+                Log.i(TAG, "start() confirmed up (session=$sessionId)")
+            }
+            call.resolve(JSObject().put("started", up))
+        }
+    }
+
+    /**
+     * Ask the watchdog to try again NOW rather than at its next periodic slot.
+     *
+     * The periodic job floors at 15 minutes and is deferred further in Doze --
+     * observed at 97 minutes on the failure this was written for. An expedited
+     * one-off runs as soon as the system will allow, and the periodic job stays
+     * as the backstop behind it.
+     */
+    private fun scheduleImmediateRetry() {
+        try {
+            TrackerWatchdogWorker.scheduleImmediate(context)
+        } catch (e: Throwable) {
+            Log.w(TAG, "could not schedule immediate retry: ${e.message}")
         }
     }
 
@@ -129,6 +220,11 @@ class BackgroundTrackerPlugin : Plugin() {
             .put("queued",         -1)
             .put("lastFixAt",       lastFixAt)
             .put("permissionState", permState)
+            // Lets the web layer know this build honours "track always". An older
+            // APK does not send it, so the web layer keeps it on-duty only there
+            // instead of restarting a service that stops itself every 30 s.
+            .put("supportsAlwaysMode", true)
+            .put("trackAlways",     Prefs.trackAlways(context))
         call.resolve(snapshot)
 
         // Async: fetch real queued count and emit as event.
@@ -147,6 +243,33 @@ class BackgroundTrackerPlugin : Plugin() {
     }
 
     // ── requestPermissions ────────────────────────────────────────────────────
+
+    // ── getLastCrash ─────────────────────────────────────────
+    //
+    // Reported through the web layer rather than uploaded natively because that
+    // is where a valid session token lives. The trade is that a device which
+    // crashes and is never opened again keeps its crash to itself — acceptable,
+    // since a phone nobody opens is not one anybody is waiting on a fix for.
+    //
+    // Reading CLEARS the stored crash, so each one is reported exactly once even
+    // if the app is reopened repeatedly.
+    @PluginMethod
+    fun getLastCrash(call: PluginCall) {
+        val out = JSObject()
+        val raw = CrashReporter.takeLast(context)
+        if (raw == null) {
+            out.put("crash", null as String?)
+        } else {
+            try {
+                out.put("crash", JSObject(raw))
+            } catch (t: Throwable) {
+                // Corrupt record. Losing it is fine; failing the call is not,
+                // because this runs on every launch.
+                out.put("crash", null as String?)
+            }
+        }
+        call.resolve(out)
+    }
 
     @PluginMethod(returnType = PluginMethod.RETURN_PROMISE)
     override fun requestPermissions(call: PluginCall) {
@@ -170,12 +293,27 @@ class BackgroundTrackerPlugin : Plugin() {
         if (Build.VERSION.SDK_INT >= 33) {
             requestPermissionForAlias("notifications", call, "afterNotifPerm")
         } else {
-            call.resolve(buildPermResult())
+            afterNotifPerm(call)
         }
     }
 
     @PermissionCallback
     private fun afterNotifPerm(call: PluginCall) {
+        // Activity recognition last, because it is the only one the product can
+        // do without. Asking for it before background location would spend the
+        // employee's patience on the least important prompt.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            requestPermissionForAlias("activity", call, "afterActivityPerm")
+        } else {
+            call.resolve(buildPermResult())
+        }
+    }
+
+    @PermissionCallback
+    private fun afterActivityPerm(call: PluginCall) {
+        // Granted or not, start it: start() checks for itself and no-ops when
+        // the permission is missing, so this needs no branch of its own.
+        runCatching { ActivityRecognitionTracker.start(context) }
         call.resolve(buildPermResult())
     }
 
@@ -191,10 +329,16 @@ class BackgroundTrackerPlugin : Plugin() {
                     PackageManager.PERMISSION_GRANTED
         } else true
 
+        val activity = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            context.checkSelfPermission(Manifest.permission.ACTIVITY_RECOGNITION) ==
+                    PackageManager.PERMISSION_GRANTED
+        } else true
+
         return JSObject()
             .put("fine",          fine)
             .put("background",    background)
             .put("notifications", notifications)
+            .put("activity",      activity)
     }
 
     private fun buildPermissionState(): String {
@@ -259,12 +403,24 @@ class BackgroundTrackerPlugin : Plugin() {
                     .put("background",          background)
                     .put("notifications",       notifications)
                     .put("batteryUnrestricted", batteryUnrestricted)
+                    .put("activityRecognition", ActivityRecognitionTracker.hasPermission(context))
+                    // The Android camera grant. The web layer could only ask the WebView,
+                    // which has its own separate grant and answered "prompt" on phones
+                    // where the camera was plainly allowed and in use for selfie punches.
+                    .put("camera",              context.checkSelfPermission(Manifest.permission.CAMERA) ==
+                                                    PackageManager.PERMISSION_GRANTED)
                     .put("locationState",       buildPermissionState())
                     .put("manufacturer",        Build.MANUFACTURER ?: "")
                     // Whether an OEM autostart screen exists to send the user to.
                     // Autostart itself cannot be READ -- no public API exposes it --
                     // so the setup flow can only take the user there and ask.
                     .put("hasAutostartScreen",  resolveAutostartIntent() != null)
+                    // ...but it CAN be observed. If BootReceiver has ever
+                    // resumed tracking after a reboot then autostart demonstrably
+                    // works on this handset, whatever anyone claims. This is the
+                    // difference between a reported permission and a proven one.
+                    .put("autostartProven",     Prefs.bootRestartAt(context) > 0L)
+                    .put("lastBootRestartAt",   Prefs.bootRestartAt(context))
             )
         } catch (e: Exception) {
             Log.e(TAG, "checkAllPermissions failed: ${e.message}", e)
@@ -303,13 +459,28 @@ class BackgroundTrackerPlugin : Plugin() {
             "com.huawei.systemmanager" to "com.huawei.systemmanager.optimize.process.ProtectActivity",
         )
         for ((pkg, cls) in candidates) {
-            val intent = Intent().apply {
+            // `intent.resolveActivity` answers yes for ANY explicit component without
+            // checking the app is installed, so the first entry (Xiaomi's) "matched" on
+            // every phone: a Pixel or Vivo showed an auto-start step that could only
+            // open Xiaomi's screen, fail, and land on the Settings home page. Ask the
+            // package manager whether this exact screen exists. The packages are listed
+            // under <queries> in the manifest, which Android 11+ needs to see them.
+            if (!activityExists(pkg, cls)) continue
+            return Intent().apply {
                 component = android.content.ComponentName(pkg, cls)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            if (intent.resolveActivity(context.packageManager) != null) return intent
         }
         return null
+    }
+
+    private fun activityExists(pkg: String, cls: String): Boolean = try {
+        context.packageManager.getActivityInfo(android.content.ComponentName(pkg, cls), 0)
+        true
+    } catch (_: PackageManager.NameNotFoundException) {
+        false
+    } catch (_: Exception) {
+        false
     }
 
     // ── Developer Options Check ──────────────────────────────────────────────

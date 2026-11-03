@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Megaphone, Pin, AlertTriangle, PartyPopper, ScrollText, Search, Filter } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -7,7 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
-import { useAnnouncementService, type Announcement } from "@/services/announcement-service";
+import { hasQuestion, useAnnouncementService, useNoticeActions, type Announcement } from "@/services/announcement-service";
+import { NoticeResponse } from "@/components/notices/notice-answer";
+import { LoadError } from "@/components/user/load-error";
 
 export const Route = createFileRoute("/user/announcements")({
   component: UserAnnouncements,
@@ -19,17 +21,41 @@ const TYPE_CONFIG: Record<AnnouncementType, { icon: typeof Megaphone; color: str
   urgent: { icon: AlertTriangle, color: "text-rose-600 bg-rose-500/10", label: "Urgent" },
   event: { icon: PartyPopper, color: "text-blue-600 bg-blue-500/10", label: "Event" },
   policy: { icon: ScrollText, color: "text-primary bg-primary/10", label: "Policy" },
-  general: { icon: Megaphone, color: "text-amber-600 bg-amber-500/10", label: "General" },
+  general: { icon: Megaphone, color: "text-amber-600 bg-amber-500/10", label: "Announcement" },
 };
 
+// The day it was posted, from the real timestamp and in IST ("20 Sep 2026").
+// The stored `date` is a string the server formatted in ITS timezone, so on a
+// UTC host a notice posted before 05:30 IST showed the previous day.
+function postedOn(a: Announcement) {
+  const d = a.createdAt ? new Date(a.createdAt) : null;
+  if (!d || Number.isNaN(d.getTime())) return a.date;
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
+}
+
 function UserAnnouncements() {
-  const { announcements: list, isLoading } = useAnnouncementService();
+  const { announcements: list, isLoading, isError, error, refetch, isFetching } = useAnnouncementService();
   const [search, setSearch] = useState("");
-  const [filterType, setFilterType] = useState<"all" | AnnouncementType>("all");
+  const [filterType, setFilterType] = useState<"all" | "todo" | AnnouncementType>("all");
+  const { markSeen } = useNoticeActions();
+
+  // What is on the board counts as seen (for the admin's "seen" count). Once
+  // per notice per visit; a failure only means it is counted later.
+  const sent = useRef(new Set<string>());
+  useEffect(() => {
+    const ids = list.filter((a) => !a.myResponse?.seenAt && !sent.current.has(a._id)).map((a) => a._id);
+    if (ids.length === 0) return;
+    ids.forEach((id) => sent.current.add(id));
+    markSeen(ids);
+  }, [list, markSeen]);
+
+  const needsMe = (a: Announcement) =>
+    (hasQuestion(a) && a.isOpen !== false && !a.myResponse?.answeredAt) || (!!a.display?.markAsRead && !a.myResponse?.readAt);
+  const todo = list.filter(needsMe).length;
 
   const filtered = list
-    .filter((a) => filterType === "all" || a.type === filterType)
-    .filter((a) => a.title.toLowerCase().includes(search.toLowerCase()) || a.content.toLowerCase().includes(search.toLowerCase()))
+    .filter((a) => filterType === "all" || (filterType === "todo" ? needsMe(a) : a.type === filterType))
+    .filter((a) => (a.title || "").toLowerCase().includes(search.toLowerCase()) || (a.content || "").toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => (a.pinned === b.pinned ? 0 : a.pinned ? -1 : 1));
 
   return (
@@ -51,17 +77,18 @@ function UserAnnouncements() {
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
-        <Select value={filterType} onValueChange={(v) => setFilterType(v as "all" | AnnouncementType)}>
+        <Select value={filterType} onValueChange={(v) => setFilterType(v as "all" | "todo" | AnnouncementType)}>
           <SelectTrigger className="h-10 w-full sm:w-[200px] border-slate-100/50 dark:border-white/5 bg-white/80 dark:bg-slate-900/40 rounded-xl text-xs gap-2">
             <Filter className="h-3.5 w-3.5 text-primary/70" />
             <SelectValue placeholder="All Types" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Types</SelectItem>
+            <SelectItem value="todo">Needs my answer ({todo})</SelectItem>
             <SelectItem value="urgent">Urgent</SelectItem>
             <SelectItem value="event">Events</SelectItem>
             <SelectItem value="policy">Policy</SelectItem>
-            <SelectItem value="general">General</SelectItem>
+            <SelectItem value="general">Announcements</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -72,11 +99,17 @@ function UserAnnouncements() {
             <Card key={i} className="h-[100px] rounded-2xl border-slate-100/50 dark:border-white/5 animate-pulse bg-slate-100/40 dark:bg-slate-900/40" />
           ))}
         </div>
+      ) : isError && list.length === 0 ? (
+        // Not the empty state: "HR hasn't published anything" was a false
+        // claim whenever the list simply failed to load.
+        <LoadError what="announcements" error={error} onRetry={() => refetch()} retrying={isFetching} />
       ) : filtered.length === 0 ? (
         <div className="text-center py-16 bg-white/40 dark:bg-slate-900/30 rounded-[24px] border border-dashed border-slate-200/60 dark:border-white/10">
           <Megaphone className="h-8 w-8 text-primary/30 mx-auto mb-3" />
           <p className="text-sm font-bold text-slate-700 dark:text-slate-200">No announcements found</p>
-          <p className="text-xs text-slate-500 mt-1">Check back later — HR hasn't published anything matching this filter yet.</p>
+          <p className="text-[13px] text-slate-500 mt-1 px-4">
+            {list.length === 0 ? "HR has not posted any notices yet. Check back later." : "Nothing matches your search. Try another word or type."}
+          </p>
         </div>
       ) : (
         <AnimatePresence mode="wait">
@@ -99,7 +132,7 @@ function UserAnnouncements() {
                   transition={{ duration: 0.3, delay: i * 0.04 }}
                 >
                   <Card className={cn(
-                    "p-4 border border-slate-100/50 dark:border-white/5 bg-white/70 dark:bg-slate-900/40 backdrop-blur-md rounded-2xl shadow-xs",
+                    "p-4 border border-slate-100/50 dark:border-white/5 bg-white/70 dark:bg-slate-900/40 rounded-2xl shadow-xs",
                     a.pinned && "border-primary/30 ring-1 ring-primary/10"
                   )}>
                     <div className="flex items-start gap-3">
@@ -108,21 +141,31 @@ function UserAnnouncements() {
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">{a.title}</h3>
+                          <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100 break-words">{a.title}</h3>
                           {a.pinned && (
-                            <Badge className="h-4.5 text-[8px] px-1.5 font-bold uppercase bg-primary/10 text-primary border-primary/20 gap-1">
-                              <Pin className="h-2.5 w-2.5" /> Pinned
+                            <Badge className="text-[11px] px-1.5 py-0.5 font-bold uppercase bg-primary/10 text-primary border-primary/20 gap-1">
+                              <Pin className="h-3 w-3" /> Pinned
                             </Badge>
                           )}
-                          <Badge variant="outline" className={cn("h-4.5 text-[8px] px-1.5 font-bold uppercase border-transparent", config.color)}>
+                          <Badge variant="outline" className={cn("text-[11px] px-1.5 py-0.5 font-bold uppercase border-transparent", config.color)}>
                             {config.label}
                           </Badge>
+                          {needsMe(a) && (
+                            <Badge className="text-[11px] px-1.5 py-0.5 font-bold uppercase bg-rose-500/10 text-rose-600 border-transparent">
+                              {hasQuestion(a) && !a.myResponse?.answeredAt ? "Please answer" : "Please read"}
+                            </Badge>
+                          )}
                         </div>
-                        <p className="text-[13px] text-slate-600 dark:text-slate-300 mt-1.5 whitespace-pre-line">{a.content}</p>
-                        <div className="text-[11px] text-slate-400 mt-2 flex items-center gap-1.5">
+                        <p className="text-[13px] text-slate-600 dark:text-slate-300 mt-1.5 whitespace-pre-line break-words">{a.content}</p>
+                        {(hasQuestion(a) || a.display?.markAsRead) && (
+                          <div className="mt-3">
+                            <NoticeResponse notice={a} />
+                          </div>
+                        )}
+                        <div className="text-xs text-slate-500 mt-2 flex items-center gap-1.5 flex-wrap">
                           <span>{a.author}</span>
                           <span>•</span>
-                          <span>{a.date}</span>
+                          <span>{postedOn(a)}</span>
                         </div>
                       </div>
                     </div>

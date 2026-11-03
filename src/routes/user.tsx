@@ -1,15 +1,24 @@
 import { useEffect, useState } from "react";
 import { Outlet, useNavigate, Link, useLocation, createFileRoute, redirect } from "@tanstack/react-router";
+import { UpdatePrompt } from "@/components/shared/app-update";
+import { CenterModal } from "@/components/shared/center-modal";
+import { MissedPunchOutPrompt } from "@/components/user/missed-punch-out-prompt";
+import { OfflineBanner } from "@/components/user/offline-banner";
+import { ApkUpdatePrompt } from "@/components/shared/apk-update-prompt";
+import { NoticePopup } from "@/components/notices/notice-popup";
+import { hapticSelection } from "@/lib/haptics";
 import { useAuth } from "@/hooks/use-auth";
 import { useDeveloperOptionsGate } from "@/hooks/use-developer-options-gate";
 import { DeveloperOptionsBlock } from "@/components/attendance/developer-options-block";
 import { getSession } from "@/lib/auth";
+import { isNativeApp } from "@/lib/geolocation";
 import { logoutAndClear } from "@/lib/logout";
 import {
   Home, CalendarDays, Ticket, LogOut, Sparkles, Coins, Gift, Zap,
   type LucideIcon
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { NotificationBell } from "@/components/layout/notification-bell";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -28,13 +37,35 @@ export const Route = createFileRoute("/user")({
   component: UserLayout,
 });
 
+/**
+ * The ticking time pill in the desktop header. Its 1-second timer lives here,
+ * in this tiny component: in the shell it re-rendered the whole employee app,
+ * every page included, once a second.
+ */
+function HeaderClock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <>
+      <span className="text-[10px] font-bold text-[#501537] dark:text-slate-300 font-mono tracking-wider">
+        {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
+      </span>
+      <span className="text-[9px] text-slate-450 font-semibold uppercase tracking-wider border-l border-slate-200 dark:border-slate-800 pl-2">
+        {now.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+      </span>
+    </>
+  );
+}
+
 function UserLayout() {
   const { isAuthenticated, session } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [dark, setDark] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
-  const [headerTime, setHeaderTime] = useState(new Date());
 
   useEffect(() => {
     setIsMounted(true);
@@ -44,9 +75,51 @@ function UserLayout() {
     document.documentElement.classList.toggle("dark", isDark);
   }, []);
 
+
+  // Android's Back button.
+  //
+  // With no handler, Capacitor's default goes back in history or closes the
+  // app -- so pressing Back with a popup open (the selfie camera, the location
+  // check, a confirmation) threw away the half-finished action instead of
+  // closing the popup, which is what everybody expects Back to do. Order:
+  //  1. a page popup that handles Back itself (Home's punch flow listens for
+  //     "bot-back" and cancels the event when it closed something);
+  //  2. any other open dialog is sent Escape, which CenterModal and the Radix
+  //     dialogs both close on (a deliberately undismissable one ignores it,
+  //     so Back is swallowed rather than navigating out from under it);
+  //  3. nothing open: Home is the root, so the app goes to the background --
+  //     going "back" from it would land on /login, which bounces straight
+  //     back here, and Back could then never leave the app. Elsewhere, history.
   useEffect(() => {
-    const timer = setInterval(() => setHeaderTime(new Date()), 1000);
-    return () => clearInterval(timer);
+    if (!isNativeApp()) return;
+    let remove: (() => void) | undefined;
+    let disposed = false;
+    import("@capacitor/app")
+      .then(({ App }) =>
+        App.addListener("backButton", ({ canGoBack }) => {
+          const back = new Event("bot-back", { cancelable: true });
+          window.dispatchEvent(back);
+          if (back.defaultPrevented) return;
+
+          if (document.querySelector('[role="dialog"], [role="alertdialog"]')) {
+            document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+            return;
+          }
+
+          const atRoot = window.location.pathname.replace(/\/$/, "") === "/user";
+          if (canGoBack && !atRoot) window.history.back();
+          else void App.minimizeApp();
+        }),
+      )
+      .then((h) => {
+        if (disposed) void h.remove();
+        else remove = () => void h.remove();
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+      remove?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -62,14 +135,20 @@ function UserLayout() {
     window.localStorage.setItem("bot_theme", next ? "dark" : "light");
   };
 
-  const handleLogout = async () => {
+  // Asked first. The icon sits beside the profile picture, one stray tap
+  // logged people out, and getting back in needs a phone number and an OTP --
+  // a real barrier for someone who does not read English comfortably.
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const handleLogout = () => setConfirmLogout(true);
+  const doLogout = async () => {
+    setConfirmLogout(false);
     await logoutAndClear();
-    toast.success("Successfully logged out");
+    toast.success("You have logged out");
     navigate({ to: "/login" });
   };
 
   const getGreeting = () => {
-    const hr = headerTime.getHours();
+    const hr = new Date().getHours();
     if (hr < 12) return "Good morning";
     if (hr < 17) return "Good afternoon";
     return "Good evening";
@@ -104,10 +183,26 @@ function UserLayout() {
     { to: "/user/holidays", label: "Holidays", icon: Gift },
     { to: "/user/advance-salary", label: "My Requests", icon: Coins },
     { to: "/user/tickets", label: "Tickets", icon: Ticket },
-    { to: "/user/profile", label: "Quick Action", icon: Zap, hash: "quick-actions" },
+    { to: "/user/profile", label: "More", icon: Zap, hash: "quick-actions" },
   ];
 
-  const bottomNavItems = navItems;
+  /**
+   * The phone gets four, the sidebar gets everything.
+   *
+   * Six items across a phone bottom bar left every label truncated — "MY
+   * REQUES...", "QUICK ACTI..." — which is the point at which a nav stops being
+   * scannable and people just tap around. Four fit at full width.
+   *
+   * Chosen by how often an employee actually needs them: Home is the punch
+   * screen and the reason the app exists, Leaves and My Requests are the
+   * everyday self-service, and Quick Action is the way to everything else.
+   * Holidays and Tickets are occasional, so they live in Quick Actions rather
+   * than costing a permanent slot.
+   */
+  const BOTTOM_NAV_PATHS = ["/user", "/user/leaves", "/user/advance-salary", "/user/profile"];
+  const bottomNavItems = BOTTOM_NAV_PATHS
+    .map((path) => navItems.find((i) => i.to === path))
+    .filter((i): i is (typeof navItems)[number] => !!i);
   const isProfileActive = location.pathname === "/user/account";
 
   const initials = (session?.name ?? "User").split(" ").map(s => s[0]).slice(0, 2).join("");
@@ -116,8 +211,12 @@ function UserLayout() {
     <div className="h-screen w-full flex bg-[#FAF7F9] dark:bg-[#0D070B] transition-colors duration-500 overflow-clip relative font-sans">
       
       {/* ─── DYNAMIC AMBIENT BACKDROP GLOWS ─────────────────────────────────── */}
-      <div className="absolute top-[-10%] left-[-10%] w-[45%] aspect-square rounded-full bg-gradient-to-br from-[#501537]/15 via-purple-500/5 to-transparent blur-[120px] pointer-events-none z-0" />
-      <div className="absolute bottom-[-10%] right-[-10%] w-[45%] aspect-square rounded-full bg-gradient-to-tr from-[#7B2453]/15 via-[#501537]/5 to-transparent blur-[120px] pointer-events-none z-0" />
+      {/* Soft glows drawn as radial gradients, not `blur-[120px]`: a 120px
+          filter on two large layers had to be re-composited under the
+          blurred bottom bar on every scroll frame, which costs ordinary
+          phones a lot. The gradients look the same and cost nothing. */}
+      <div className="absolute top-[-15%] left-[-15%] w-[60%] aspect-square rounded-full bg-[radial-gradient(closest-side,rgba(80,21,55,0.12),rgba(168,85,247,0.04)_55%,transparent)] pointer-events-none z-0" />
+      <div className="absolute bottom-[-15%] right-[-15%] w-[60%] aspect-square rounded-full bg-[radial-gradient(closest-side,rgba(123,36,83,0.12),rgba(80,21,55,0.04)_55%,transparent)] pointer-events-none z-0" />
 
       {/* ─── DESKTOP SIDEBAR ────────────────────────────────────────────────── */}
       <aside className="hidden md:flex w-[260px] flex-col border-r border-[#501537]/10 dark:border-white/5 bg-white/70 dark:bg-slate-900/60 backdrop-blur-xl shrink-0 shadow-[4px_0_30px_rgba(80,21,55,0.02)] z-10 relative">
@@ -198,7 +297,19 @@ function UserLayout() {
       </aside>
 
       {/* ─── MAIN CONTENT CONTAINER ────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col overflow-clip z-10 relative min-w-0">
+      {/* min-w-0 is load-bearing, not cosmetic.
+          This is a flex ITEM of the row above, and a flex item defaults to
+          min-width:auto — it refuses to shrink below the min-content width of
+          whatever it contains. One nowrap row anywhere in the portal (the
+          Helpdesk filter chips are ~500px) therefore widened this whole column
+          past the phone's viewport, and overflow-clip then CLIPPED the result
+          instead of preventing it: every page rendered with its right-hand side
+          cut off and no way to scroll to it.
+          With min-w-0 the column shrinks to the screen and each page's own
+          overflow-x-auto does the scrolling, which is what they were written to
+          do. The admin layout has carried this class from the start, which is
+          why only the employee portal was affected. */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-clip z-10 relative">
         {/* Mobile Glass Header */}
         <header className="md:hidden sticky top-0 z-30 bg-white/70 dark:bg-slate-900/60 backdrop-blur-xl border-b border-[#501537]/10 dark:border-white/5 px-4 sm:px-6 py-3 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
@@ -212,26 +323,30 @@ function UserLayout() {
           </div>
 
           <div className="flex items-center gap-2">
+            <NotificationBell
+              href="/user/announcements"
+              className="h-10 w-10 flex items-center justify-center text-[#501537] dark:text-slate-300 hover:scale-100 active:scale-95"
+            />
             {/* Profile avatar — replaces the Profile item that used to live in the bottom bar */}
             <Link
               to="/user/account"
               aria-label="Profile"
-              className={`rounded-full transition-all active:scale-95 ${
+              className={`rounded-full p-0.5 transition-all active:scale-95 ${
                 isProfileActive ? "ring-2 ring-[#501537] dark:ring-white" : "ring-2 ring-[#501537]/10 dark:ring-white/10"
               }`}
             >
-              <Avatar className="h-8 w-8">
-                <AvatarFallback className="bg-gradient-to-br from-[#4A0E2E] to-[#7B2453] text-white text-[11px] font-bold uppercase">
+              <Avatar className="h-9 w-9">
+                <AvatarFallback className="bg-gradient-to-br from-[#4A0E2E] to-[#7B2453] text-white text-[12px] font-bold uppercase">
                   {initials}
                 </AvatarFallback>
               </Avatar>
             </Link>
             <button
               onClick={handleLogout}
-              className="p-1.5 rounded-lg text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all cursor-pointer"
+              className="h-10 w-10 flex items-center justify-center rounded-lg text-rose-500 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-all cursor-pointer"
               aria-label="Logout"
             >
-              <LogOut className="h-4.5 w-4.5" />
+              <LogOut className="h-5 w-5" />
             </button>
           </div>
         </header>
@@ -248,15 +363,11 @@ function UserLayout() {
           </div>
           
           <div className="flex items-center gap-4">
+            <NotificationBell href="/user/announcements" className="h-9 w-9 flex items-center justify-center text-[#501537] dark:text-slate-300" />
             {/* Live Ticking Time pill */}
             <div className="px-3.5 py-1.5 rounded-full bg-white/60 dark:bg-slate-900/60 border border-[#501537]/10 dark:border-white/5 backdrop-blur-md flex items-center gap-2 shadow-sm">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-              <span className="text-[10px] font-bold text-[#501537] dark:text-slate-300 font-mono tracking-wider">
-                {headerTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}
-              </span>
-              <span className="text-[9px] text-slate-450 font-semibold uppercase tracking-wider border-l border-slate-200 dark:border-slate-800 pl-2">
-                {headerTime.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-              </span>
+              <HeaderClock />
             </div>
           </div>
         </header>
@@ -264,7 +375,27 @@ function UserLayout() {
         {/* Scrollable view container */}
         <main className="flex-1 overflow-y-auto pb-28 md:pb-8 scrollbar-thin">
           <div className="max-w-[1440px] mx-auto px-4 sm:px-8 lg:px-10 py-6 w-full">
+            {/* Above the outlet, not over it: losing the network is worth
+                saying plainly on every page, but it is not worth taking the
+                screen away from someone who may be trying to read something
+                they already loaded. */}
+            <OfflineBanner />
             <Outlet />
+            {/* Offers a waiting update once, a few seconds after the portal
+                settles. Renders nothing at all in a browser or on an APK too
+                old to carry the updater plugin. */}
+            <UpdatePrompt />
+            {/* Asks for the real leaving time on a day the 04:00 job closed at
+                shift end. Mounted in the shell rather than on Home so a deep
+                link into any employee page still surfaces it. Renders nothing
+                when there is no unconfirmed day. */}
+            <MissedPunchOutPrompt />
+            {/* Native updates, which OTA cannot deliver. Checks later than the
+                bundle prompt so the quick update goes first when both wait. */}
+            <ApkUpdatePrompt />
+            {/* Notices the admin marked "show as popup" that this employee
+                has not answered / marked read / seen yet. */}
+            <NoticePopup />
           </div>
         </main>
       </div>
@@ -280,6 +411,12 @@ function UserLayout() {
               key={`${item.to}-${item.label}`}
               to={item.to}
               hash={item.hash}
+              // A tick on every nav tap. This is the single highest-value place
+              // for one: it is the control used most often, and a tab bar that
+              // responds only visually is one of the clearest differences
+              // between an app and a page. Selection-weight, not impact —
+              // navigation is not a commitment and should not feel like one.
+              onClick={() => { void hapticSelection(); }}
               className={`flex flex-1 min-w-0 flex-col items-center gap-0.5 px-0.5 py-1.5 rounded-xl transition-all duration-300 relative ${
                 isActive
                   ? "text-[#501537] dark:text-white font-bold"
@@ -293,15 +430,51 @@ function UserLayout() {
                   transition={{ type: "spring", stiffness: 380, damping: 30 }}
                 />
               )}
-              <IconComponent className={`h-[18px] w-[18px] shrink-0 relative z-10 ${isActive ? "stroke-[2.5px] text-[#501537] dark:text-white" : "stroke-[2px]"}`} />
-              <span className="w-full text-center text-[8px] tracking-tight font-semibold uppercase leading-tight mt-0.5 relative z-10 whitespace-normal px-0.5">{item.label}</span>
+              {/* 22px icon, 10.5px sentence-case label: the old 8px uppercase
+                  labels were close to unreadable on a budget phone. */}
+              <IconComponent className={`h-[22px] w-[22px] shrink-0 relative z-10 ${isActive ? "stroke-[2.5px] text-[#501537] dark:text-white" : "stroke-[2px]"}`} />
+              <span className="w-full text-center text-[10.5px] tracking-tight font-semibold leading-none mt-0.5 relative z-10 truncate px-0.5">{item.label}</span>
             </Link>
           );
         })}
       </nav>
 
+      <AnimatePresence>
+        {confirmLogout && (
+          <CenterModal
+            onClose={() => setConfirmLogout(false)}
+            labelledBy="logout-title"
+            footer={
+              <div className="flex flex-col gap-2">
+                <button
+                  type="button"
+                  onClick={doLogout}
+                  className="w-full h-12 rounded-xl bg-rose-600 text-white text-[15px] font-bold active:scale-[0.98] transition-transform"
+                >
+                  Yes, log out
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmLogout(false)}
+                  className="w-full h-12 rounded-xl border border-slate-200 dark:border-white/10 text-[15px] font-semibold text-slate-600 dark:text-slate-300"
+                >
+                  No, stay here
+                </button>
+              </div>
+            }
+          >
+            <div className="flex flex-col items-center text-center gap-2">
+              <div className="h-12 w-12 rounded-2xl bg-rose-500/10 flex items-center justify-center">
+                <LogOut className="h-6 w-6 text-rose-500" />
+              </div>
+              <h4 id="logout-title" className="text-base font-bold text-slate-800 dark:text-white">Log out?</h4>
+              <p className="text-[13px] leading-relaxed text-slate-500">
+                To come back in you will need your phone number and a new OTP.
+              </p>
+            </div>
+          </CenterModal>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
-
-export default UserLayout;

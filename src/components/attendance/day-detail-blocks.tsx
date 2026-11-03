@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   AlertTriangle,
   ArrowRight,
+  CloudOff,
   Clock,
   Fingerprint,
   LogIn,
@@ -14,26 +16,22 @@ import {
   Undo2,
   Smartphone,
   UserCog,
+  UtensilsCrossed,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
-import type { AttendanceRecord, AttendanceSession, PunchChannel } from "@/services/attendance-service";
+import { cn, toISTDateKey } from "@/lib/utils";
+import { statusLabel, statusClass, NEEDS_REVIEW_HINT } from "@/lib/attendance-status";
+import type { AttendanceRecord, AttendanceSession, DayGrading, PunchChannel } from "@/services/attendance-service";
+import { CorrectionLog, type PunchCorrectionEntry } from "@/components/tickets/correction-log";
+import { CHANNEL_LABEL, closeTag, lateTag } from "@/lib/punch-labels";
 
 // Read-only blocks for the Attendance Dashboard detail sheet.
 //
 // Everything here mirrors server-side maths that already exists, so the two
 // must not drift: worked time comes from `totalWorkMs` (already lunch-deducted
-// and shift-clamped by utils/shift_status.js) by default, and the
-// required-hours figure repeats the backend's `requiredWorkMs`: shift span -
-// configured lunch - grace.
-//
-// `getWorkedEstimate` below is the one narrow exception: a server timezone bug
-// (fixed, but not yet backfilled) saved `totalWorkMs` as 0 for many closed
-// records between 11-20 Sep 2026 despite real punches. Rather than showing a
-// bare, misleading "0h 0m", these blocks fall back to a client-computed
-// estimate in that specific case (and in the separate case of a missing
-// punch-out). It is always visibly flagged as an estimate and never feeds back
-// into `record.status` or anything persisted — display only.
+// and shift-clamped by utils/shift_status.js) rather than being recomputed from
+// punchIn/punchOut, and the required-hours figure repeats the backend's
+// `requiredWorkMs`: shift span - configured lunch - grace.
 //
 // The one thing computed here and nowhere else is the plain-English REASON a
 // day came out as a half day. That is presentation, not policy: it explains a
@@ -44,12 +42,14 @@ import type { AttendanceRecord, AttendanceSession, PunchChannel } from "@/servic
 const LABEL = "text-[10px] font-black uppercase tracking-widest text-muted-foreground/60";
 
 /** Which channel reported a punch. Same three the day-level source icon uses. */
+// Labels shared with the employee app (lib/punch-labels.ts), so the admin and
+// the employee read the same words for the same punch.
 const CHANNEL: Record<PunchChannel, { icon: typeof Smartphone; label: string }> = {
-  app: { icon: Smartphone, label: "Phone app" },
-  lens: { icon: ScanFace, label: "Lens camera" },
-  biometric: { icon: Fingerprint, label: "Biometric machine" },
-  system: { icon: MapPinOff, label: "Automatic" },
-  admin: { icon: UserCog, label: "Admin correction" },
+  app: { icon: Smartphone, label: CHANNEL_LABEL.app },
+  lens: { icon: ScanFace, label: CHANNEL_LABEL.lens },
+  biometric: { icon: Fingerprint, label: CHANNEL_LABEL.biometric },
+  system: { icon: MapPinOff, label: CHANNEL_LABEL.system },
+  admin: { icon: UserCog, label: CHANNEL_LABEL.admin },
 };
 
 export const fmtHM = (ms: number | null | undefined) => {
@@ -58,103 +58,44 @@ export const fmtHM = (ms: number | null | undefined) => {
   return `${Math.floor(mins / 60)}h ${mins % 60}m`;
 };
 
-// ─── Worked-hours estimate (display-only fallback) ──────────────────────────
-
-/**
- * A punch-in/out gap this short (ms) with a stored 0 is treated as a genuine
- * near-instant punch, not the known zero-totalWorkMs bug — below it we trust
- * the stored 0 as real.
- */
-const STALE_ZERO_GAP_MS = 3 * 60_000;
-
-export interface WorkedEstimate {
-  ms: number;
-  estimated: boolean;
-  reason: "measured" | "stale-zero-fallback" | "live" | "shift-end-estimate";
-}
-
-export const ESTIMATE_TOOLTIP: Record<WorkedEstimate["reason"], string | undefined> = {
-  measured: undefined,
-  "stale-zero-fallback":
-    "Estimated — the server recorded 0 worked time for this day (a known data issue for records between 11–20 Sep 2026); calculated here from punch-in/punch-out instead of the stored figure.",
-  live: "Estimated — still on duty; this is punch-in through now, not yet finalized.",
-  "shift-end-estimate":
-    "Estimated — punch-out was never recorded for this day; shown as punch-in through the scheduled shift end.",
-};
-
-/** Actual punched lunch duration if longer than the configured minimum, else the configured minimum. */
-function actualOrConfiguredLunchMins(record: AttendanceRecord, lunchMins: number): number {
-  if (record.lunchInTime && record.lunchOutTime) {
-    const punched = Math.round(
-      (new Date(record.lunchOutTime).getTime() - new Date(record.lunchInTime).getTime()) / 60000,
-    );
-    return Math.max(punched, lunchMins);
-  }
-  return lunchMins;
-}
-
-/**
- * Live worked ms for someone still on duty right now, correctly handling
- * where they are relative to lunch — NOT a blanket "elapsed minus configured
- * lunch", which would wrongly dock a person 30 minutes of lunch they haven't
- * taken yet (showing "2 min worked" 32 minutes into their shift).
- *
- * - Not yet at lunch: count everything from punch-in to now.
- * - Currently on lunch break (lunch-in set, no lunch-out yet): the clock
- *   pauses — count only up to when lunch started.
- * - Back from lunch: count elapsed time minus the actual lunch gap.
- */
-function liveWorkedMs(record: AttendanceRecord): number {
-  const punchInMs = new Date(record.punchIn!).getTime();
-  const lunchInMs = record.lunchInTime ? new Date(record.lunchInTime).getTime() : null;
-  const lunchOutMs = record.lunchOutTime ? new Date(record.lunchOutTime).getTime() : null;
-
-  if (lunchInMs && !lunchOutMs) return Math.max(0, lunchInMs - punchInMs);
-  if (lunchInMs && lunchOutMs) return Math.max(0, Date.now() - punchInMs - (lunchOutMs - lunchInMs));
-  return Math.max(0, Date.now() - punchInMs);
-}
-
-/**
- * Worked time for display, falling back to a clearly-flagged estimate only
- * when the stored `totalWorkMs` is missing/wrong in a known way. Never writes
- * anything, never changes `record.status` — see the file header comment.
- */
-export function getWorkedEstimate(
-  record: AttendanceRecord,
-  shift: ShiftLike | null | undefined,
-  lunchMins: number,
-  effectivePunchOut: string | null | undefined,
-  isRecordToday: boolean,
-): WorkedEstimate | null {
-  if (!record.punchIn) return { ms: record.totalWorkMs || 0, estimated: false, reason: "measured" };
-  if (record.totalWorkMs) return { ms: record.totalWorkMs, estimated: false, reason: "measured" };
-
-  if (effectivePunchOut) {
-    const rawMs = new Date(effectivePunchOut).getTime() - new Date(record.punchIn).getTime();
-    if (rawMs <= STALE_ZERO_GAP_MS) return { ms: record.totalWorkMs || 0, estimated: false, reason: "measured" };
-    const ms = Math.max(0, rawMs - actualOrConfiguredLunchMins(record, lunchMins) * 60000);
-    return { ms, estimated: true, reason: "stale-zero-fallback" };
-  }
-
-  if (isRecordToday) {
-    return { ms: liveWorkedMs(record), estimated: true, reason: "live" };
-  }
-
-  if (!shift?.endTime) return null;
-  const punchInDate = new Date(record.punchIn);
-  const [eh, em] = shift.endTime.split(":").map(Number);
-  const shiftEnd = new Date(punchInDate);
-  shiftEnd.setHours(eh, em, 0, 0);
-  if (shiftEnd < punchInDate) shiftEnd.setDate(shiftEnd.getDate() + 1); // overnight shift wraps past midnight
-  const rawMs = Math.max(0, shiftEnd.getTime() - punchInDate.getTime());
-  const ms = Math.max(0, rawMs - actualOrConfiguredLunchMins(record, lunchMins) * 60000);
-  return { ms, estimated: true, reason: "shift-end-estimate" };
-}
-
+// IST, like the day each time belongs to -- not the reviewer's browser zone.
 const fmtTime = (value?: string | null) =>
   value
-    ? new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    ? new Date(value).toLocaleTimeString("en-US", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true })
     : "—";
+
+/** Minutes past IST midnight for a real instant. */
+const istMinuteOfDay = (value: string) => {
+  const d = new Date(new Date(value).getTime() + 5.5 * 60 * 60 * 1000);
+  return d.getUTCHours() * 60 + d.getUTCMinutes();
+};
+
+/**
+ * The Full-Day bar in minutes, and what it is made of.
+ *
+ * Prefers `grading` -- computed by the server with the same requiredWorkMs /
+ * scheduledLunchMs / resolveGraceMs that grade the day. The browser-side
+ * fallback (tenant minLunch + lateGrace) ignores the shift's own lunch block
+ * and grace, and on a 09:30-18:30 shift with a 60-minute lunch it read 8h55m
+ * against the server's 7h50m, so every "why half day" line was built on a bar
+ * the grade was never measured against. It only remains for callers without a
+ * server figure.
+ */
+function resolveBar(
+  shift: ShiftLike | null | undefined,
+  lunchMins: number,
+  graceMins: number,
+  grading?: DayGrading | null,
+) {
+  if (grading && grading.requiredMs != null) {
+    return {
+      required: Math.round(grading.requiredMs / 60000),
+      lunch: Math.round((grading.lunchMs || 0) / 60000),
+      grace: Math.round(((grading.graceInMs || 0) + (grading.graceOutMs || 0)) / 60000),
+    };
+  }
+  return { required: requiredMinutes(shift, lunchMins, graceMins), lunch: lunchMins, grace: graceMins };
+}
 
 /** "HH:mm" to minutes past midnight. */
 const toMin = (t?: string | null) => {
@@ -216,6 +157,27 @@ function ChannelMark({ channel, title }: { channel?: PunchChannel | null; title:
   );
 }
 
+/**
+ * A machine punch recorded while the terminal was offline and sent later.
+ * Such a tap keeps its real time, so it can land after the day has moved on
+ * (for example after a phone punch-out) and look like an odd extra session;
+ * this says why.
+ */
+function OfflineMark({ at, receivedAt }: { at?: string | null; receivedAt?: string | null }) {
+  const tag = lateTag(at, receivedAt);
+  if (!tag) return null;
+  return (
+    <Badge
+      variant="outline"
+      title={tag.hint}
+      className="border-sky-500/25 bg-sky-500/10 text-sky-700 dark:text-sky-300 text-[9px] font-black uppercase px-1.5 py-0 gap-1"
+    >
+      <CloudOff className="h-2.5 w-2.5" />
+      {tag.label}
+    </Badge>
+  );
+}
+
 // ─── Sessions ────────────────────────────────────────────────────────────────
 
 /**
@@ -225,8 +187,42 @@ function ChannelMark({ channel, title }: { channel?: PunchChannel | null; title:
  * be opened on a phone and closed on the terminal, and without showing both an
  * admin looking at a disputed day cannot tell that from a single-device day.
  */
-export function SessionTimeline({ sessions }: { sessions: AttendanceSession[] }) {
+export function SessionTimeline({
+  sessions,
+  onAutoExitClick,
+  totalWorkMs,
+}: {
+  sessions: AttendanceSession[];
+  /**
+   * Open this session's auto punch-out detail. Supplied by the detail sheet;
+   * without it the badge stays a plain badge, so the component is still usable
+   * anywhere that has nothing to open.
+   */
+  onAutoExitClick?: (sessionIndex: number) => void;
+  /**
+   * The day's credited total. When supplied, any gap between it and the sum of
+   * the sessions above is shown and named.
+   *
+   * Observed 2026-09-17: four sessions reading 5h06 + 1h35 + 0h54 + 0h17 sat
+   * directly above a total of 7h23. They sum to 7h52. The missing 29 minutes
+   * were the unpaid lunch, deducted server-side by lunchDeductionMs and
+   * mentioned nowhere on the screen -- so the panel looked like it could not
+   * add up, and the employee it belonged to had punched no lunch at all.
+   *
+   * Derived from the two figures rather than fetched: the deduction is whatever
+   * the server did NOT credit, so this can never disagree with payroll the way
+   * a second client-side lunch calculation would.
+   */
+  totalWorkMs?: number | null;
+}) {
   if (!sessions.length) return null;
+
+  const summed = sessions.reduce((n, s) => n + (s.workMs || 0), 0);
+  // Only worth showing when it is both real and unexplained by rounding.
+  const deducted =
+    typeof totalWorkMs === "number" && summed > 0 && summed - totalWorkMs >= 60000
+      ? summed - totalWorkMs
+      : null;
 
   return (
     <div className="space-y-2">
@@ -234,14 +230,6 @@ export function SessionTimeline({ sessions }: { sessions: AttendanceSession[] })
       {sessions.map((s, i) => {
         const open = !!s.punchIn && !s.punchOut;
         const autoExit = s.closeReason === "auto_geofence";
-
-        // Per-session workMs is gross (never lunch-deducted — see shift_status.js),
-        // so the fallback estimate here is just the raw punch gap, no lunch
-        // subtraction, matching what a real workMs would have measured.
-        const rawGapMs = s.punchIn && s.punchOut ? new Date(s.punchOut).getTime() - new Date(s.punchIn).getTime() : null;
-        const sessionIsStale = !s.workMs && rawGapMs != null && rawGapMs > STALE_ZERO_GAP_MS;
-        const sessionWorkedMs = sessionIsStale ? rawGapMs : s.workMs;
-
         return (
           <div
             key={i}
@@ -258,6 +246,7 @@ export function SessionTimeline({ sessions }: { sessions: AttendanceSession[] })
 
               <span className="font-mono">{fmtTime(s.punchIn)}</span>
               <ChannelMark channel={s.punchInSource} title="Punched in via" />
+              <OfflineMark at={s.punchIn} receivedAt={s.punchInReceivedAt} />
 
               <ArrowRight className="h-3 w-3 opacity-40 shrink-0" />
 
@@ -265,27 +254,49 @@ export function SessionTimeline({ sessions }: { sessions: AttendanceSession[] })
                 <>
                   <span className="font-mono">{fmtTime(s.punchOut)}</span>
                   <ChannelMark channel={s.punchOutSource} title="Punched out via" />
+                  <OfflineMark at={s.punchOut} receivedAt={s.punchOutReceivedAt} />
                 </>
               ) : (
                 <span className="font-black text-success">Live</span>
               )}
 
-              {sessionWorkedMs != null && (
-                <span
-                  className={cn("ml-auto text-muted-foreground font-bold", sessionIsStale && "italic")}
-                  title={sessionIsStale ? ESTIMATE_TOOLTIP["stale-zero-fallback"] : undefined}
-                >
-                  {fmtHM(sessionWorkedMs)}
-                  {sessionIsStale && "*"}
-                </span>
+              {s.workMs != null && (
+                <span className="ml-auto text-muted-foreground font-bold">{fmtHM(s.workMs)}</span>
               )}
 
-              {autoExit && (
+              {autoExit &&
+                (onAutoExitClick ? (
+                  // Clickable, because on a multi-exit day the badge is the
+                  // only thing that identifies WHICH close an admin means.
+                  // A single day-level panel cannot answer "why did S1 close?"
+                  // when S4 also closed itself.
+                  <button
+                    type="button"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      onAutoExitClick(i);
+                    }}
+                    title="Show why this session was closed automatically"
+                    className="inline-flex items-center gap-1 rounded-md border border-destructive/25 bg-destructive/10 px-1.5 py-0 text-[9px] font-black uppercase text-destructive hover:bg-destructive/20 transition-colors"
+                  >
+                    Auto exit
+                    <ArrowRight className="h-2.5 w-2.5" />
+                  </button>
+                ) : (
+                  <Badge
+                    variant="outline"
+                    className="border-destructive/25 bg-destructive/10 text-destructive text-[9px] font-black uppercase px-1.5 py-0"
+                  >
+                    Auto exit
+                  </Badge>
+                ))}
+              {(s.closeReason === "admin" || s.closeReason === "regularized") && (
                 <Badge
                   variant="outline"
-                  className="border-destructive/25 bg-destructive/10 text-destructive text-[9px] font-black uppercase px-1.5 py-0"
+                  title={closeTag(s.closeReason)?.hint}
+                  className="border-border/60 bg-muted/40 text-muted-foreground text-[9px] font-black uppercase px-1.5 py-0"
                 >
-                  Auto exit
+                  {closeTag(s.closeReason)?.label}
                 </Badge>
               )}
               {s.closeReason === "shift_end" && (
@@ -307,6 +318,30 @@ export function SessionTimeline({ sessions }: { sessions: AttendanceSession[] })
           </div>
         );
       })}
+
+      {deducted !== null && (
+        <div className="rounded-xl border border-border/40 bg-muted/20 px-3 py-2 text-[11px] font-semibold space-y-0.5">
+          <div className="flex items-center justify-between text-muted-foreground">
+            <span>Sessions add up to</span>
+            <span className="font-mono font-bold text-foreground/70">{fmtHM(summed)}</span>
+          </div>
+          <div className="flex items-center justify-between text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <UtensilsCrossed className="h-3 w-3 shrink-0 opacity-60" />
+              Unpaid lunch
+            </span>
+            <span className="font-mono font-bold text-destructive">-{fmtHM(deducted)}</span>
+          </div>
+          <div className="flex items-center justify-between border-t border-border/40 pt-1 mt-1">
+            <span className="font-black text-foreground/80">Credited</span>
+            <span className="font-mono font-black text-primary">{fmtHM(totalWorkMs || 0)}</span>
+          </div>
+          <p className="text-[9px] font-normal text-muted-foreground/80 pt-0.5 leading-relaxed">
+            Set by the shift's Lunch Break rule. "Calculate from punches" deducts only a break that
+            was actually taken.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -316,11 +351,9 @@ export function SessionTimeline({ sessions }: { sessions: AttendanceSession[] })
 export function DayStatsRow({
   record,
   displayStatus,
-  worked,
 }: {
   record: AttendanceRecord;
   displayStatus: string;
-  worked?: WorkedEstimate | null;
 }) {
   const geo = record.autoPunchOut
     ? { label: "Auto exit", className: "bg-destructive/10 text-destructive border-destructive/25" }
@@ -330,17 +363,18 @@ export function DayStatsRow({
         ? { label: "Outside fence", className: "bg-warning/10 text-warning-foreground border-warning/25" }
         : null;
 
+  // Approved "Forgot to punch in/out" and missed-punch-out corrections. The
+  // punch fields above already hold the corrected time; this keeps what the
+  // employee actually punched, for reference. Read defensively: the field is
+  // new and not on the shared AttendanceRecord type.
+  const corrections = (record as AttendanceRecord & { corrections?: PunchCorrectionEntry[] }).corrections;
+
   return (
+    <div className="space-y-3">
     <div className="grid grid-cols-3 gap-3 rounded-2xl border border-border/40 bg-muted/20 p-4 text-center">
       <div className="space-y-1">
         <p className={LABEL}>Total Hours</p>
-        <p
-          className={cn("text-[13px] font-black text-primary", worked?.estimated && "italic")}
-          title={worked?.estimated ? ESTIMATE_TOOLTIP[worked.reason] : undefined}
-        >
-          {fmtHM(worked?.ms ?? record.totalWorkMs)}
-          {worked?.estimated && "*"}
-        </p>
+        <p className="text-[13px] font-black text-primary">{fmtHM(record.totalWorkMs)}</p>
       </div>
       <div className="space-y-1">
         <p className={LABEL}>Geo Status</p>
@@ -354,24 +388,37 @@ export function DayStatsRow({
       </div>
       <div className="space-y-1">
         <p className={LABEL}>Status</p>
+        {/* statusClass/statusLabel, not a local ternary chain.
+            This was the last copy of the chain that ended in
+            `bg-destructive/10` for anything it did not recognise -- so
+            `needs_review` rendered in the same red as Absent, telling an admin
+            the employee did not turn up when in fact the day carries a real
+            punch and is waiting on a human. Every other surface was migrated to
+            the shared helper; this one was missed. */}
         <Badge
           variant="outline"
           className={cn(
             "text-[9px] font-black uppercase capitalize border-transparent",
             displayStatus === "on-duty"
               ? "bg-blue-500/10 text-blue-600"
-              : record.status === "present"
-                ? "bg-success/10 text-success"
-                : record.status === "half-day" || record.status === "late"
-                  ? "bg-warning/15 text-warning-foreground"
-                  : record.status === "wfh"
-                    ? "bg-info/15 text-info"
-                    : "bg-destructive/10 text-destructive",
+              : statusClass(record.status),
           )}
+          title={record.status === "needs_review" ? NEEDS_REVIEW_HINT : undefined}
         >
-          {displayStatus === "on-duty" ? "On Duty" : record.status}
+          {displayStatus === "on-duty" ? "On Duty" : statusLabel(record.status)}
         </Badge>
+        {record.isWFH && (
+          <Badge
+            variant="outline"
+            title="Worked from home — branch distance not checked, exempt from auto punch-out."
+            className="ml-1 border-transparent bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 text-[9px] font-black uppercase"
+          >
+            WFH
+          </Badge>
+        )}
       </div>
+    </div>
+    <CorrectionLog corrections={corrections} />
     </div>
   );
 }
@@ -386,104 +433,265 @@ export function DayStatsRow({
  * minutes before the close is the tell for a stale reading, which is the most
  * common cause of a wrong auto punch-out and is invisible without this.
  */
-export function AutoPunchOutCard({ record, onRevert }: { record: AttendanceRecord; onRevert?: () => void }) {
+export function AutoPunchOutCard({
+  record,
+  onRevert,
+  focusIndex,
+  onFocusChange,
+}: {
+  record: AttendanceRecord;
+  onRevert?: () => void;
+  /** Index into `record.shifts` of the exit to open, set by the session badge. */
+  focusIndex?: number | null;
+  onFocusChange?: (index: number | null) => void;
+}) {
+  // Hooks must run unconditionally, so the early return lives below them.
+  const [localOpen, setLocalOpen] = useState<number | null>(null);
+
+  const sessions = record.shifts || [];
+
+  // EVERY auto exit, each carrying its own index so the session list can point
+  // at one. A day can hold several: the engine closes a session, the employee
+  // punches back in, and it closes again. Rendering only the first (or only the
+  // day-level fields) is what made a multi-exit day unexplainable.
+  const exits = sessions
+    .map((s, i) => ({ session: s, index: i }))
+    .filter((e) => e.session.closeReason === "auto_geofence");
+
+  // Legacy shape: a single-session day keeps its close on the root and has no
+  // shifts[] entry to read, so fall back to the day-level fields.
+  const items =
+    exits.length === 0
+      ? [
+          {
+            index: -1,
+            at: record.punchOut ?? null,
+            // `punchOutLocation` is typed `string | {lat,lng}`: older rows put
+            // the raw coordinate in the location field. Rendering that object
+            // directly prints "[object Object]", so split it by shape -- a
+            // string is a place name, an object is a position.
+            coords:
+              record.punchOutCoordinates ??
+              (typeof record.punchOutLocation === "object" ? record.punchOutLocation : null) ??
+              null,
+            distance: record.calculatedDistance ?? record.punchOutDistance ?? null,
+            accuracy: record.punchOutAccuracy ?? null,
+            fixAt: record.punchOutFixAt ?? null,
+            location:
+              typeof record.punchOutLocation === "string" ? record.punchOutLocation : null,
+            reason: record.autoPunchOutReason ?? null,
+          },
+        ]
+      : exits.map((e, n) => {
+          // The LAST exit is the one the day-level fields describe: the engine
+          // overwrites calculatedDistance / autoPunchOutReason / punchOutFixAt
+          // on each close, so they end up holding the final decision. Reading
+          // them for an EARLIER exit is what produced a banner showing S1's
+          // time and coordinates beside S4's 731 m and S3's +/-19 m -- an
+          // accuracy figure belonging to a MANUAL punch-out. Four values, three
+          // different events, presented as one decision.
+          //
+          // So: a session's own fields, and the day-level fields only for the
+          // exit they actually describe. A missing number renders as absent
+          // rather than borrowing a neighbour's -- this panel exists to justify
+          // a punch-out the employee did not make, and a plausible wrong number
+          // is worse here than no number at all.
+          const isLast = n === exits.length - 1;
+          return {
+            index: e.index,
+            at: e.session.punchOut ?? null,
+            coords: e.session.punchOutCoordinates ?? null,
+            distance:
+              e.session.punchOutDistance ?? (isLast ? record.calculatedDistance ?? null : null),
+            accuracy: e.session.punchOutAccuracy ?? null,
+            fixAt: isLast ? record.punchOutFixAt ?? null : null,
+            location: e.session.punchOutLocation ?? null,
+            reason: isLast ? record.autoPunchOutReason ?? null : null,
+          };
+        });
+
   if (!record.autoPunchOut) return null;
 
-  const session = (record.shifts || []).find((s) => s.closeReason === "auto_geofence");
-  const coords = session?.punchOutCoordinates || null;
-  const accuracy = session?.punchOutAccuracy ?? record.punchOutAccuracy ?? null;
-  const distance = record.calculatedDistance ?? session?.punchOutDistance ?? null;
-
-  const fixAt = record.punchOutFixAt ? new Date(record.punchOutFixAt) : null;
-  const outAt = session?.punchOut ? new Date(session.punchOut) : record.punchOut ? new Date(record.punchOut) : null;
-  const staleMin = fixAt && outAt ? Math.round((outAt.getTime() - fixAt.getTime()) / 60000) : null;
+  // One exit needs no picking. Several start collapsed so the list reads as a
+  // list, and the session badge opens the one the admin clicked.
+  const openIndex = focusIndex !== undefined && focusIndex !== null ? focusIndex : localOpen;
+  const setOpen = (i: number | null) => {
+    setLocalOpen(i);
+    onFocusChange?.(i);
+  };
+  const single = items.length === 1;
 
   const employeeId = record.employeeId?._id;
-  const canMap = !!employeeId && typeof coords?.lat === "number" && typeof coords?.lng === "number";
+  const dateKey = record.date ? toISTDateKey(record.date) : undefined;
 
   return (
     <div className="rounded-2xl border border-warning/25 bg-warning/10 p-4 space-y-2">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+      <div className="flex items-center gap-2 flex-wrap">
         <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide text-warning-foreground">
           <AlertTriangle className="h-4 w-4" />
           Auto punch-out
-          {outAt && <span className="font-bold normal-case"> at {fmtTime(session?.punchOut || record.punchOut)}</span>}
         </span>
-
-        {distance != null && (
-          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-warning-foreground">
-            <RouteIcon className="h-3.5 w-3.5" />
-            {distance} m from branch
-          </span>
-        )}
-
-        {accuracy != null && (
-          <span
-            title={
-              accuracy > 35
-                ? "Low-quality fix — the position was uncertain by this many metres"
-                : "GPS accuracy at the moment of the close"
-            }
-            className={cn(
-              "inline-flex items-center gap-1 text-[11px] font-bold",
-              accuracy > 35 ? "text-destructive" : "text-muted-foreground",
-            )}
+        {items.length > 1 && (
+          <Badge
+            variant="outline"
+            className="border-warning/30 bg-warning/15 text-warning-foreground text-[9px] font-black uppercase px-1.5 py-0"
           >
-            <Satellite className="h-3.5 w-3.5" />±{Math.round(accuracy)} m
-          </span>
-        )}
-
-        {staleMin != null && staleMin >= 2 && (
-          <span
-            title="The device captured this position well before the punch-out — it may be a stale reading"
-            className="inline-flex items-center gap-1 text-[11px] font-bold text-destructive"
-          >
-            <Clock className="h-3.5 w-3.5" /> fix {staleMin} min old
-          </span>
+            {items.length} exits this day
+          </Badge>
         )}
       </div>
 
-      {session?.punchOutLocation && (
-        <p className="flex items-start gap-1.5 text-[11px] font-medium text-foreground/80">
-          <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-          <span>{session.punchOutLocation}</span>
-        </p>
-      )}
+      <div className="space-y-1.5">
+        {items.map((item) => {
+          const expanded = single || openIndex === item.index;
+          const canMap =
+            !!employeeId &&
+            typeof item.coords?.lat === "number" &&
+            typeof item.coords?.lng === "number";
+          const outAt = item.at ? new Date(item.at) : null;
+          const fixAt = item.fixAt ? new Date(item.fixAt) : null;
+          // Only meaningful when the fix PRECEDES the close. A negative value
+          // means the two belong to different events and must not be shown.
+          const staleMin =
+            fixAt && outAt && outAt.getTime() >= fixAt.getTime()
+              ? Math.round((outAt.getTime() - fixAt.getTime()) / 60000)
+              : null;
 
-      {record.autoPunchOutReason && (
-        <p className="text-[10px] text-muted-foreground leading-relaxed">{record.autoPunchOutReason}</p>
-      )}
+          return (
+            <div
+              key={item.index}
+              id={item.index >= 0 ? `auto-exit-${item.index}` : undefined}
+              className={cn(
+                "rounded-xl border transition-colors",
+                expanded
+                  ? "border-warning/30 bg-background/60"
+                  : "border-border/40 bg-background/30",
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => setOpen(expanded && !single ? null : item.index)}
+                disabled={single}
+                className={cn(
+                  "w-full flex items-center gap-2 flex-wrap px-3 py-2 text-left",
+                  !single && "hover:bg-warning/10 rounded-xl",
+                )}
+              >
+                {item.index >= 0 && (
+                  <span className="text-[11px] font-black text-foreground/70">
+                    S{item.index + 1}
+                  </span>
+                )}
+                <span className="text-[11px] font-bold text-warning-foreground">
+                  {outAt ? fmtTime(item.at) : "—"}
+                </span>
+                {item.distance != null && (
+                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-warning-foreground">
+                    <RouteIcon className="h-3.5 w-3.5" />
+                    {Math.round(item.distance)} m from branch
+                  </span>
+                )}
+                {item.accuracy != null && (
+                  <span
+                    title={
+                      item.accuracy > 35
+                        ? "Low-quality fix — the position was uncertain by this many metres"
+                        : "GPS accuracy at the moment of the close"
+                    }
+                    className={cn(
+                      "inline-flex items-center gap-1 text-[11px] font-bold",
+                      item.accuracy > 35 ? "text-destructive" : "text-muted-foreground",
+                    )}
+                  >
+                    <Satellite className="h-3.5 w-3.5" />
+                    {"±"}
+                    {Math.round(item.accuracy)} m
+                  </span>
+                )}
+                {staleMin != null && staleMin >= 2 && (
+                  <span
+                    title="The device captured this position well before the punch-out — it may be a stale reading"
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-destructive"
+                  >
+                    <Clock className="h-3.5 w-3.5" /> fix {staleMin} min old
+                  </span>
+                )}
+                {!single && (
+                  <span className="ml-auto text-[10px] font-bold text-muted-foreground">
+                    {expanded ? "Hide" : "Why"}
+                  </span>
+                )}
+              </button>
 
-      <div className="flex flex-wrap items-center gap-2 pt-0.5">
-        {canMap && (
-          <Link
-            to="/tracking"
-            search={{
-              employeeId,
-              date: record.date?.slice(0, 10),
-              exitLat: coords!.lat,
-              exitLng: coords!.lng,
-            }}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[11px] font-black text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            <RouteIcon className="h-3.5 w-3.5" /> Show on map — why this happened
-          </Link>
-        )}
+              {expanded && (
+                <div className="px-3 pb-3 space-y-2">
+                  {item.location ? (
+                    <p className="flex items-start gap-1.5 text-[11px] font-medium text-foreground/80">
+                      <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                      <span>{item.location}</span>
+                    </p>
+                  ) : (
+                    canMap && (
+                      <p className="flex items-start gap-1.5 text-[11px] font-mono text-foreground/70">
+                        <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                        <span>
+                          {item.coords!.lat!.toFixed(5)}, {item.coords!.lng!.toFixed(5)}
+                        </span>
+                      </p>
+                    )
+                  )}
 
-        {/* The undo, put where the decision is being read rather than buried in
-            a settings page. An admin who has just decided the engine was wrong
-            should not then have to go and hand-edit punch times -- that is
-            slower than the mistake and leaves no trace of what happened. */}
-        {onRevert && (
-          <button
-            type="button"
-            onClick={onRevert}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 py-1.5 text-[11px] font-black text-foreground hover:bg-muted transition-colors"
-          >
-            <Undo2 className="h-3.5 w-3.5" /> This was wrong — undo
-          </button>
-        )}
+                  {item.reason && (
+                    <p className="text-[10px] text-muted-foreground leading-relaxed">
+                      {item.reason}
+                    </p>
+                  )}
+
+                  {canMap ? (
+                    <Link
+                      to="/tracking"
+                      search={{
+                        employeeId,
+                        // toISTDateKey, not slice(0,10): the stored date is IST
+                        // midnight, so its UTC date is always the previous day
+                        // and the link pointed the map at the wrong one.
+                        date: dateKey,
+                        // THIS exit's coordinates, so a multi-exit day focuses
+                        // the pin the admin actually clicked rather than
+                        // whichever one happened to be first.
+                        exitLat: item.coords!.lat,
+                        exitLng: item.coords!.lng,
+                        exitAt: item.at ? new Date(item.at).toISOString() : undefined,
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-[11px] font-black text-primary-foreground hover:bg-primary/90 transition-colors"
+                    >
+                      <RouteIcon className="h-3.5 w-3.5" /> Show on map {"—"} why this happened
+                    </Link>
+                  ) : (
+                    <p className="text-[10px] font-semibold text-muted-foreground">
+                      No coordinates were stored for this close, so it cannot be shown on the map.
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
+
+      {/* The undo, put where the decision is being read rather than buried in
+          a settings page. An admin who has just decided the engine was wrong
+          should not then have to go and hand-edit punch times -- that is
+          slower than the mistake and leaves no trace of what happened. */}
+      {onRevert && (
+        <button
+          type="button"
+          onClick={onRevert}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border/60 bg-background px-3 py-1.5 text-[11px] font-black text-foreground hover:bg-muted transition-colors"
+        >
+          <Undo2 className="h-3.5 w-3.5" /> This was wrong {"—"} undo
+        </button>
+      )}
     </div>
   );
 }
@@ -492,19 +700,21 @@ export function AutoPunchOutCard({ record, onRevert }: { record: AttendanceRecor
 
 export function ShiftRequirementCard({
   shift,
-  lunchMins,
-  graceMins,
-  worked,
+  lunchMins: lunchFallback,
+  graceMins: graceFallback,
+  workedMs,
+  grading,
 }: {
   shift: ShiftLike | null | undefined;
   lunchMins: number;
   graceMins: number;
-  worked: WorkedEstimate | null;
+  workedMs: number;
+  /** Server-computed bar for this day; preferred over the fallback figures. */
+  grading?: DayGrading | null;
 }) {
-  const required = requiredMinutes(shift, lunchMins, graceMins);
+  const { required, lunch: lunchMins, grace: graceMins } = resolveBar(shift, lunchFallback, graceFallback, grading);
   const span = shiftSpanMinutes(shift);
-  const workedMs = worked?.ms ?? 0;
-  const workedMins = Math.round(workedMs / 60000);
+  const workedMins = Math.round((workedMs || 0) / 60000);
 
   return (
     <div className="rounded-2xl border border-border/40 bg-muted/20 p-4 space-y-2">
@@ -539,12 +749,9 @@ export function ShiftRequirementCard({
               className={cn(
                 "text-[12px] font-black",
                 workedMins >= required ? "text-success" : "text-warning-foreground",
-                worked?.estimated && "italic",
               )}
-              title={worked?.estimated ? ESTIMATE_TOOLTIP[worked.reason] : undefined}
             >
               {fmtHM(workedMs)}
-              {worked?.estimated && "*"}
             </p>
             <p className="text-[10px] text-muted-foreground">
               {required > 0 ? Math.round((workedMins / required) * 100) : 0}% of required
@@ -572,38 +779,30 @@ export function WhyHalfDay({
   record,
   sessions,
   shift,
-  lunchMins,
-  graceMins,
-  worked,
+  lunchMins: lunchFallback,
+  graceMins: graceFallback,
 }: {
   record: AttendanceRecord;
   sessions: AttendanceSession[];
   shift: ShiftLike | null | undefined;
   lunchMins: number;
   graceMins: number;
-  worked: WorkedEstimate | null;
 }) {
   if (record.status !== "half-day") return null;
 
-  const required = requiredMinutes(shift, lunchMins, graceMins);
-  const workedMs = worked?.ms ?? 0;
-  const workedMins = Math.round(workedMs / 60000);
+  const { required, lunch: lunchMins } = resolveBar(shift, lunchFallback, graceFallback, record.grading);
+  const workedMins = Math.round((record.totalWorkMs || 0) / 60000);
   const reasons: string[] = [];
-
-  if (worked?.estimated) {
-    reasons.push(ESTIMATE_TOOLTIP[worked.reason]!);
-  }
 
   if (required != null && workedMins < required) {
     reasons.push(
-      `Worked ${fmtHM(workedMs)} — ${required - workedMins} min short of the required ${fmtHM(required * 60000)}.`,
+      `Worked ${fmtHM(record.totalWorkMs)} — ${required - workedMins} min short of the required ${fmtHM(required * 60000)}.`,
     );
 
     const firstIn = sessions[0]?.punchIn || record.punchIn;
     const startMin = toMin(shift?.startTime);
     if (firstIn && startMin != null) {
-      const d = new Date(firstIn);
-      const inMin = d.getHours() * 60 + d.getMinutes();
+      const inMin = istMinuteOfDay(firstIn);
       if (inMin > startMin) {
         reasons.push(
           `Arrived ${inMin - startMin} min after shift start (${fmtTime(firstIn)} vs ${fmt12(shift?.startTime)}).`,
@@ -614,8 +813,7 @@ export function WhyHalfDay({
     const lastOut = [...sessions].reverse().find((s) => s.punchOut)?.punchOut || record.punchOut;
     const endMin = toMin(shift?.endTime);
     if (lastOut && endMin != null) {
-      const d = new Date(lastOut);
-      const outMin = d.getHours() * 60 + d.getMinutes();
+      const outMin = istMinuteOfDay(lastOut);
       if (outMin < endMin) {
         reasons.push(
           `Left ${endMin - outMin} min before shift end (${fmtTime(lastOut)} vs ${fmt12(shift?.endTime)}).`,
@@ -648,7 +846,7 @@ export function WhyHalfDay({
       reasons.push(
         punched > lunchMins
           ? `Lunch ran ${punched} min — longer than the ${lunchMins} min allowance, so the full break was deducted.`
-          : `${lunchMins} min lunch deducted (configured minimum${punched > 0 ? `; actual break ${punched} min` : " — no lunch was punched"}).`,
+          : `${lunchMins} min lunch deducted (the shift's lunch rule${punched > 0 ? `; actual break ${punched} min` : " — no lunch was punched"}).`,
       );
     }
 
@@ -658,7 +856,7 @@ export function WhyHalfDay({
     }
   } else if (required != null) {
     reasons.push(
-      `Hours met the requirement (${fmtHM(workedMs)} ≥ ${fmtHM(required * 60000)}) — the half day came from a late arrival or early departure rule, or an admin correction.`,
+      `Hours met the requirement (${fmtHM(record.totalWorkMs)} ≥ ${fmtHM(required * 60000)}) — the half day came from a late arrival or early departure rule, or an admin correction.`,
     );
   }
 

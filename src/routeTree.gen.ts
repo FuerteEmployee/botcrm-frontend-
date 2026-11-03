@@ -24,8 +24,10 @@ import { Route as UserAnnouncementsRouteImport } from './routes/user/announcemen
 import { Route as UserAdvanceSalaryRouteImport } from './routes/user/advance-salary'
 import { Route as UserAccountRouteImport } from './routes/user/account'
 import { Route as SuperTenantsRouteImport } from './routes/super/tenants'
+import { Route as SuperReleasesRouteImport } from './routes/super/releases'
 import { Route as SuperPlansRouteImport } from './routes/super/plans'
 import { Route as SuperOverviewRouteImport } from './routes/super/overview'
+import { Route as SuperHealthRouteImport } from './routes/super/health'
 import { Route as SuperDevicesRouteImport } from './routes/super/devices'
 import { Route as SuperBillingRouteImport } from './routes/super/billing'
 import { Route as SuperAlertsRouteImport } from './routes/super/alerts'
@@ -52,7 +54,6 @@ import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
 import { Route as AppBranchesRouteImport } from './routes/_app/branches'
 import { Route as AppBiometricDevicesRouteImport } from './routes/_app/biometric-devices'
 import { Route as AppBillingRouteImport } from './routes/_app/billing'
-import { Route as AppAttendanceConfigRouteImport } from './routes/_app/attendance-config'
 import { Route as AppAttendanceRouteImport } from './routes/_app/attendance'
 import { Route as AppAssetsRouteImport } from './routes/_app/assets'
 import { Route as AppAnnouncementsRouteImport } from './routes/_app/announcements'
@@ -137,6 +138,11 @@ const SuperTenantsRoute = SuperTenantsRouteImport.update({
   path: '/tenants',
   getParentRoute: () => SuperRoute,
 } as any)
+const SuperReleasesRoute = SuperReleasesRouteImport.update({
+  id: '/releases',
+  path: '/releases',
+  getParentRoute: () => SuperRoute,
+} as any)
 const SuperPlansRoute = SuperPlansRouteImport.update({
   id: '/plans',
   path: '/plans',
@@ -145,6 +151,11 @@ const SuperPlansRoute = SuperPlansRouteImport.update({
 const SuperOverviewRoute = SuperOverviewRouteImport.update({
   id: '/overview',
   path: '/overview',
+  getParentRoute: () => SuperRoute,
+} as any)
+const SuperHealthRoute = SuperHealthRouteImport.update({
+  id: '/health',
+  path: '/health',
   getParentRoute: () => SuperRoute,
 } as any)
 const SuperDevicesRoute = SuperDevicesRouteImport.update({
@@ -277,11 +288,6 @@ const AppBillingRoute = AppBillingRouteImport.update({
   path: '/billing',
   getParentRoute: () => AppRoute,
 } as any)
-const AppAttendanceConfigRoute = AppAttendanceConfigRouteImport.update({
-  id: '/attendance-config',
-  path: '/attendance-config',
-  getParentRoute: () => AppRoute,
-} as any)
 const AppAttendanceRoute = AppAttendanceRouteImport.update({
   id: '/attendance',
   path: '/attendance',
@@ -337,7 +343,6 @@ export interface FileRoutesByFullPath {
   '/announcements': typeof AppAnnouncementsRoute
   '/assets': typeof AppAssetsRouteWithChildren
   '/attendance': typeof AppAttendanceRoute
-  '/attendance-config': typeof AppAttendanceConfigRoute
   '/billing': typeof AppBillingRoute
   '/biometric-devices': typeof AppBiometricDevicesRoute
   '/branches': typeof AppBranchesRoute
@@ -364,8 +369,10 @@ export interface FileRoutesByFullPath {
   '/super/alerts': typeof SuperAlertsRoute
   '/super/billing': typeof SuperBillingRoute
   '/super/devices': typeof SuperDevicesRoute
+  '/super/health': typeof SuperHealthRoute
   '/super/overview': typeof SuperOverviewRoute
   '/super/plans': typeof SuperPlansRoute
+  '/super/releases': typeof SuperReleasesRoute
   '/super/tenants': typeof SuperTenantsRoute
   '/user/account': typeof UserAccountRoute
   '/user/advance-salary': typeof UserAdvanceSalaryRoute
@@ -389,7 +396,6 @@ export interface FileRoutesByTo {
   '/advance-salary': typeof AppAdvanceSalaryRoute
   '/announcements': typeof AppAnnouncementsRoute
   '/attendance': typeof AppAttendanceRoute
-  '/attendance-config': typeof AppAttendanceConfigRoute
   '/billing': typeof AppBillingRoute
   '/biometric-devices': typeof AppBiometricDevicesRoute
   '/branches': typeof AppBranchesRoute
@@ -415,8 +421,10 @@ export interface FileRoutesByTo {
   '/super/alerts': typeof SuperAlertsRoute
   '/super/billing': typeof SuperBillingRoute
   '/super/devices': typeof SuperDevicesRoute
+  '/super/health': typeof SuperHealthRoute
   '/super/overview': typeof SuperOverviewRoute
   '/super/plans': typeof SuperPlansRoute
+  '/super/releases': typeof SuperReleasesRoute
   '/super/tenants': typeof SuperTenantsRoute
   '/user/account': typeof UserAccountRoute
   '/user/advance-salary': typeof UserAdvanceSalaryRoute
@@ -444,7 +452,6 @@ export interface FileRoutesById {
   '/_app/announcements': typeof AppAnnouncementsRoute
   '/_app/assets': typeof AppAssetsRouteWithChildren
   '/_app/attendance': typeof AppAttendanceRoute
-  '/_app/attendance-config': typeof AppAttendanceConfigRoute
   '/_app/billing': typeof AppBillingRoute
   '/_app/biometric-devices': typeof AppBiometricDevicesRoute
   '/_app/branches': typeof AppBranchesRoute
@@ -471,8 +478,10 @@ export interface FileRoutesById {
   '/super/alerts': typeof SuperAlertsRoute
   '/super/billing': typeof SuperBillingRoute
   '/super/devices': typeof SuperDevicesRoute
+  '/super/health': typeof SuperHealthRoute
   '/super/overview': typeof SuperOverviewRoute
   '/super/plans': typeof SuperPlansRoute
+  '/super/releases': typeof SuperReleasesRoute
   '/super/tenants': typeof SuperTenantsRoute
   '/user/account': typeof UserAccountRoute
   '/user/advance-salary': typeof UserAdvanceSalaryRoute
@@ -500,7 +509,6 @@ export interface FileRouteTypes {
     | '/announcements'
     | '/assets'
     | '/attendance'
-    | '/attendance-config'
     | '/billing'
     | '/biometric-devices'
     | '/branches'
@@ -527,8 +535,10 @@ export interface FileRouteTypes {
     | '/super/alerts'
     | '/super/billing'
     | '/super/devices'
+    | '/super/health'
     | '/super/overview'
     | '/super/plans'
+    | '/super/releases'
     | '/super/tenants'
     | '/user/account'
     | '/user/advance-salary'
@@ -552,7 +562,6 @@ export interface FileRouteTypes {
     | '/advance-salary'
     | '/announcements'
     | '/attendance'
-    | '/attendance-config'
     | '/billing'
     | '/biometric-devices'
     | '/branches'
@@ -578,8 +587,10 @@ export interface FileRouteTypes {
     | '/super/alerts'
     | '/super/billing'
     | '/super/devices'
+    | '/super/health'
     | '/super/overview'
     | '/super/plans'
+    | '/super/releases'
     | '/super/tenants'
     | '/user/account'
     | '/user/advance-salary'
@@ -606,7 +617,6 @@ export interface FileRouteTypes {
     | '/_app/announcements'
     | '/_app/assets'
     | '/_app/attendance'
-    | '/_app/attendance-config'
     | '/_app/billing'
     | '/_app/biometric-devices'
     | '/_app/branches'
@@ -633,8 +643,10 @@ export interface FileRouteTypes {
     | '/super/alerts'
     | '/super/billing'
     | '/super/devices'
+    | '/super/health'
     | '/super/overview'
     | '/super/plans'
+    | '/super/releases'
     | '/super/tenants'
     | '/user/account'
     | '/user/advance-salary'
@@ -767,6 +779,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SuperTenantsRouteImport
       parentRoute: typeof SuperRoute
     }
+    '/super/releases': {
+      id: '/super/releases'
+      path: '/releases'
+      fullPath: '/super/releases'
+      preLoaderRoute: typeof SuperReleasesRouteImport
+      parentRoute: typeof SuperRoute
+    }
     '/super/plans': {
       id: '/super/plans'
       path: '/plans'
@@ -779,6 +798,13 @@ declare module '@tanstack/react-router' {
       path: '/overview'
       fullPath: '/super/overview'
       preLoaderRoute: typeof SuperOverviewRouteImport
+      parentRoute: typeof SuperRoute
+    }
+    '/super/health': {
+      id: '/super/health'
+      path: '/health'
+      fullPath: '/super/health'
+      preLoaderRoute: typeof SuperHealthRouteImport
       parentRoute: typeof SuperRoute
     }
     '/super/devices': {
@@ -963,13 +989,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppBillingRouteImport
       parentRoute: typeof AppRoute
     }
-    '/_app/attendance-config': {
-      id: '/_app/attendance-config'
-      path: '/attendance-config'
-      fullPath: '/attendance-config'
-      preLoaderRoute: typeof AppAttendanceConfigRouteImport
-      parentRoute: typeof AppRoute
-    }
     '/_app/attendance': {
       id: '/_app/attendance'
       path: '/attendance'
@@ -1071,7 +1090,6 @@ interface AppRouteChildren {
   AppAnnouncementsRoute: typeof AppAnnouncementsRoute
   AppAssetsRoute: typeof AppAssetsRouteWithChildren
   AppAttendanceRoute: typeof AppAttendanceRoute
-  AppAttendanceConfigRoute: typeof AppAttendanceConfigRoute
   AppBillingRoute: typeof AppBillingRoute
   AppBiometricDevicesRoute: typeof AppBiometricDevicesRoute
   AppBranchesRoute: typeof AppBranchesRoute
@@ -1102,7 +1120,6 @@ const AppRouteChildren: AppRouteChildren = {
   AppAnnouncementsRoute: AppAnnouncementsRoute,
   AppAssetsRoute: AppAssetsRouteWithChildren,
   AppAttendanceRoute: AppAttendanceRoute,
-  AppAttendanceConfigRoute: AppAttendanceConfigRoute,
   AppBillingRoute: AppBillingRoute,
   AppBiometricDevicesRoute: AppBiometricDevicesRoute,
   AppBranchesRoute: AppBranchesRoute,
@@ -1134,8 +1151,10 @@ interface SuperRouteChildren {
   SuperAlertsRoute: typeof SuperAlertsRoute
   SuperBillingRoute: typeof SuperBillingRoute
   SuperDevicesRoute: typeof SuperDevicesRoute
+  SuperHealthRoute: typeof SuperHealthRoute
   SuperOverviewRoute: typeof SuperOverviewRoute
   SuperPlansRoute: typeof SuperPlansRoute
+  SuperReleasesRoute: typeof SuperReleasesRoute
   SuperTenantsRoute: typeof SuperTenantsRoute
 }
 
@@ -1143,8 +1162,10 @@ const SuperRouteChildren: SuperRouteChildren = {
   SuperAlertsRoute: SuperAlertsRoute,
   SuperBillingRoute: SuperBillingRoute,
   SuperDevicesRoute: SuperDevicesRoute,
+  SuperHealthRoute: SuperHealthRoute,
   SuperOverviewRoute: SuperOverviewRoute,
   SuperPlansRoute: SuperPlansRoute,
+  SuperReleasesRoute: SuperReleasesRoute,
   SuperTenantsRoute: SuperTenantsRoute,
 }
 

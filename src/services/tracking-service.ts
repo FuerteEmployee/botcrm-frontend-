@@ -12,6 +12,34 @@ export interface Location {
   // perfect fix. Absent on older rows saved before the field existed.
   accuracy?: number | null;
   timestamp: string;
+  // Freshness, computed by the server so the threshold has one definition.
+  // Absent on rows that arrive by socket, which carry no age -- treat a
+  // missing isLive as "work it out from timestamp", never as "not live".
+  ageSeconds?: number;
+  isLive?: boolean;
+  liveWindowSeconds?: number;
+}
+
+/** Seconds since this fix was recorded, recomputed now rather than at fetch. */
+export function locationAgeSeconds(loc: Location): number {
+  return Math.max(0, Math.round((Date.now() - new Date(loc.timestamp).getTime()) / 1000));
+}
+
+/**
+ * Is this position current enough to represent where someone IS, rather than
+ * where they were? Recomputed on every render so a pin goes stale on screen
+ * even if the page has not re-fetched.
+ */
+export function isLocationLive(loc: Location): boolean {
+  return locationAgeSeconds(loc) <= (loc.liveWindowSeconds ?? 120);
+}
+
+/** "12s" / "8m" / "3h" / "24d" — compact enough for a map label. */
+export function formatAge(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
+  return `${Math.round(seconds / 86400)}d`;
 }
 
 function normalizeLocations(raw: any): Location[] {
@@ -34,6 +62,9 @@ function normalizeLocations(raw: any): Location[] {
       longitude: item.longitude ?? item.lng ?? 0,
       accuracy: item.accuracy,
       timestamp: item.timestamp ?? item.updatedAt ?? new Date().toISOString(),
+      ageSeconds: item.ageSeconds,
+      isLive: item.isLive,
+      liveWindowSeconds: item.liveWindowSeconds,
     }))
     .filter((l) => l.employeeId && l.latitude !== 0 && l.longitude !== 0);
 }
@@ -54,17 +85,24 @@ function snapshotToLocations(snapshot: Record<string, any>): Location[] {
 export function useTrackingService() {
   const [locations, setLocations] = useState<Location[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  // The failed request, kept so the page can say why the map is empty
+  // (no permission, no connection) instead of looking like nobody has a fix.
+  const [error, setError] = useState<unknown>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     // 1. Initial snapshot via REST (shows data even before socket connects)
-    apiClient
-      .get("/tracking/latest")
-      .then(({ data }) => {
-        const normalized = normalizeLocations(data);
-        if (normalized.length > 0) setLocations(normalized);
-      })
-      .catch(() => {})
-      .finally(() => setIsLoading(false));
+    const load = () =>
+      apiClient
+        .get("/tracking/latest")
+        .then(({ data }) => {
+          // An empty list is a real answer (nobody has reported yet), so it
+          // replaces the old one rather than being ignored.
+          setLocations(normalizeLocations(data));
+          setError(null);
+        })
+        .catch((e) => setError(e));
+    load().finally(() => setIsLoading(false));
 
     // 2. Socket.IO — real-time channel the server uses
     const socket = canUseSocket() ? getSocket() : null;
@@ -112,13 +150,7 @@ export function useTrackingService() {
 
     // 3. REST polling fallback every 30s (covers gaps if socket events are missed)
     const pollInterval = setInterval(() => {
-      apiClient
-        .get("/tracking/latest")
-        .then(({ data }) => {
-          const normalized = normalizeLocations(data);
-          if (normalized.length > 0) setLocations(normalized);
-        })
-        .catch(() => {});
+      load();
     }, 30000);
 
     return () => {
@@ -128,20 +160,24 @@ export function useTrackingService() {
       socket?.off("employee:offline");
       clearInterval(pollInterval);
     };
-  }, []);
+  }, [reloadKey]);
 
-  return { locations, isLoading };
+  return { locations, isLoading, error, refresh: () => setReloadKey((k) => k + 1) };
 }
 
 export interface TrackingStats {
   liveNow: number;
+  /** Field staff not reporting right now. */
   offline: number;
   trackingPoints: number;
+  /** Active employees whose own or department tracking switch is on. */
   fieldStaff: number;
+  /** Punched in, tracking on, and nothing received in the last two minutes. */
+  expectedButSilent?: number;
 }
 
 export function useTrackingStats() {
-  const { data, isLoading, refetch } = useQuery<TrackingStats>({
+  const { data, isLoading, isError, error, refetch } = useQuery<TrackingStats>({
     queryKey: ["tracking-stats"],
     queryFn: async () => {
       const { data } = await apiClient.get("/tracking/stats");
@@ -150,13 +186,20 @@ export function useTrackingStats() {
     refetchInterval: 30000,
   });
 
-  return { stats: data, isLoading, refetch };
+  return { stats: data, isLoading, isError, error, refetch };
 }
 
 // One employee's full route for a given day (YYYY-MM-DD, defaults to today) —
 // powers the map's polyline + Start/End markers + distance readout.
 export function useTrackingHistory(employeeId: string | undefined, date: string) {
-  const { data, isLoading, refetch } = useQuery<{ points: Location[]; distanceKm: number }>({
+  const { data, isLoading, isError, refetch } = useQuery<{
+    points: Location[];
+    distanceKm: number;
+    /** Fixes actually received. `points` is the smoothed route drawn from them. */
+    rawCount?: number;
+    /** Distance before smoothing — kept so the drop is explainable, not mysterious. */
+    rawDistanceKm?: number;
+  }>({
     queryKey: ["tracking-history", employeeId, date],
     queryFn: async () => {
       const { data } = await apiClient.get("/tracking/history", { params: { employeeId, date } });
@@ -166,14 +209,22 @@ export function useTrackingHistory(employeeId: string | undefined, date: string)
     refetchInterval: 30000,
   });
 
-  return { points: data?.points ?? [], distanceKm: data?.distanceKm ?? 0, isLoading, refetch };
+  return {
+    points: data?.points ?? [],
+    distanceKm: data?.distanceKm ?? 0,
+    rawCount: data?.rawCount ?? data?.points?.length ?? 0,
+    rawDistanceKm: data?.rawDistanceKm ?? 0,
+    isLoading,
+    isError,
+    refetch,
+  };
 }
 
 export function usePingEmployee() {
   return useMutation({
     mutationFn: async (employeeId: string) => {
       const { data } = await apiClient.post(`/tracking/ping/${employeeId}`);
-      return data;
+      return data as { pingRequestedAt: string; punchedIn: boolean };
     },
   });
 }

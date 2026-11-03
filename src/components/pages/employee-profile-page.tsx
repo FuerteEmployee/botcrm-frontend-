@@ -6,7 +6,7 @@ import { motion } from 'framer-motion'
 import { Button } from '@/components/ui/button'
 import { Mail, Phone, MapPin, Calendar, Building, Clock, DollarSign, CheckCircle, XCircle } from 'lucide-react'
 import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar'
-import { employees, mockAttendance, mockSalary } from '@/lib/mock-data'
+import { employees, attendanceLogs, salaryRecords, getDepartmentName, getBranchName } from '@/lib/mock-data'
 
 interface EmployeeProfilePageProps {
   employeeId?: string
@@ -14,8 +14,11 @@ interface EmployeeProfilePageProps {
 
 export function EmployeeProfilePage({ employeeId = 'EMP001' }: EmployeeProfilePageProps) {
   const employee = employees.find(e => e.id === employeeId) || employees[0]
-  const employeeAttendance = mockAttendance.filter(a => a.employeeId === employee.id)
-  const employeeSalary = mockSalary.filter(s => s.employeeId === employee.id)
+  const employeeAttendance = attendanceLogs.filter(a => a.employeeId === employee.id)
+  const employeeSalary = salaryRecords.filter(s => s.employeeId === employee.id)
+  const department = getDepartmentName(employee.departmentId)
+  const branch = getBranchName(employee.branchId)
+  const attendanceCount = (status: string) => employeeAttendance.filter(a => a.status === status).length
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-950 p-4 md:p-8">
@@ -42,8 +45,8 @@ export function EmployeeProfilePage({ employeeId = 'EMP001' }: EmployeeProfilePa
                 </p>
                 <div className="flex flex-wrap gap-3">
                   <Badge className="bg-purple-600 text-white">{employee.status}</Badge>
-                  <Badge variant="outline">{employee.department}</Badge>
-                  <Badge variant="outline">{employee.branch}</Badge>
+                  <Badge variant="outline">{department}</Badge>
+                  <Badge variant="outline">{branch}</Badge>
                 </div>
               </div>
               <Button className="bg-linear-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white">
@@ -88,7 +91,7 @@ export function EmployeeProfilePage({ employeeId = 'EMP001' }: EmployeeProfilePa
                 <span className="text-sm text-slate-600 dark:text-slate-400">Joined</span>
               </div>
               <p className="font-medium text-slate-900 dark:text-white">
-                {new Date(employee.joinDate).toLocaleDateString()}
+                {new Date(employee.joinedAt).toLocaleDateString()}
               </p>
             </CardContent>
           </Card>
@@ -102,7 +105,7 @@ export function EmployeeProfilePage({ employeeId = 'EMP001' }: EmployeeProfilePa
                 <span className="text-sm text-slate-600 dark:text-slate-400">Salary</span>
               </div>
               <p className="font-medium text-slate-900 dark:text-white">
-                ৳{employee.salary.toLocaleString()}
+                ₹{employee.salary.toLocaleString('en-IN')}
               </p>
             </CardContent>
           </Card>
@@ -170,14 +173,14 @@ export function EmployeeProfilePage({ employeeId = 'EMP001' }: EmployeeProfilePa
                       <Building className="w-4 h-4" />
                       Department
                     </p>
-                    <p className="font-medium text-slate-900 dark:text-white">{employee.department}</p>
+                    <p className="font-medium text-slate-900 dark:text-white">{department}</p>
                   </div>
                   <div className="p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">
                     <p className="text-sm text-slate-600 dark:text-slate-400 mb-1 flex items-center gap-2">
                       <MapPin className="w-4 h-4" />
                       Branch
                     </p>
-                    <p className="font-medium text-slate-900 dark:text-white">{employee.branch}</p>
+                    <p className="font-medium text-slate-900 dark:text-white">{branch}</p>
                   </div>
                 </div>
               </CardContent>
@@ -200,19 +203,19 @@ export function EmployeeProfilePage({ employeeId = 'EMP001' }: EmployeeProfilePa
                 <div className="grid grid-cols-3 gap-4 mb-6">
                   <div className="p-4 bg-green-50 dark:bg-green-950/30 rounded-lg text-center">
                     <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                      {employee.attendance?.presentDays || 0}
+                      {attendanceCount('present')}
                     </p>
                     <p className="text-sm text-slate-600 dark:text-slate-400">Present Days</p>
                   </div>
                   <div className="p-4 bg-red-50 dark:bg-red-950/30 rounded-lg text-center">
                     <p className="text-2xl font-bold text-red-600 dark:text-red-400">
-                      {employee.attendance?.absentDays || 0}
+                      {attendanceCount('absent')}
                     </p>
                     <p className="text-sm text-slate-600 dark:text-slate-400">Absent Days</p>
                   </div>
                   <div className="p-4 bg-orange-50 dark:bg-orange-950/30 rounded-lg text-center">
                     <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">
-                      {employee.attendance?.halfDays || 0}
+                      {attendanceCount('half-day')}
                     </p>
                     <p className="text-sm text-slate-600 dark:text-slate-400">Half Days</p>
                   </div>
@@ -226,7 +229,7 @@ export function EmployeeProfilePage({ employeeId = 'EMP001' }: EmployeeProfilePa
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {employeeAttendance.slice(0, 5).map((record, index) => (
+                  {employeeAttendance.slice(0, 5).map((record) => (
                     <div key={record.id} className="flex items-center justify-between p-3 bg-slate-100 dark:bg-slate-800/50 rounded-lg">
                       <div>
                         <p className="font-medium text-slate-900 dark:text-white">
@@ -260,26 +263,26 @@ export function EmployeeProfilePage({ employeeId = 'EMP001' }: EmployeeProfilePa
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {employeeSalary.slice(0, 3).map((record, index) => (
+                  {employeeSalary.slice(0, 3).map((record) => (
                     <div key={record.id} className="p-4 bg-slate-100 dark:bg-slate-800/50 rounded-lg">
                       <div className="flex items-center justify-between mb-2">
                         <p className="font-medium text-slate-900 dark:text-white">{record.month}</p>
-                        <Badge variant={record.status === 'paid' ? 'default' : record.status === 'approved' ? 'secondary' : 'outline'}>
+                        <Badge variant={record.status === 'paid' ? 'default' : 'outline'}>
                           {record.status}
                         </Badge>
                       </div>
                       <div className="grid grid-cols-3 gap-3 text-sm">
                         <div>
                           <span className="text-slate-600 dark:text-slate-400">Base</span>
-                          <p className="font-medium text-slate-900 dark:text-white">৳{record.baseSalary.toLocaleString()}</p>
+                          <p className="font-medium text-slate-900 dark:text-white">₹{record.base.toLocaleString('en-IN')}</p>
                         </div>
                         <div>
                           <span className="text-slate-600 dark:text-slate-400">Bonus</span>
-                          <p className="font-medium text-green-600 dark:text-green-400">+৳{record.bonus.toLocaleString()}</p>
+                          <p className="font-medium text-green-600 dark:text-green-400">+₹{record.bonus.toLocaleString('en-IN')}</p>
                         </div>
                         <div>
                           <span className="text-slate-600 dark:text-slate-400">Net</span>
-                          <p className="font-medium text-slate-900 dark:text-white">৳{record.netSalary.toLocaleString()}</p>
+                          <p className="font-medium text-slate-900 dark:text-white">₹{record.net.toLocaleString('en-IN')}</p>
                         </div>
                       </div>
                     </div>
@@ -313,7 +316,7 @@ export function EmployeeProfilePage({ employeeId = 'EMP001' }: EmployeeProfilePa
                     <div className="pb-4">
                       <p className="font-medium text-slate-900 dark:text-white">Staff joined</p>
                       <p className="text-sm text-slate-500">
-                        Joined on {new Date(employee.joinDate).toLocaleDateString()}
+                        Joined on {new Date(employee.joinedAt).toLocaleDateString()}
                       </p>
                     </div>
                   </div>

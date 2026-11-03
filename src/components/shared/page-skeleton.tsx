@@ -18,7 +18,7 @@ export function PageSkeleton() {
           <SkeletonLoader type="table" count={5} />
         </div>
         <div className="space-y-6">
-          <div className="p-5 border border-border/40 rounded-xl bg-white/50 space-y-4">
+          <div className="p-5 border border-border/40 rounded-xl bg-card/50 space-y-4">
              <div className="h-4 w-32 bg-muted rounded animate-pulse" />
              <SkeletonLoader type="list" count={4} />
           </div>

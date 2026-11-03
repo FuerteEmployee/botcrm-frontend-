@@ -15,7 +15,9 @@ import { clearSession } from "./auth";
  */
 export async function logoutAndClear(): Promise<void> {
   try {
-    await apiClient.post("/users/logout", {});
+    // Bounded: on a dead connection axios would otherwise wait indefinitely,
+    // leaving the person on "Signing out…" with no way out.
+    await apiClient.post("/users/logout", {}, { timeout: 8000 });
   } catch {
     // Best-effort. The user asked to leave, so a failed audit write must never
     // strand them in a signed-in state.

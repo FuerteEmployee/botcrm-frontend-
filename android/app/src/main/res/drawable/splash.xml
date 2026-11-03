@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The launch screen, shown by AppTheme.NoActionBarLaunch from process start
+  until the WebView paints its first frame (roughly half a second).
+
+  This replaced Capacitor's stock splash.png, which was never swapped for the
+  BOT mark — the blue X every user saw on launch was the Capacitor framework's
+  own logo. The launcher icon had been customised; this had not.
+
+  It is a layer-list rather than the eleven density/orientation bitmaps the
+  Capacitor template ships, because `android:background` on a window scales a
+  bitmap to FILL, not to fit: the nearest stock asset to a 1080x2340 handset was
+  960x1600, so the logo was being stretched vertically by about a third. A
+  centred bitmap over a solid colour cannot distort at any screen size, and one
+  asset per density replaces twenty-two.
+
+  NOTE: @capacitor/assets, if it is ever added, regenerates that bitmap set and
+  would reintroduce drawable/splash.png alongside this file — two resources
+  with one name, which fails the build. Delete the PNGs again if that happens;
+  do not resolve it by deleting this.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@color/splashBg" />
+    <item>
+        <bitmap
+            android:src="@drawable/splash_logo"
+            android:gravity="center" />
+    </item>
+</layer-list>

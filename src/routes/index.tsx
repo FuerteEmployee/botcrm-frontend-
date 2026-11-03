@@ -1,5 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { getSession } from "@/lib/auth";
+import { panelHomeFor } from "@/lib/panel-home";
 
 export const Route = createFileRoute("/")({
   beforeLoad: () => {
@@ -11,7 +12,8 @@ export const Route = createFileRoute("/")({
       throw redirect({ to: "/super/overview" });
     }
     if (session.role === "admin" || session.role === "subadmin") {
-      throw redirect({ to: "/dashboard" });
+      // A sub-admin goes to the first page they may open, not always /dashboard.
+      throw redirect({ to: panelHomeFor(session) as "/dashboard" });
     }
     throw redirect({ to: "/user" });
   },

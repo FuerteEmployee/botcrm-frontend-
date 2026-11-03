@@ -1,6 +1,14 @@
 import axios from "axios";
 import { toast } from "sonner";
 import { getSession, clearSession } from "./auth";
+import { switchToLegacyUi, isSwitchingToLegacy } from "./legacy-switch";
+
+declare module "axios" {
+  interface AxiosRequestConfig {
+    /** Do not raise the plan-upgrade prompt if this request is refused for the plan. */
+    quietUpgrade?: boolean;
+  }
+}
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || "https://gray-crab-756474.hostingersite.com/api";
 export const IMAGE_BASE_URL = API_BASE_URL.replace(/\/api$/, "");
@@ -38,6 +46,24 @@ apiClient.interceptors.request.use(
     if (session?.token) {
       config.headers.Authorization = `Bearer ${session.token}`;
     }
+
+    // A FormData body has to set its own Content-Type.
+    //
+    // Only the browser knows the multipart boundary it generated, and the
+    // instance-level "application/json" above overrides the header axios would
+    // otherwise build for it. The server then receives a multipart body
+    // labelled as JSON, cannot find a boundary, and parses nothing — which
+    // surfaces at the far end as "no file was uploaded", with a file plainly
+    // attached in the UI. Dropping the header here lets the browser fill it in.
+    if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+      const headers = config.headers as unknown as {
+        delete?: (name: string) => void;
+        [key: string]: unknown;
+      };
+      if (typeof headers.delete === "function") headers.delete("Content-Type");
+      else delete headers["Content-Type"];
+    }
+
     return config;
   },
   (error) => {
@@ -61,18 +87,22 @@ apiClient.interceptors.response.use(
 
         const code = error.response?.data?.code;
         const message: string = error.response?.data?.message || "";
-        let toastMessage = "You were signed out.";
+        let toastMessage = "You were signed out. Please sign in again.";
         let reason: "another_device" | "inactive" | null = null;
 
         if (code === "another_device") {
           reason = "another_device";
-          toastMessage = "You were signed out because your account was logged in on another device.";
-        } else if (code === "inactive" || code === "employee_inactive" || code === "account_inactive" || /inactive|deactivat/i.test(message)) {
-          // Deactivated mid-session (e.g. admin flips the employee's status
-          // while they hold a valid token) — the message may be a custom
-          // per-employee reason the admin set.
+          toastMessage = "You were signed out because your account was signed in on another phone.";
+        } else if (
+          code === "inactive" || code === "employee_inactive" || code === "account_inactive" ||
+          code === "company_inactive" || /inactive|deactivat|switched off/i.test(message)
+        ) {
+          // Deactivated mid-session (the admin switched the employee off, or
+          // the company itself was switched off) while a valid token was held.
+          // The message is written for people -- possibly a custom reason the
+          // admin set -- so it is shown as-is, here and on the login screen.
           reason = "inactive";
-          toastMessage = message || "Your account has been deactivated. Please contact your administrator.";
+          toastMessage = message || "Your account has been switched off. Please contact your admin.";
         }
 
         // No forced navigation/reload here — just clear the session and show
@@ -83,12 +113,24 @@ apiClient.interceptors.response.use(
           window.localStorage.setItem("bot_logout_reason", reason);
           if (message) window.localStorage.setItem("bot_logout_message", message);
         }
-        toast.error(toastMessage, { duration: LOGOUT_TOAST_DURATION_MS });
+        // A fixed id: however many requests fail at once, one toast.
+        toast.error(toastMessage, { id: "forced-logout", duration: LOGOUT_TOAST_DURATION_MS });
       }
     }
 
-    // Handle subscription/module gating 403 errors
-    if (error.response?.status === 403 && error.response?.data?.requiredUpgrade) {
+    // A company kept on the previous release: this browser belongs on the
+    // classic site. Switch, and keep the request pending so no screen shows an
+    // error (or clears the session) in the moment before the page reloads.
+    if (error.response?.status === 403 && error.response?.data?.code === "frozen_tenant") {
+      void switchToLegacyUi();
+      if (isSwitchingToLegacy()) return new Promise(() => {});
+    }
+
+    // Handle subscription/module gating 403 errors. A background read the
+    // admin did not ask for (the header bell) opts out with `quietUpgrade`:
+    // a plan without the notice board would otherwise get an upgrade prompt
+    // on every page load.
+    if (error.response?.status === 403 && error.response?.data?.requiredUpgrade && !error.config?.quietUpgrade) {
       // Dispatch a custom event so UI components can show upgrade prompts
       if (typeof window !== "undefined") {
         window.dispatchEvent(
