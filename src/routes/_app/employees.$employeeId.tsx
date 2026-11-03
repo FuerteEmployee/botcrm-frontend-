@@ -59,6 +59,7 @@ import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { statusLabel, statusClass } from "@/lib/attendance-status";
 import { DeviceTab } from "@/components/employees/device-tab";
+import { IdDocumentUpload } from "@/components/employees/id-document-upload";
 import { formatINR, formatINRFull } from "@/lib/format";
 import { usePermission } from "@/hooks/use-permission";
 
@@ -503,6 +504,12 @@ function EmployeeDetailsPage() {
                           className="h-11 border-border/40 text-muted-foreground"
                         />
                       )
+                    )}
+                    {can("employees", "edit") && (
+                      <>
+                        <IdDocumentUpload employeeId={employee._id} kind="panCard" label="PAN" onFile={!!employee.panCardUrls?.length} />
+                        <IdDocumentUpload employeeId={employee._id} kind="aadhaarCard" label="Aadhaar" onFile={!!employee.aadhaarCardUrls?.length} />
+                      </>
                     )}
                   </div>
                 </CardContent>

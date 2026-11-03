@@ -129,7 +129,7 @@ function shiftSummary(f: {
     lines.push({ tone: "bg-warning", text: `Lunch ${to12hLabel(L.startTime || "")} to ${to12hLabel(L.endTime || "")} (${fmtMins(w)}). Only the part actually worked through is deducted — someone not at work then loses nothing.` });
   } else if (L.mode === "fixed_duration") {
     lunchMins = Number(L.durationMins) || 0;
-    lines.push({ tone: "bg-warning", text: `${fmtMins(lunchMins)} is deducted every working day, whether or not a break is punched.` });
+    lines.push({ tone: "bg-warning", text: `At least ${fmtMins(lunchMins)} of lunch is deducted every working day, whether or not a break is punched. Time punched out (going out to eat) counts toward it, so it is not deducted twice.` });
   } else if (L.mode === "from_punches") {
     const parts = [
       L.minMins != null ? `counted as at least ${fmtMins(Number(L.minMins))}` : null,
@@ -331,7 +331,7 @@ const LUNCH_MODES = [
 const LUNCH_HELP: Record<string, string> = {
   fixed_window:
     "Only the part of this window the employee actually worked through is deducted. Someone who was not at work then loses nothing.",
-  fixed_duration: "This exact length is deducted every working day, punched or not.",
+  fixed_duration: "At least this length is deducted every working day, punched or not. Time punched out between sessions (going out to eat) counts toward it.",
   from_punches:
     "Deducts exactly the break that was punched, and nothing at all if none was. Use this when employees reliably punch their lunch.",
   none: "Nothing is ever deducted. Worked hours equal the time between punches.",

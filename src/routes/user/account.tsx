@@ -225,6 +225,24 @@ function UserAccountSummaryPage() {
     }
   });
 
+  // A first PAN/Aadhaar scan, allowed even when the details are locked.
+  const docMutation = useMutation({
+    mutationFn: async ({ kind, files }: { kind: "panCard" | "aadhaarCard"; files: File[] }) => {
+      const fd = new FormData();
+      files.forEach((f) => fd.append(kind, f));
+      const { data } = await apiClient.put("/users/profile", fd, { headers: { "Content-Type": "multipart/form-data" } });
+      return data;
+    },
+    onSuccess: () => {
+      toast.success("Photo saved");
+      queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+    },
+    onError: (err) => {
+      const message = requestErrorMessage(err, "The photo could not be saved. Please try again.");
+      if (message) toast.error(message);
+    },
+  });
+
   const pickFiles = (setter: (f: File[]) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const picked = Array.from(e.target.files || []).slice(0, 2);
     e.target.value = "";
@@ -554,6 +572,34 @@ function UserAccountSummaryPage() {
                       ? [profile.panCardUrls?.length ? "PAN card" : "", profile.aadhaarCardUrls?.length ? "Aadhaar card" : ""].filter(Boolean).join(", ")
                       : "None added"}
                   />
+                  {/* With the details locked, a MISSING scan can still be added;
+                      replacing one already on file stays with HR. */}
+                  {!canEditSensitive && ([
+                    { key: "panCard", label: "PAN card photo", onFile: !!profile.panCardUrls?.length },
+                    { key: "aadhaarCard", label: "Aadhaar card photo", onFile: !!profile.aadhaarCardUrls?.length },
+                  ] as const).filter((d) => !d.onFile).map((d) => (
+                    <label
+                      key={d.key}
+                      className={`min-h-11 flex items-center gap-2 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 px-3.5 py-2.5 text-sm font-semibold text-[#501537] dark:text-[#e0a6c6] cursor-pointer hover:bg-[#501537]/5 ${docMutation.isPending ? "pointer-events-none opacity-60" : ""}`}
+                    >
+                      <Upload className="h-4 w-4 shrink-0" />
+                      <span className="min-w-0 break-words">
+                        {docMutation.isPending && docMutation.variables?.kind === d.key ? "Uploading…" : `Add ${d.label} (front and back)`}
+                      </span>
+                      <input
+                        type="file"
+                        accept={ID_FILE_TYPES}
+                        multiple
+                        className="sr-only"
+                        disabled={docMutation.isPending}
+                        onChange={(e) => {
+                          const files = Array.from(e.target.files || []).slice(0, 2);
+                          e.target.value = "";
+                          if (files.length) docMutation.mutate({ kind: d.key, files });
+                        }}
+                      />
+                    </label>
+                  ))}
                   <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
                     {canEditSensitive ? (
                       <p className="text-[13px] text-slate-600 dark:text-slate-300 leading-snug">To change these, tap Edit Profile.</p>

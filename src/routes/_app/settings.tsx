@@ -160,6 +160,7 @@ function SettingsPage() {
     workMinGapSeconds: 60,
     punchDebounceSeconds: 120,
     trackingMode: "on_duty" as "on_duty" | "always",
+    gpsOffPenalty: { enabled: false, graceMinutes: 10, amount: 0, autoApprove: false },
     officeRadius: 3000,
     roundingInterval: 0,
     roundingDirection: "nearest" as "nearest" | "up" | "down",
@@ -253,6 +254,12 @@ function SettingsPage() {
             workMinGapSeconds: data.attendance.workMinGapSeconds ?? 60,
             punchDebounceSeconds: data.attendance.punchDebounceSeconds ?? 120,
             trackingMode: data.attendance.trackingMode === "always" ? "always" : "on_duty",
+            gpsOffPenalty: {
+              enabled: data.attendance.gpsOffPenalty?.enabled === true,
+              graceMinutes: data.attendance.gpsOffPenalty?.graceMinutes ?? 10,
+              amount: data.attendance.gpsOffPenalty?.amount ?? 0,
+              autoApprove: data.attendance.gpsOffPenalty?.autoApprove === true,
+            },
             officeRadius: data.attendance.officeRadius ?? 3000,
             roundingInterval: data.attendance.roundingInterval ?? 0,
             roundingDirection: data.attendance.roundingDirection || "nearest",
@@ -666,6 +673,53 @@ function SettingsPage() {
                               tracking only while punched in. Make sure your employees have agreed to this.
                             </p>
                           )}
+
+                          {/* GPS switched off on duty: a penalty an admin reviews on the
+                              Tracking page before it reaches a payslip (utils/gps_penalty.js). */}
+                          <div className="border-t border-border/40 pt-3 space-y-3">
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="text-[13px] font-bold">Penalty for turning GPS off on duty</div>
+                                <div className="text-[11px] text-muted-foreground">
+                                  When a tracked employee's phone reports GPS switched off between punch-in and punch-out for longer
+                                  than the grace, a penalty is listed on the Tracking page. At most one a day.
+                                </div>
+                              </div>
+                              <Switch
+                                checked={attendance.gpsOffPenalty.enabled}
+                                onCheckedChange={(v) => setAttendance(p => ({ ...p, gpsOffPenalty: { ...p.gpsOffPenalty, enabled: v } }))}
+                                aria-label="Penalty for turning GPS off on duty"
+                              />
+                            </div>
+                            {attendance.gpsOffPenalty.enabled && (
+                              <>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <NumField label="Grace" suffix="mins" min={1} max={240} value={attendance.gpsOffPenalty.graceMinutes}
+                                    onChange={(v) => setAttendance(p => ({ ...p, gpsOffPenalty: { ...p.gpsOffPenalty, graceMinutes: v } }))}
+                                    hint="GPS off for less than this is ignored." />
+                                  <NumField label="Penalty" suffix="₹/day" max={100000} value={attendance.gpsOffPenalty.amount}
+                                    onChange={(v) => setAttendance(p => ({ ...p, gpsOffPenalty: { ...p.gpsOffPenalty, amount: v } }))}
+                                    hint="Deducted from that month's salary once approved." />
+                                </div>
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="text-[11px] text-muted-foreground">
+                                    <span className="font-semibold text-foreground">Deduct without asking me.</span>{" "}
+                                    Off: each penalty waits on the Tracking page for you to approve or waive. Phones can lose GPS on their
+                                    own, so checking first is safer.
+                                  </div>
+                                  <Switch
+                                    checked={attendance.gpsOffPenalty.autoApprove}
+                                    onCheckedChange={(v) => setAttendance(p => ({ ...p, gpsOffPenalty: { ...p.gpsOffPenalty, autoApprove: v } }))}
+                                    aria-label="Deduct GPS-off penalties without approval"
+                                  />
+                                </div>
+                                <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-400">
+                                  Only employees with tracking switched on, on app version 2.0 or later, are checked. Tell your employees about
+                                  this rule before switching it on.
+                                </p>
+                              </>
+                            )}
+                          </div>
                         </div>
                         )}
                       </div>

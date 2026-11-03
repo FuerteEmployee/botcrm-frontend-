@@ -5,6 +5,7 @@ import { usePermission } from "@/hooks/use-permission";
 import { useFeatureToggles } from "@/hooks/use-feature-toggles";
 import { requestErrorMessage } from "@/services/request-error";
 import { AutoPunchOutPanel } from "@/components/tracking/auto-punch-out-panel";
+import { GpsPenaltiesCard } from "@/components/tracking/gps-penalties-card";
 import { PageHeader } from "@/components/shared/page-header";
 import { ViewToggle } from "@/components/shared/view-toggle";
 import { FormInput } from "@/components/shared/form-input";
@@ -1353,6 +1354,9 @@ function TrackingPage() {
         date={selectedDate}
         dateLabel={isToday ? "today" : `on ${dayLabel(selectedDate)}`}
       />}
+
+      {/* Shows only while Settings > Attendance > "Penalty for turning GPS off" is on. */}
+      <GpsPenaltiesCard />
     </div>
   );
 }
