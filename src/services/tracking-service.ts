@@ -189,6 +189,43 @@ export function useTrackingStats() {
   return { stats: data, isLoading, isError, error, refetch };
 }
 
+/**
+ * City-level guess from the phone's network address, recorded while GPS was
+ * off. Never part of the route or the distance. `plausible: false` means it
+ * is impossibly far from the last GPS fix: almost always the mobile carrier's
+ * hub city, not where the phone is.
+ */
+export interface ApproxLocation {
+  employeeId: string;
+  timestamp: string;
+  latitude: number;
+  longitude: number;
+  accuracyM: number;
+  city: string | null;
+  region: string | null;
+  country: string | null;
+  trigger: "gps_off" | "poll";
+  plausible: boolean | null;
+}
+
+/** "Udaipur, Rajasthan" -- whatever parts the lookup returned. */
+export function approxPlaceName(a: ApproxLocation): string {
+  return [a.city, a.region].filter(Boolean).join(", ") || a.country || "Unknown area";
+}
+
+/** Each employee's newest network-based reading from the last 24 h. */
+export function useApproxLatest() {
+  const { data } = useQuery<ApproxLocation[]>({
+    queryKey: ["tracking-approx-latest"],
+    queryFn: async () => {
+      const { data } = await apiClient.get("/tracking/approx-latest");
+      return Array.isArray(data) ? data : [];
+    },
+    refetchInterval: 30000,
+  });
+  return data ?? [];
+}
+
 // One employee's full route for a given day (YYYY-MM-DD, defaults to today) —
 // powers the map's polyline + Start/End markers + distance readout.
 export function useTrackingHistory(employeeId: string | undefined, date: string) {
@@ -199,6 +236,8 @@ export function useTrackingHistory(employeeId: string | undefined, date: string)
     rawCount?: number;
     /** Distance before smoothing — kept so the drop is explainable, not mysterious. */
     rawDistanceKm?: number;
+    /** Network-based readings while GPS was off. Not part of `points`. */
+    approxPoints?: ApproxLocation[];
   }>({
     queryKey: ["tracking-history", employeeId, date],
     queryFn: async () => {
@@ -214,6 +253,7 @@ export function useTrackingHistory(employeeId: string | undefined, date: string)
     distanceKm: data?.distanceKm ?? 0,
     rawCount: data?.rawCount ?? data?.points?.length ?? 0,
     rawDistanceKm: data?.rawDistanceKm ?? 0,
+    approxPoints: data?.approxPoints ?? [],
     isLoading,
     isError,
     refetch,

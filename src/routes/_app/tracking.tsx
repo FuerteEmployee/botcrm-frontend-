@@ -14,7 +14,7 @@ import { Card } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { StatCard } from "@/components/shared/stat-card";
-import { useTrackingService, useTrackingStats, useTrackingHistory, usePingEmployee, isLocationLive, locationAgeSeconds, formatAge } from "@/services/tracking-service";
+import { useTrackingService, useTrackingStats, useTrackingHistory, usePingEmployee, isLocationLive, locationAgeSeconds, formatAge, useApproxLatest, approxPlaceName, type ApproxLocation } from "@/services/tracking-service";
 import { useEmployeeService } from "@/services/employee-service";
 import { useAttendanceService } from "@/services/attendance-service";
 import { cn, toISTDateKey } from "@/lib/utils";
@@ -131,12 +131,18 @@ function TrackingMap({
   focusExit,
   tileMode,
   branches,
+  approxPoints,
+  approxLatest,
 }: {
   locations: any[];
   employees: any[];
   selectedId: string;
   onSelect: (id: string) => void;
   routePoints?: { latitude: number; longitude: number; timestamp: string }[];
+  /** The selected employee's network-based readings for the day (GPS off). */
+  approxPoints?: ApproxLocation[];
+  /** Employees whose newest reading is network-based, not GPS. */
+  approxLatest?: ApproxLocation[];
   autoPunchOuts?: AutoPunchOutPoint[];
   /** Position from a "why this happened" link — centre here and open its popup. */
   focusExit?: { lat: number; lng: number; at?: string } | null;
@@ -150,6 +156,7 @@ function TrackingMap({
   const tileLayerRef = useRef<L.TileLayer | null>(null);
   const routeLayerRef = useRef<L.LayerGroup | null>(null);
   const fenceLayerRef = useRef<L.LayerGroup | null>(null);
+  const approxLayerRef = useRef<L.LayerGroup | null>(null);
   const onSelectRef = useRef(onSelect);
   onSelectRef.current = onSelect;
 
@@ -177,6 +184,7 @@ function TrackingMap({
 
     routeLayerRef.current = L.layerGroup().addTo(map);
     fenceLayerRef.current = L.layerGroup().addTo(map);
+    approxLayerRef.current = L.layerGroup().addTo(map);
     // Added last so it renders above the route and the fence rings.
     autoPunchLayerRef.current = L.layerGroup().addTo(map);
 
@@ -190,6 +198,7 @@ function TrackingMap({
       tileLayerRef.current = null;
       routeLayerRef.current = null;
       fenceLayerRef.current = null;
+      approxLayerRef.current = null;
       autoPunchLayerRef.current = null;
     };
   }, []);
@@ -447,6 +456,59 @@ function TrackingMap({
     }
   }, [branches]);
 
+  /**
+   * Network-based areas, from the phone's IP while GPS was off.
+   *
+   * Drawn as a big dashed circle, never a pin, because a pin claims a spot and
+   * this is a city at best. Amber when it is consistent with the last GPS fix
+   * (or there is none to compare); grey and labelled "carrier hub?" when it is
+   * impossibly far from it, which on mobile data is usually the network's
+   * gateway city rather than the phone. Never joined to the route line.
+   */
+  useEffect(() => {
+    const layer = approxLayerRef.current;
+    if (!layer) return;
+    layer.clearLayers();
+
+    const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
+    const draw = (a: ApproxLocation, label: string, selectable: boolean) => {
+      const doubtful = a.plausible === false;
+      const color = doubtful ? "#94a3b8" : "#d97706";
+      L.circle([a.latitude, a.longitude], {
+        radius: a.accuracyM,
+        color,
+        weight: 1.5,
+        dashArray: "6 6",
+        fillColor: color,
+        fillOpacity: 0.08,
+        interactive: false,
+      }).addTo(layer);
+      const icon = L.divIcon({
+        className: "approx-area-marker",
+        html: `<div style="background:${doubtful ? "rgba(100,116,139,0.9)" : "rgba(180,83,9,0.92)"};color:white;font-size:11px;font-weight:600;padding:2px 6px;border-radius:4px;white-space:nowrap;border:1px dashed rgba(255,255,255,0.7);cursor:${selectable ? "pointer" : "default"};">${esc(label)}</div>`,
+        iconSize: [0, 0],
+        iconAnchor: [0, 10],
+      });
+      const m = L.marker([a.latitude, a.longitude], { icon, zIndexOffset: -100 })
+        .bindTooltip(
+          `${esc(approxPlaceName(a))} · ${istTime(a.timestamp)}<br/>Approximate, from the network address (GPS ${a.trigger === "gps_off" ? "switched off" : "unavailable"}).${doubtful ? "<br/>Too far from the last GPS fix: probably the mobile carrier's hub, not the phone." : ""}`,
+          { direction: "top", offset: [0, -12] },
+        );
+      if (selectable) m.on("click", () => onSelectRef.current(a.employeeId));
+      m.addTo(layer);
+    };
+
+    if (selectedId) {
+      for (const a of approxPoints ?? []) draw(a, `≈ ${a.city || a.region || "Area"} · ${istTime(a.timestamp)}`, false);
+      return;
+    }
+    for (const a of approxLatest ?? []) {
+      const emp = employees.find((e: any) => e._id === a.employeeId);
+      if (!emp) continue;
+      draw(a, `${emp.name.split(" ")[0]} ≈ ${a.city || a.region || "area"}${a.plausible === false ? " (carrier hub?)" : ""}`, true);
+    }
+  }, [approxPoints, approxLatest, employees, selectedId]);
+
   // Sync markers whenever locations, employees, or selectedId change
   useEffect(() => {
     const map = mapRef.current;
@@ -548,6 +610,14 @@ function TrackingMap({
       ...(autoPunchOuts ?? []).map((p) => [p.lat, p.lng] as L.LatLngTuple),
     ];
 
+    // GPS off all day: centre on the network-based areas instead, at a zoom
+    // that shows a city rather than pretending to a street.
+    if (dayPoints.length === 0 && approxPoints?.length) {
+      const latest = approxPoints[approxPoints.length - 1];
+      map.setView([latest.latitude, latest.longitude], 10, { animate: true });
+      return;
+    }
+
     if (dayPoints.length === 1) {
       map.setView(dayPoints[0], 16, { animate: true });
     } else if (dayPoints.length > 1) {
@@ -555,7 +625,7 @@ function TrackingMap({
     } else {
       map.setView([20.5937, 78.9629], 5, { animate: true });
     }
-  }, [selectedId, locations, routePoints, autoPunchOuts]);
+  }, [selectedId, locations, routePoints, autoPunchOuts, approxPoints]);
 
   return <div ref={containerRef} style={{ height: "100%", width: "100%" }} />;
 }
@@ -683,7 +753,7 @@ function TrackingPage() {
   // punch-outs rather than this morning's.
   const { records: dayAttendance } = useAttendanceService(selectedDate, selectedDate);
   const isToday = selectedDate === today;
-  const { points: routePoints, distanceKm, rawCount, refetch: refetchHistory } = useTrackingHistory(selectedId || undefined, selectedDate);
+  const { points: routePoints, distanceKm, rawCount, approxPoints, refetch: refetchHistory } = useTrackingHistory(selectedId || undefined, selectedDate);
   const { branches } = useBranchService();
   const { mutateAsync: pingEmployee, isPending: isPinging } = usePingEmployee();
 
@@ -872,6 +942,19 @@ function TrackingPage() {
   }, [locationMap, selectedId]);
 
   const selectedHasNoLocation = !!selectedId && !locationMap[selectedId];
+
+  // Network-based areas worth showing: only where they are NEWER than the
+  // employee's last GPS fix (otherwise GPS already says more), and only on
+  // today's view, since they answer "where is the phone now".
+  const approxLatestAll = useApproxLatest();
+  const approxLatest = useMemo(() => {
+    if (!isToday) return [];
+    return approxLatestAll.filter((a) => {
+      const gps = restLocations.find((l) => l.employeeId === a.employeeId);
+      return !gps || new Date(a.timestamp) > new Date(gps.timestamp);
+    });
+  }, [approxLatestAll, restLocations, isToday]);
+  const selectedApprox = approxLatest.find((a) => a.employeeId === selectedId);
 
   const filtered = useMemo(() => {
     return (employees || []).filter((e) =>
@@ -1099,6 +1182,8 @@ function TrackingPage() {
                 selectedId={selectedId}
                 onSelect={setSelectedId}
                 routePoints={selectedId ? routePoints : undefined}
+                approxPoints={selectedId ? approxPoints : undefined}
+                approxLatest={approxLatest}
                 autoPunchOuts={autoPunchOuts}
                 focusExit={
                   routeSearch.exitLat != null && routeSearch.exitLng != null
@@ -1233,6 +1318,17 @@ function TrackingPage() {
                             : `Last fix · ${istTime(locationMap[selected._id].timestamp)} · ${formatAge(locationAgeSeconds(locationMap[selected._id]))} ago`
                         : "No coordinates available"}
                     </div>
+                    {selectedApprox && (
+                      <div className="flex items-start gap-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+                        <MapPin className="h-3 w-3 shrink-0 mt-0.5" />
+                        <span>
+                          GPS off · approx. {approxPlaceName(selectedApprox)} · {istTime(selectedApprox.timestamp)}
+                          {selectedApprox.plausible === false && (
+                            <span className="block text-muted-foreground">Far from the last GPS fix: probably the mobile carrier's hub, not the phone.</span>
+                          )}
+                        </span>
+                      </div>
+                    )}
                     {locationMap[selected._id] && (
                       <div className="text-[11px] font-mono text-muted-foreground">
                         {locationMap[selected._id].latitude.toFixed(4)}°N · {locationMap[selected._id].longitude.toFixed(4)}°E
