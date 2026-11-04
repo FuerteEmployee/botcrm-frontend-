@@ -54,6 +54,10 @@ import { cn, toISTDateKey } from "@/lib/utils";
 import { formatINR, formatINRFull } from "@/lib/format";
 import { SkeletonLoader } from "@/components/shared/skeleton-loader";
 
+// Recharts 3 renders once at -1×-1 before it measures the box and warns about
+// it in dev; a positive starting size skips that pass. The real size follows.
+const CHART_INITIAL_SIZE = { width: 1, height: 1 };
+
 export const Route = createFileRoute("/_app/dashboard")({
   component: DashboardPage,
 });
@@ -742,7 +746,7 @@ function TrendPanel({ summary, monthLabel }: { summary: DashboardSummary; monthL
         {!hasData ? (
           <Empty>No attendance recorded in these 7 days.</Empty>
         ) : (
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height="100%" initialDimension={CHART_INITIAL_SIZE}>
             <BarChart
               data={data}
               barGap={2}
@@ -888,7 +892,7 @@ function SalaryPanel({ summary, monthLabel }: { summary: DashboardSummary; month
       ) : (
         <div className="flex flex-col sm:flex-row items-center gap-4">
           <div className="h-[170px] w-[170px] shrink-0">
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" initialDimension={CHART_INITIAL_SIZE}>
               <PieChart>
                 <Pie
                   data={slices}
@@ -941,7 +945,7 @@ function StaffPanel({ summary }: { summary: DashboardSummary }) {
         <Empty>No active employees yet.</Empty>
       ) : (
         <div style={{ height }}>
-          <ResponsiveContainer width="100%" height="100%">
+          <ResponsiveContainer width="100%" height="100%" initialDimension={CHART_INITIAL_SIZE}>
             <BarChart
               data={data}
               layout="vertical"

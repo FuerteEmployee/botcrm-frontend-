@@ -12,7 +12,6 @@ import {
   Clock,
   ChevronLeft,
   ChevronRight,
-  Download,
   CalendarCheck,
   CalendarX,
   Zap,
@@ -60,6 +59,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { statusLabel, statusClass } from "@/lib/attendance-status";
 import { DeviceTab } from "@/components/employees/device-tab";
 import { IdDocumentUpload } from "@/components/employees/id-document-upload";
+import { IdDocumentPreview } from "@/components/employees/id-document-preview";
 import { formatINR, formatINRFull } from "@/lib/format";
 import { usePermission } from "@/hooks/use-permission";
 
@@ -738,18 +738,7 @@ function EmployeeDetailsPage() {
                     return (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         {docs.map((doc) => (
-                          <a
-                            key={doc.url}
-                            href={doc.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex min-h-11 items-center gap-3 p-3.5 rounded-xl border border-border/60 hover:border-primary/30 hover:bg-primary/2 transition-all group"
-                          >
-                            <div className="h-9 w-9 rounded-lg bg-muted/50 flex items-center justify-center group-hover:bg-primary/10 transition-colors">
-                              <Download className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
-                            </div>
-                            <span className="text-[12px] font-semibold text-foreground/80 group-hover:text-primary transition-colors">{doc.label}</span>
-                          </a>
+                          <IdDocumentPreview key={doc.url} url={doc.url} label={doc.label} />
                         ))}
                       </div>
                     );

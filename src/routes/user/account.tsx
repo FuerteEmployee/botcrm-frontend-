@@ -6,7 +6,7 @@ import { apiClient, IMAGE_BASE_URL } from "@/lib/api-client";
 import { patchSession } from "@/lib/auth";
 import {
   User, Phone, MapPin, Briefcase, Building2, Clock, CalendarDays, BadgeCheck,
-  Pencil, RefreshCw, Save, Edit2, Landmark, IdCard, Lock, FileText, Upload
+  Pencil, RefreshCw, Save, Edit2, Landmark, IdCard, Lock, FileText, Loader2
 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { requestErrorMessage } from "@/services/request-error";
 import { LoadError } from "@/components/user/load-error";
+import { IdPhotoPicker } from "@/components/employees/id-photo-picker";
 
 export const Route = createFileRoute("/user/account")({
   component: UserAccountSummaryPage,
@@ -56,7 +57,6 @@ interface UserProfile {
 
 type BankForm = Required<BankDetails>;
 const EMPTY_BANK: BankForm = { accountNumber: "", bankName: "", ifsc: "", branchName: "", nameAsPerBank: "" };
-const ID_FILE_TYPES = "image/jpeg,image/png,image/webp,application/pdf";
 
 // Only the last four digits, the way banks and UIDAI print them.
 const maskTail = (value?: string, groups = "•••• ") => {
@@ -124,6 +124,8 @@ function UserAccountSummaryPage() {
   // New PAN / Aadhaar scans picked while editing (front and back, up to two).
   const [panFiles, setPanFiles] = useState<File[]>([]);
   const [aadhaarFiles, setAadhaarFiles] = useState<File[]>([]);
+  // A missing scan added while the details are locked, saved on its own.
+  const [newDocFiles, setNewDocFiles] = useState<Record<"panCard" | "aadhaarCard", File[]>>({ panCard: [], aadhaarCard: [] });
   // "#bank" opens straight on Bank & ID -- the My Account page links here
   // when the admin lets employees change those details themselves.
   const [tab, setTab] = useState(() =>
@@ -233,8 +235,9 @@ function UserAccountSummaryPage() {
       const { data } = await apiClient.put("/users/profile", fd, { headers: { "Content-Type": "multipart/form-data" } });
       return data;
     },
-    onSuccess: () => {
+    onSuccess: (_data, { kind }) => {
       toast.success("Photo saved");
+      setNewDocFiles((prev) => ({ ...prev, [kind]: [] }));
       queryClient.invalidateQueries({ queryKey: ["user-profile"] });
     },
     onError: (err) => {
@@ -242,12 +245,6 @@ function UserAccountSummaryPage() {
       if (message) toast.error(message);
     },
   });
-
-  const pickFiles = (setter: (f: File[]) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    const picked = Array.from(e.target.files || []).slice(0, 2);
-    e.target.value = "";
-    if (picked.length) setter(picked);
-  };
 
   const photoMutation = useMutation({
     mutationFn: async (file: File) => {
@@ -539,21 +536,7 @@ function UserAccountSummaryPage() {
                       { key: "pan", label: "PAN card photo", files: panFiles, set: setPanFiles, onFile: profile.panCardUrls?.length || 0 },
                       { key: "aadhaar", label: "Aadhaar card photo", files: aadhaarFiles, set: setAadhaarFiles, onFile: profile.aadhaarCardUrls?.length || 0 },
                     ] as const).map((d) => (
-                      <div key={d.key} className="space-y-1.5">
-                        <span className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide">{d.label}</span>
-                        <label className="min-h-11 flex items-center gap-2 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 px-3.5 py-2.5 text-sm font-semibold text-[#501537] dark:text-[#e0a6c6] cursor-pointer hover:bg-[#501537]/5">
-                          <Upload className="h-4 w-4 shrink-0" />
-                          <span className="min-w-0 break-words">
-                            {d.files.length
-                              ? `${d.files.length} new photo${d.files.length > 1 ? "s" : ""} chosen`
-                              : d.onFile ? "Choose a new photo (front and back)" : "Add a photo (front and back)"}
-                          </span>
-                          <input type="file" accept={ID_FILE_TYPES} multiple className="sr-only" onChange={pickFiles(d.set)} />
-                        </label>
-                        {d.files.length > 0 && d.onFile > 0 && (
-                          <p className="text-xs text-slate-500">The photo on file will be replaced when you save.</p>
-                        )}
-                      </div>
+                      <IdPhotoPicker key={d.key} id={`acct-${d.key}`} label={d.label} files={d.files} onChange={d.set} onFile={d.onFile} />
                     ))}
                   </div>
                 </>
@@ -577,29 +560,33 @@ function UserAccountSummaryPage() {
                   {!canEditSensitive && ([
                     { key: "panCard", label: "PAN card photo", onFile: !!profile.panCardUrls?.length },
                     { key: "aadhaarCard", label: "Aadhaar card photo", onFile: !!profile.aadhaarCardUrls?.length },
-                  ] as const).filter((d) => !d.onFile).map((d) => (
-                    <label
-                      key={d.key}
-                      className={`min-h-11 flex items-center gap-2 rounded-xl border border-dashed border-slate-300 dark:border-slate-700 px-3.5 py-2.5 text-sm font-semibold text-[#501537] dark:text-[#e0a6c6] cursor-pointer hover:bg-[#501537]/5 ${docMutation.isPending ? "pointer-events-none opacity-60" : ""}`}
-                    >
-                      <Upload className="h-4 w-4 shrink-0" />
-                      <span className="min-w-0 break-words">
-                        {docMutation.isPending && docMutation.variables?.kind === d.key ? "Uploading…" : `Add ${d.label} (front and back)`}
-                      </span>
-                      <input
-                        type="file"
-                        accept={ID_FILE_TYPES}
-                        multiple
-                        className="sr-only"
-                        disabled={docMutation.isPending}
-                        onChange={(e) => {
-                          const files = Array.from(e.target.files || []).slice(0, 2);
-                          e.target.value = "";
-                          if (files.length) docMutation.mutate({ kind: d.key, files });
-                        }}
-                      />
-                    </label>
-                  ))}
+                  ] as const).filter((d) => !d.onFile).map((d) => {
+                    const files = newDocFiles[d.key];
+                    const saving = docMutation.isPending && docMutation.variables?.kind === d.key;
+                    return (
+                      <div key={d.key} className="space-y-2">
+                        <IdPhotoPicker
+                          id={`acct-new-${d.key}`}
+                          label={d.label}
+                          files={files}
+                          onChange={(f) => setNewDocFiles((prev) => ({ ...prev, [d.key]: f }))}
+                          onFile={0}
+                          disabled={docMutation.isPending}
+                        />
+                        {files.length > 0 && (
+                          <Button
+                            type="button"
+                            className="w-full min-h-11"
+                            disabled={docMutation.isPending}
+                            onClick={() => docMutation.mutate({ kind: d.key, files })}
+                          >
+                            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                            {saving ? "Uploading…" : `Save ${d.label}`}
+                          </Button>
+                        )}
+                      </div>
+                    );
+                  })}
                   <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
                     {canEditSensitive ? (
                       <p className="text-[13px] text-slate-600 dark:text-slate-300 leading-snug">To change these, tap Edit Profile.</p>
